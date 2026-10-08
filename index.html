@@ -64,7 +64,8 @@ h3{font-size:15px;margin:0 0 6px}
 
 .tools{display:flex;gap:8px;margin-bottom:10px}
 .tools input,.tools select{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card)}
-.tools select{flex:0 0 auto;max-width:42%}
+.tools select{flex:0 0 auto;max-width:32%}
+.tools .btn.sm{white-space:nowrap;flex:none}
 
 .list{display:flex;flex-direction:column;gap:8px}
 .row{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;text-align:left;width:100%}
@@ -148,6 +149,23 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .ov.show{display:block}
 .ov b{font-size:20px}.ov .muted{color:#C9D2E3}.ov .chip{background:var(--c);color:#fff}
 .ov .split .btn{background:#fff;color:#16233D}.ov .split .btn.ghost{background:transparent;color:#fff;border-color:#fff8}
+.arwrap{position:relative;background:#000;border-radius:12px;overflow:hidden;height:60vh;min-height:360px}
+.arwrap video{width:100%;height:100%;object-fit:cover;display:block}
+.arwrap .fallback{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#C9D2E3;font-size:13px;text-align:center;padding:20px;background:linear-gradient(#1A2538,#0F1726)}
+.arwrap.nocam .fallback{display:flex}
+.arm{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;gap:2px;transition:left .15s,top .15s;cursor:pointer;border:0;background:transparent;padding:0}
+.arm .tag{background:rgba(16,24,40,.85);color:#fff;border-radius:10px;padding:5px 9px;font-size:12px;line-height:1.3;white-space:nowrap;border:2px solid var(--c);text-align:center}
+.arm .tag b{display:block;font-size:13px}
+.arm .pin{width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid var(--c)}
+.arm.far .tag{opacity:.7;transform:scale(.88)}
+.aredge{position:absolute;top:46%;color:#fff;font-size:12px;background:rgba(16,24,40,.75);border-radius:99px;padding:5px 9px;border:0;cursor:pointer}
+.aredge.l{left:8px}.aredge.r{right:8px}
+.arhud{position:absolute;left:0;right:0;top:0;padding:8px 10px;display:flex;justify-content:space-between;color:#fff;font-size:12px;background:linear-gradient(rgba(0,0,0,.55),transparent);pointer-events:none}
+.radar{position:absolute;right:10px;bottom:10px;width:92px;height:92px;border-radius:50%;background:rgba(16,24,40,.72);border:1px solid #fff5;pointer-events:none}
+.radar::before{content:"";position:absolute;left:50%;top:50%;width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;border-bottom:40px solid rgba(255,255,255,.12);transform:translate(-50%,-100%)}
+.radar i{position:absolute;width:7px;height:7px;border-radius:50%;background:var(--c);transform:translate(-50%,-50%)}
+.radar .me{width:6px;height:6px;background:#fff;left:50%;top:50%}
+.arlist .row{padding:8px 12px}
 .reticle{position:absolute;left:50%;top:50%;width:150px;height:150px;transform:translate(-50%,-50%);border:2px solid #fff9;border-radius:14px;pointer-events:none}
 .tiltbox{text-align:center;padding:10px 0}
 .tilt-n{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
@@ -335,7 +353,7 @@ function vInspect(){
   ${S.me==="local"?`<div class="notice">체험 모드예요. 점검·신고 내용은 이 브라우저에만 저장되고 다른 사람과 공유되지 않아요. 사진 인식은 공유 운영 링크에서만 동작해요.</div>`:""}
   <h2>점검할 가로등</h2>
   <p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${DUE_DAYS}일) 경과 ${due}개.</p>
-  <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색"><button class="btn sm" data-scan="inspect" aria-label="표찰 스캔">표찰 스캔</button>
+  <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색"><button class="btn sm" data-scan="inspect" aria-label="표찰 스캔">표찰 스캔</button><button class="btn sm ghost" id="arBtn" aria-label="주변 등 찾기">주변 찾기</button>
   <select id="dong" aria-label="행정동">${["전체",...DONGS].map(d=>`<option ${d===S.dong?"selected":""}>${d}</option>`).join("")}</select></div>
   <div class="list">${list.length?list.map(lightRow).join(""):`<div class="empty">${S.lights.length?"조건에 맞는 가로등이 없어요.":(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}</div>`;
 }
@@ -507,6 +525,9 @@ document.addEventListener("click",async e=>{
   if(t.id==="gps"){if(!navigator.geolocation){toast("이 기기에서는 위치를 가져올 수 없어요.");return}navigator.geolocation.getCurrentPosition(p=>{$("#nLat").value=p.coords.latitude.toFixed(5);$("#nLng").value=p.coords.longitude.toFixed(5)},()=>toast("위치 권한이 없어 좌표를 직접 입력해 주세요."));return}
   if(t.id==="csv"||t.id==="csv2"){exportCSV(t.id==="csv")}
   if(t.dataset.scan){openScanner(t.dataset.scan);return}
+  if(t.id==="arBtn"){openAR();return}
+  if(t.dataset.arOpen){arStop();openLight(t.dataset.arOpen);return}
+  if(t.id==="arRetry"){arStart();return}
   if(t.id==="scanStop"){stopCam();return}
   if(t.id==="scanStart"){startCam();return}
   if(t.dataset.apply){applyScan(t.dataset.apply);return}
@@ -599,6 +620,90 @@ function keepTilt(){
   stopTilt();
 }
 function stopTilt(){tilt.on=false;window.removeEventListener("deviceorientation",onTilt);const b=$("#tiltBox");if(b){b.hidden=true;b.innerHTML=""}}
+
+/* ---------- AR finder: lights around you, over the camera view ---------- */
+const AR_RANGE=200,AR_FOV=62;
+let ar={on:false,stream:null,pos:null,acc:null,heading:null,hbuf:[],watch:null,raf:0,lastDraw:0};
+const toRad=d=>d*Math.PI/180;
+function distM(a,b){const R=6371000,dLat=toRad(b.lat-a.lat),dLng=toRad(b.lng-a.lng),s=Math.sin(dLat/2)**2+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.sqrt(s))}
+function bearing(a,b){const y=Math.sin(toRad(b.lng-a.lng))*Math.cos(toRad(b.lat)),x=Math.cos(toRad(a.lat))*Math.sin(toRad(b.lat))-Math.sin(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.cos(toRad(b.lng-a.lng));return (Math.atan2(y,x)*180/Math.PI+360)%360}
+const angDiff=(a,b)=>((b-a+540)%360)-180;
+function openAR(){
+  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">주변 등 찾기</h3><div class="muted">휴대폰을 세워 주위를 비추면 그 방향에 있는 가로등·보안등이 거리와 함께 표시돼요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+    <div class="arwrap" id="arwrap"><video id="arCam" playsinline muted></video><div class="fallback" id="arFb">카메라를 쓸 수 없어요.<br>아래 목록으로 가까운 등을 확인하세요.</div>
+      <div class="arhud"><span id="arGps">위치 찾는 중…</span><span id="arHead">방향 –</span></div>
+      <div id="arLayer"></div><div class="radar" id="radar"><i class="me"></i></div></div>
+    <p class="muted" id="arNote" style="margin:8px 0 0">도심에서는 GPS 오차가 5~15m 있어요. 가까운 등은 표찰 스캔으로 확정하세요.</p>
+    <div class="split"><button class="btn ghost sm" id="arRetry">센서 다시 켜기</button></div>
+    <h2 style="margin-top:14px">가까운 순 <span class="muted" id="arCount"></span></h2>
+    <div class="list arlist" id="arList"><div class="empty">현재 위치를 기다리는 중이에요.</div></div>`);
+  arStart();
+}
+async function arStart(){
+  arStop(false);ar={on:true,stream:null,pos:null,acc:null,heading:null,hbuf:[],watch:null,raf:0,lastDraw:0};
+  const v=$("#arCam"),wrap=$("#arwrap");if(!v)return;
+  // camera
+  try{ar.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});v.srcObject=ar.stream;await v.play();wrap.classList.remove("nocam")}
+  catch(e){wrap.classList.add("nocam")}
+  // orientation (iOS asks)
+  if(window.DeviceOrientationEvent){
+    let ok=true;
+    if(typeof DeviceOrientationEvent.requestPermission==="function"){try{ok=(await DeviceOrientationEvent.requestPermission())==="granted"}catch(e){ok=false}}
+    if(ok){if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",onHeading);else window.addEventListener("deviceorientation",onHeading)}
+    else{const h=$("#arHead");if(h)h.textContent="나침반 권한 없음"}
+  }
+  // position
+  if(!navigator.geolocation){const g=$("#arGps");if(g)g.textContent="위치 사용 불가";return}
+  ar.watch=navigator.geolocation.watchPosition(p=>{ar.pos={lat:p.coords.latitude,lng:p.coords.longitude};ar.acc=p.coords.accuracy;const g=$("#arGps");if(g)g.textContent=`GPS ±${Math.round(ar.acc)}m`;arList();arDraw()},
+    ()=>{const g=$("#arGps");if(g)g.textContent="위치 권한이 없어요";const l=$("#arList");if(l)l.innerHTML=`<div class="empty">위치 권한을 허용하면 가까운 등을 보여드려요.</div>`},
+    {enableHighAccuracy:true,maximumAge:3000,timeout:15000});
+}
+function onHeading(e){
+  if(!ar.on)return;
+  let h=null;
+  if(typeof e.webkitCompassHeading==="number")h=e.webkitCompassHeading;
+  else if(e.absolute!==false&&typeof e.alpha==="number")h=(360-e.alpha)%360;
+  if(h==null)return;
+  // circular smoothing
+  ar.hbuf.push(h);if(ar.hbuf.length>8)ar.hbuf.shift();
+  const sx=ar.hbuf.reduce((s,x)=>s+Math.cos(toRad(x)),0),sy=ar.hbuf.reduce((s,x)=>s+Math.sin(toRad(x)),0);
+  ar.heading=(Math.atan2(sy,sx)*180/Math.PI+360)%360;
+  const el=$("#arHead");if(el)el.textContent=`방향 ${Math.round(ar.heading)}° ${["북","북동","동","남동","남","남서","서","북서"][Math.round(ar.heading/45)%8]}`;
+  const now=performance.now();if(now-ar.lastDraw>80){ar.lastDraw=now;arDraw()}
+}
+function arNear(){
+  if(!ar.pos)return[];
+  return S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number").map(l=>({l,d:distM(ar.pos,l),b:bearing(ar.pos,l)})).filter(x=>x.d<=AR_RANGE).sort((x,y)=>x.d-y.d);
+}
+function arList(){
+  const box=$("#arList"),c=$("#arCount");if(!box)return;
+  const near=arNear();if(c)c.textContent=`${near.length}개 (${AR_RANGE}m 이내)`;
+  box.innerHTML=near.length?near.slice(0,12).map(({l,d,b})=>`<button class="row st-${esc(l.status)}" data-ar-open="${esc(l.id)}"><span class="pole"></span>
+    <span class="body"><span class="code">${esc(l.code)}</span> <span class="muted">${esc(l.kind||"가로등")}</span><span class="addr" style="display:block">${esc(l.address)}</span></span>
+    <span class="meta"><span class="chip">${esc(l.status)}</span><span class="muted" style="display:block;font-size:11px;margin-top:3px">${Math.round(d)}m · ${["북","북동","동","남동","남","남서","서","북서"][Math.round(b/45)%8]}</span></span></button>`).join("")
+  :`<div class="empty">${AR_RANGE}m 안에 등록된 등이 없어요.</div>`;
+}
+function arDraw(){
+  const layer=$("#arLayer"),radar=$("#radar");if(!layer)return;
+  const near=arNear();const H=ar.heading;
+  if(H==null){layer.innerHTML=`<div class="aredge" style="left:50%;transform:translateX(-50%)">나침반을 기다리는 중</div>`;return}
+  let left=0,right=0,html="";
+  near.forEach(({l,d,b})=>{
+    const diff=angDiff(H,b);
+    if(Math.abs(diff)>AR_FOV/2+6){if(diff<0)left++;else right++;return}
+    const x=50+diff/(AR_FOV/2)*50,y=72-Math.min(d,AR_RANGE)/AR_RANGE*42;
+    html+=`<button class="arm st-${esc(l.status)} ${d>80?"far":""}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%" data-ar-open="${esc(l.id)}"><span class="tag"><b>${esc(l.code)}</b>${Math.round(d)}m · ${esc(l.status)}</span><span class="pin"></span></button>`;
+  });
+  if(left)html+=`<button class="aredge l">◀ ${left}</button>`;if(right)html+=`<button class="aredge r">${right} ▶</button>`;
+  layer.innerHTML=html;
+  if(radar)radar.innerHTML=`<i class="me"></i>`+near.map(({l,d,b})=>{const a=toRad(angDiff(H,b)-90),r=Math.min(d,AR_RANGE)/AR_RANGE*42;return`<i class="st-${esc(l.status)}" style="left:${(50+Math.cos(a)*r).toFixed(1)}%;top:${(50+Math.sin(a)*r).toFixed(1)}%"></i>`}).join("");
+}
+function arStop(reset=true){
+  ar.on=false;
+  if(ar.stream){ar.stream.getTracks().forEach(t=>t.stop());ar.stream=null}
+  if(ar.watch!=null){navigator.geolocation.clearWatch(ar.watch);ar.watch=null}
+  window.removeEventListener("deviceorientation",onHeading);window.removeEventListener("deviceorientationabsolute",onHeading);
+}
 
 /* ---------- label scanner ---------- */
 let scan={ctx:null,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null};
@@ -730,7 +835,7 @@ async function readLabelPhoto(file){
   }finally{scan.busy=false}
 }
 document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
-const _close=closeSheet;closeSheet=function(){stopCam(false);stopTilt();_close()};
+const _close=closeSheet;closeSheet=function(){stopCam(false);stopTilt();arStop();_close()};
 
 render();
 boot();
