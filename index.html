@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>광주 동구 가로등 점검</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<style>
+:root{
+  --ink:#16233D; --ink-2:#4A5873; --line:#D8DEE8; --bg:#EEF1F5; --card:#FFFFFF;
+  --sodium:#E89A0C; --sodium-soft:#FFF1D6; --ok:#2C7A57; --ok-soft:#E1F2EA;
+  --warn:#B86E00; --warn-soft:#FFF0D9; --bad:#C2372B; --bad-soft:#FBE4E1;
+  --fix:#2F5DA8; --fix-soft:#E2EAF7;
+  --font:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ink:#E8ECF3; --ink-2:#A3AEC2; --line:#2C3850; --bg:#0F1726; --card:#17223A;
+    --sodium:#F5B03A; --sodium-soft:#3A2E14; --ok:#5CC495; --ok-soft:#173528;
+    --warn:#F0A945; --warn-soft:#3A2A10; --bad:#F07A6E; --bad-soft:#3D1B19;
+    --fix:#7FA6E8; --fix-soft:#1A2A47;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#E8ECF3; --ink-2:#A3AEC2; --line:#2C3850; --bg:#0F1726; --card:#17223A;
+  --sodium:#F5B03A; --sodium-soft:#3A2E14; --ok:#5CC495; --ok-soft:#173528;
+  --warn:#F0A945; --warn-soft:#3A2A10; --bad:#F07A6E; --bad-soft:#3D1B19;
+  --fix:#7FA6E8; --fix-soft:#1A2A47;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--sodium);outline-offset:2px}
+.wrap{max-width:760px;margin:0 auto;padding:0 16px 110px}
+
+/* header: the lamp head is the one bold element */
+header.top{padding:22px 0 14px;display:flex;align-items:flex-end;gap:14px}
+.lamp{width:46px;height:58px;flex:none}
+.lamp .glow{fill:var(--sodium)}
+header h1{font-size:22px;line-height:1.25;margin:0;font-weight:700;letter-spacing:-.01em}
+header p{margin:2px 0 0;color:var(--ink-2);font-size:13px}
+.sync{margin-left:auto;font-size:12px;color:var(--ink-2);white-space:nowrap}
+.sync i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--line);margin-right:5px;vertical-align:1px}
+.sync.on i{background:var(--ok)}
+
+.tally{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 0 18px}
+.tally button{border:0;border-radius:10px;padding:10px 8px 8px;text-align:left;background:var(--card);border-top:4px solid var(--c)}
+.tally b{display:block;font-size:24px;line-height:1.1;font-variant-numeric:tabular-nums}
+.tally span{font-size:12px;color:var(--ink-2)}
+.tally button[aria-pressed="true"]{box-shadow:inset 0 0 0 2px var(--c)}
+
+h2{font-size:17px;margin:22px 0 10px;font-weight:700}
+h3{font-size:15px;margin:0 0 6px}
+.muted{color:var(--ink-2);font-size:13px}
+.panel{background:var(--card);border-radius:12px;padding:14px;border:1px solid var(--line)}
+
+.tools{display:flex;gap:8px;margin-bottom:10px}
+.tools input,.tools select{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card)}
+.tools select{flex:0 0 auto;max-width:42%}
+
+.list{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;text-align:left;width:100%}
+.row .code{font-weight:700;font-variant-numeric:tabular-nums;font-size:15px}
+.row .addr{font-size:13px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .meta{margin-left:auto;text-align:right;flex:none}
+.row .body{min-width:0;flex:1}
+.pole{width:6px;align-self:stretch;border-radius:3px;background:var(--c);flex:none}
+.chip{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--cs);color:var(--c);white-space:nowrap}
+.due{display:block;font-size:11px;color:var(--warn);margin-top:3px}
+
+.st-정상{--c:var(--ok);--cs:var(--ok-soft)}
+.st-점검필요{--c:var(--warn);--cs:var(--warn-soft)}
+.st-고장{--c:var(--bad);--cs:var(--bad-soft)}
+.st-수리중{--c:var(--fix);--cs:var(--fix-soft)}
+.st-접수{--c:var(--bad);--cs:var(--bad-soft)}
+.st-처리중{--c:var(--fix);--cs:var(--fix-soft)}
+.st-완료{--c:var(--ok);--cs:var(--ok-soft)}
+
+/* forms */
+label.f{display:block;margin:12px 0 4px;font-size:13px;font-weight:600}
+.f-in{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card)}
+textarea.f-in{min-height:84px;resize:vertical}
+.btn{border:0;border-radius:10px;padding:12px 16px;font-weight:600;background:var(--ink);color:var(--bg)}
+.btn.sodium{background:var(--sodium);color:#1B1300}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn.sm{padding:7px 11px;font-size:13px;border-radius:8px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.block{width:100%}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg button{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:6px 12px;font-size:13px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+
+.check{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.check:last-child{border-bottom:0}
+.check .q{flex:1}
+.check .q small{display:block;color:var(--ink-2);font-size:12px}
+.pair{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex:none}
+.pair button{border:0;background:var(--card);padding:8px 13px;font-size:13px;font-weight:600}
+.pair button.g[aria-pressed="true"]{background:var(--ok);color:#fff}
+.pair button.b[aria-pressed="true"]{background:var(--bad);color:#fff}
+
+.photo-in{display:flex;gap:10px;align-items:center}
+.photo-in img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
+.thumb{max-width:100%;border-radius:8px;margin-top:8px;display:block}
+
+/* sheet */
+.sheet-bg{position:fixed;inset:0;background:rgba(10,16,30,.45);z-index:30;display:none}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;background:var(--bg);border-radius:16px 16px 0 0;max-height:92%;overflow:auto;display:none;padding:0 0 env(safe-area-inset-bottom,0px)}
+.sheet.open,.sheet-bg.open{display:block}
+.sheet-in{max-width:760px;margin:0 auto;padding:10px 16px 28px}
+.sheet .grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 10px}
+.sheet-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:6px}
+.sheet-head .x{margin-left:auto;border:0;background:transparent;font-size:24px;line-height:1;padding:2px 6px;color:var(--ink-2)}
+
+/* map */
+.map{width:100%;height:auto;display:block}
+.map .dong{font-size:9px;fill:var(--ink-2);font-family:var(--font)}
+.map circle{cursor:pointer;stroke:var(--card);stroke-width:1.2}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--ink-2);margin-top:6px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--c);margin-right:5px}
+
+.bars .b{display:grid;grid-template-columns:62px 1fr 34px;gap:8px;align-items:center;font-size:13px;margin:5px 0}
+.bars .track{height:10px;border-radius:5px;background:var(--bg);overflow:hidden;display:flex}
+.bars .track span{display:block;height:100%;background:var(--c)}
+
+.split{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.empty{padding:22px 14px;text-align:center;color:var(--ink-2);background:var(--card);border:1px dashed var(--line);border-radius:10px;font-size:14px}
+.notice{background:var(--sodium-soft);border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0}
+
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav.tabs .in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr)}
+nav.tabs button{border:0;background:transparent;padding:10px 4px 12px;font-size:13px;font-weight:600;color:var(--ink-2);display:flex;flex-direction:column;align-items:center;gap:3px}
+nav.tabs button svg{width:22px;height:22px}
+nav.tabs button[aria-selected="true"]{color:var(--ink)}
+nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
+
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50;display:none;max-width:90%}
+.toast.show{display:block}
+.ov{position:absolute;left:10px;right:10px;top:10px;background:rgba(16,24,40,.82);color:#fff;border-radius:12px;padding:10px 12px;backdrop-filter:blur(4px);border-left:5px solid var(--c);display:none}
+.ov.show{display:block}
+.ov b{font-size:20px}.ov .muted{color:#C9D2E3}.ov .chip{background:var(--c);color:#fff}
+.ov .split .btn{background:#fff;color:#16233D}.ov .split .btn.ghost{background:transparent;color:#fff;border-color:#fff8}
+.reticle{position:absolute;left:50%;top:50%;width:150px;height:150px;transform:translate(-50%,-50%);border:2px solid #fff9;border-radius:14px;pointer-events:none}
+.tiltbox{text-align:center;padding:10px 0}
+.tilt-n{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
+.bubble{width:140px;height:14px;border-radius:7px;background:var(--bg);margin:10px auto 4px;position:relative;overflow:hidden}
+.bubble i{position:absolute;top:2px;width:10px;height:10px;border-radius:50%;background:var(--sodium);left:calc(50% - 5px);transition:left .1s}
+.hist{border-left:3px solid var(--c);padding:4px 0 4px 10px;margin:8px 0}
+@media (max-width:420px){.tally b{font-size:20px}}
+@media (prefers-reduced-motion:no-preference){.sheet.open{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <svg class="lamp" viewBox="0 0 46 58" aria-hidden="true">
+      <path d="M8 58V14c0-6 4-10 10-10h14" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>
+      <path d="M26 2h16a3 3 0 0 1 3 3v3H23V5a3 3 0 0 1 3-3z" fill="currentColor"/>
+      <path class="glow" d="M24 9h20l-3 6H27z"/>
+      <path d="M34 15l-9 30h18z" fill="var(--sodium)" opacity=".18"/>
+    </svg>
+    <div>
+      <h1>광주 동구 가로등 점검</h1>
+      <p>현장 점검, 고장 관리, 주민 신고를 한곳에서</p>
+    </div>
+    <div class="sync" id="sync"><i></i><span>연결 중</span></div>
+  </header>
+  <main id="view"></main>
+</div>
+
+<nav class="tabs" role="tablist" aria-label="화면 선택"><div class="in">
+  <button role="tab" data-tab="inspect" aria-selected="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6v3H9zM7 5H5v16h14V5h-2"/><path d="m9 14 2 2 4-4"/></svg>현장 점검</button>
+  <button role="tab" data-tab="admin" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>관리 현황</button>
+  <button role="tab" data-tab="report" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0-6 6c0 4.5 6 12 6 12s6-7.5 6-12a6 6 0 0 0-6-6z"/><path d="M12 7v3M12 13h.01"/></svg>주민 신고</button>
+</div></nav>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="sheet-in" id="sheetIn"></div></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+"use strict";
+const DONGS=["충장동","동명동","계림동","산수동","지산동","서남동","학동","학운동","지원동"];
+const SLUG={"충장동":"cj","동명동":"dm","계림동":"gr","산수동":"ss","지산동":"js","서남동":"sn","학동":"hd","학운동":"hu","지원동":"jw"};
+const KINDS=["가로등","보안등"];
+const codeOf=(dong,num)=>`${dong} ${num}`;
+const idOf=(dong,num)=>`${SLUG[dong]}-${num}`;
+function parseCode(text){
+  if(!text)return null;const t=String(text).replace(/\s+/g," ");
+  for(const d of DONGS){const m=t.match(new RegExp(d.replace("동","\\s*동")+"\\s*(\\d{1,5})"));if(m)return{dong:d,num:m[1]}}
+  const u=t.match(/(?:no|num|id|code|lamp)=([^&\s]+)/i);if(u){const p=parseCode(decodeURIComponent(u[1]));if(p)return p}
+  return null;
+}
+function parsePole(text){const m=String(text||"").replace(/\s+/g,"").match(/\d{4}[A-Z]\d{3}/);return m?m[0]:null}
+const LSTAT=["정상","점검필요","고장","수리중"];
+const RSTAT=["접수","처리중","완료"];
+const ISSUES=["불이 꺼져 있어요","깜빡거려요","낮에도 켜져 있어요","등이 파손됐어요","기둥이 기울었어요","전선이 노출됐어요","기타"];
+const CHECKS=[
+  ["lamp","점등 상태","야간 점등 또는 점등 시험"],
+  ["flicker","깜빡임·조도","밝기 저하, 깜빡임 여부"],
+  ["fixture","등기구","커버 파손, 이물질, 누수"],
+  ["pole","등주","기울기, 부식, 도장 상태"],
+  ["base","기초·볼트","기초 균열, 볼트 풀림"],
+  ["cabinet","분전함·안정기","잠금, 결선, 발열"],
+  ["leak","누전","절연저항·누설전류 측정"],
+  ["tree","주변 간섭","수목, 간판, 시야 가림"]
+];
+const DUE_DAYS=90;
+
+const S={lights:[],insp:[],reports:[],tab:"inspect",q:"",dong:"전체",stat:null,me:null,canWrite:true,live:false,names:{}};
+let db=null,user=null,dl=null;
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtD=t=>{if(!t)return"기록 없음";const d=new Date(t);return`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`};
+const fmtDT=t=>{if(!t)return"";const d=new Date(t);return fmtD(t)+` ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`};
+const isDue=l=>!l.lastInspected||(Date.now()-l.lastInspected)>DUE_DAYS*864e5;
+const byId=id=>S.lights.find(l=>l.id===id);
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("show"),2600)}
+
+/* ---------- data ---------- */
+async function boot(){
+  if(!window.claude||!window.claude.use){render();setSync(false,"오프라인 미리보기");return}
+  try{
+    [db,user]=await Promise.all([claude.use("db"),claude.use("user")]);
+    claude.use("downloads").then(d=>{dl=d;if(S.tab==="admin")render()});
+  }catch(e){}
+  if(!db){setSync(false,"저장 불가");render();return}
+  if(user){
+    try{S.me=await user.id()}catch(e){}
+    try{const c=await user.can("data.write");if(c===false)S.canWrite=false}catch(e){}
+  }
+  const sub=(q,key,map)=>q.onSnapshot(snap=>{S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));if(map)map();S.live=true;setSync(true,"실시간");render();resolveNames()},err=>{setSync(false,"연결 끊김")});
+  sub(db.collection("lights"),"lights");
+  sub(db.collection("inspections").orderBy("date","desc").limit(40),"insp");
+  sub(db.collection("reports").orderBy("createdAt","desc").limit(100),"reports");
+}
+function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);s.querySelector("span").textContent=txt}
+async function resolveNames(){
+  if(!user)return;
+  const ids=[...new Set(S.insp.map(i=>i.inspector).filter(Boolean))].filter(id=>!(id in S.names));
+  if(!ids.length)return;
+  try{const ps=await user.profiles(ids);ids.forEach(id=>S.names[id]=(ps[id]&&ps[id].name)||"점검자");render()}catch(e){}
+}
+async function write(fn,okMsg){
+  if(!db){toast("이 화면에서는 저장할 수 없어요.");return false}
+  try{await fn();if(okMsg)toast(okMsg);return true}
+  catch(e){
+    if(e&&e.code==="invalid_argument"){S.canWrite=false;toast("저장 권한이 없어요. 공유 설정에서 참여자 이상 권한이 필요해요.")}
+    else if(e&&e.code==="quota_exceeded")toast("저장 공간이 가득 찼어요. 오래된 기록을 정리해 주세요.");
+    else toast("저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
+    render();return false;
+  }
+}
+function compress(file){
+  return new Promise((res,rej)=>{
+    const img=new Image(),url=URL.createObjectURL(file);
+    img.onload=()=>{const m=640,r=Math.min(1,m/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*r);c.height=Math.round(img.height*r);c.getContext("2d").drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);res(c.toDataURL("image/jpeg",.6))};
+    img.onerror=()=>{URL.revokeObjectURL(url);rej()};img.src=url;
+  });
+}
+
+/* ---------- render ---------- */
+function render(){
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===S.tab));
+  const v=$("#view");
+  v.innerHTML=S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():vReport();
+}
+function tally(clickable){
+  const n=s=>S.lights.filter(l=>l.status===s).length;
+  return `<div class="tally">${LSTAT.map(s=>`<button class="st-${s}" ${clickable?`data-stat="${s}" aria-pressed="${S.stat===s}"`:"tabindex=-1"}><b>${n(s)}</b><span>${s}</span></button>`).join("")}</div>`;
+}
+function lightRow(l){
+  return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>
+    <span class="body"><span class="code">${esc(l.code)}</span> <span class="muted">${esc(l.kind||"가로등")} · ${esc(l.lampType||"")}</span>
+    <span class="addr" style="display:block">${esc(l.address)}</span></span>
+    <span class="meta"><span class="chip">${esc(l.status)}</span>${isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${fmtD(l.lastInspected)}</span>`}</span></button>`;
+}
+function filtered(){
+  const q=S.q.trim().toLowerCase();
+  const rank={"고장":0,"수리중":1,"점검필요":2,"정상":3};
+  return S.lights.filter(l=>(S.dong==="전체"||l.dong===S.dong)&&(!S.stat||l.status===S.stat)&&(!q||(l.code+" "+l.address+" "+(l.poleNo||"")).toLowerCase().includes(q)))
+    .sort((a,b)=>(rank[a.status]-rank[b.status])||((a.lastInspected||0)-(b.lastInspected||0)));
+}
+function vInspect(){
+  const list=filtered();
+  const due=S.lights.filter(isDue).length;
+  return `${tally(true)}
+  ${!S.canWrite?`<div class="notice">보기 전용 권한이에요. 점검 결과를 저장하려면 공유 설정에서 참여자 권한을 받아야 해요.</div>`:""}
+  <h2>점검할 가로등</h2>
+  <p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${DUE_DAYS}일) 경과 ${due}개.</p>
+  <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색"><button class="btn sm" data-scan="inspect" aria-label="표찰 스캔">표찰 스캔</button>
+  <select id="dong" aria-label="행정동">${["전체",...DONGS].map(d=>`<option ${d===S.dong?"selected":""}>${d}</option>`).join("")}</select></div>
+  <div class="list">${list.length?list.map(lightRow).join(""):`<div class="empty">${S.lights.length?"조건에 맞는 가로등이 없어요.":(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}</div>`;
+}
+function mapSVG(){
+  const pts=S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
+  if(!pts.length)return `<div class="empty">위치 정보가 있는 가로등이 없어요.</div>`;
+  const W=340,H=250,p=18;
+  let a=Math.min(...pts.map(l=>l.lat)),b=Math.max(...pts.map(l=>l.lat)),c=Math.min(...pts.map(l=>l.lng)),d=Math.max(...pts.map(l=>l.lng));
+  if(b-a<.004){a-=.002;b+=.002} if(d-c<.004){c-=.002;d+=.002}
+  const x=g=>p+(g-c)/(d-c)*(W-2*p),y=t=>p+(b-t)/(b-a)*(H-2*p);
+  const groups={};pts.forEach(l=>{(groups[l.dong]=groups[l.dong]||[]).push(l)});
+  const labels=Object.entries(groups).map(([k,v])=>{const mx=v.reduce((s,l)=>s+x(l.lng),0)/v.length,my=v.reduce((s,l)=>s+y(l.lat),0)/v.length;return `<text class="dong" x="${mx.toFixed(1)}" y="${(my-9).toFixed(1)}" text-anchor="middle">${esc(k)}</text>`}).join("");
+  const col={"정상":"var(--ok)","점검필요":"var(--warn)","고장":"var(--bad)","수리중":"var(--fix)"};
+  const order=[...pts].sort((m,n)=>(m.status==="정상")-(n.status==="정상")).reverse();
+  return `<svg class="map" viewBox="0 0 ${W} ${H}" role="img" aria-label="동구 가로등 위치 분포">
+    <rect x="1" y="1" width="${W-2}" height="${H-2}" rx="10" fill="var(--bg)"/>
+    ${labels}
+    ${order.map(l=>`<circle data-light="${esc(l.id)}" cx="${x(l.lng).toFixed(1)}" cy="${y(l.lat).toFixed(1)}" r="${l.status==="정상"?4:5.5}" fill="${col[l.status]||"var(--ink-2)"}"><title>${esc(l.code)} ${esc(l.status)}</title></circle>`).join("")}
+  </svg>
+  <div class="legend">${LSTAT.map(s=>`<span class="st-${s}"><i></i>${s}</span>`).join("")}</div>`;
+}
+function dongBars(){
+  const rows=DONGS.map(d=>{const ls=S.lights.filter(l=>l.dong===d);return{d,n:ls.length,c:LSTAT.map(s=>ls.filter(l=>l.status===s).length)}}).filter(r=>r.n);
+  const max=Math.max(1,...rows.map(r=>r.n));
+  return `<div class="bars">${rows.map(r=>`<div class="b"><span>${r.d}</span><span class="track" style="width:${(r.n/max*100).toFixed(0)}%">${r.c.map((k,i)=>k?`<span class="st-${LSTAT[i]}" style="width:${(k/r.n*100).toFixed(1)}%"></span>`:"").join("")}</span><span class="muted">${r.n}</span></div>`).join("")}</div>`;
+}
+function reportCard(r,admin){
+  const l=r.lightId?byId(r.lightId):null;
+  return `<div class="panel st-${esc(r.status)}" style="border-left:5px solid var(--c)">
+    <div style="display:flex;gap:8px;align-items:center"><b>${esc(r.issue)}</b><span class="chip" style="margin-left:auto">${esc(r.status)}</span></div>
+    <div class="muted">${esc(r.dong||"")} ${esc(r.location||"")}${r.code?` · ${esc(r.code)}`:""}</div>
+    ${r.desc?`<div style="margin-top:6px">${esc(r.desc)}</div>`:""}
+    ${r.photo?`<img class="thumb" src="${esc(r.photo)}" alt="신고 사진" loading="lazy" style="max-height:180px">`:""}
+    <div class="muted" style="margin-top:6px">${fmtDT(r.createdAt)} 접수${r.updatedAt&&r.status!=="접수"?` · ${fmtDT(r.updatedAt)} ${esc(r.status)}`:""}</div>
+    ${admin&&S.canWrite?`<div class="split">${RSTAT.filter(s=>s!==r.status).map(s=>`<button class="btn ghost sm" data-rstat="${esc(r.id)}" data-to="${s}">${s}로 변경</button>`).join("")}
+      ${l&&l.status!=="고장"&&l.status!=="수리중"&&r.status!=="완료"?`<button class="btn sm" data-tofault="${esc(r.id)}">${esc(l.code)} 고장 등록</button>`:""}</div>`:""}
+  </div>`;
+}
+function vAdmin(){
+  const open=S.lights.filter(l=>l.status!=="정상").sort((a,b)=>({"고장":0,"수리중":1,"점검필요":2}[a.status]-{"고장":0,"수리중":1,"점검필요":2}[b.status]));
+  const rOpen=S.reports.filter(r=>r.status!=="완료");
+  const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;
+  return `${tally(false)}
+  <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건 · 미처리 신고 ${rOpen.length}건</span></div>${mapSVG()}</div>
+  <h2>조치가 필요한 가로등 <span class="muted">${open.length}</span></h2>
+  <div class="list">${open.length?open.map(lightRow).join(""):`<div class="empty">모든 가로등이 정상이에요.</div>`}</div>
+  <h2>주민 신고 <span class="muted">미처리 ${rOpen.length}</span></h2>
+  <div class="list">${S.reports.length?S.reports.slice(0,20).map(r=>reportCard(r,true)).join(""):`<div class="empty">접수된 신고가 없어요.</div>`}</div>
+  <h2>행정동별 현황</h2>
+  <div class="panel">${S.lights.length?dongBars():`<span class="muted">데이터 없음</span>`}</div>
+  <h2>최근 점검 이력</h2>
+  <div class="panel">${S.insp.length?S.insp.slice(0,12).map(i=>`<div class="hist st-${esc(i.result)}"><b>${esc(i.code)}</b> <span class="chip">${esc(i.result)}</span> <span class="muted">${fmtDT(i.date)} · ${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${i.faults&&i.faults.length?`<div class="muted">불량: ${i.faults.map(esc).join(", ")}</div>`:""}</div>`).join(""):`<span class="muted">아직 점검 기록이 없어요.</span>`}
+  ${dl?`<div class="split"><button class="btn ghost sm" id="csv">점검 이력 CSV 내려받기</button><button class="btn ghost sm" id="csv2">가로등 대장 CSV 내려받기</button></div>`:""}</div>
+  ${S.canWrite?`<h2>가로등·보안등 등록</h2>
+  <div class="panel">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+      <div><label class="f" for="nDong">표찰 동 이름</label><select class="f-in" id="nDong">${DONGS.map(d=>`<option>${d}</option>`).join("")}</select></div>
+      <div><label class="f" for="nNum">표찰 번호</label><input class="f-in" id="nNum" inputmode="numeric" placeholder="642"></div>
+      <div><label class="f" for="nKind">종류</label><select class="f-in" id="nKind">${KINDS.map(d=>`<option>${d}</option>`).join("")}</select></div>
+      <div><label class="f" for="nPole">한전 전주번호 (선택)</label><input class="f-in" id="nPole" placeholder="9792C742"></div>
+    </div>
+    <label class="f" for="nAddr">설치 위치</label><input class="f-in" id="nAddr" placeholder="예: 산수로 120 앞 보도">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px">
+      <div><label class="f" for="nType">광원</label><select class="f-in" id="nType"><option>LED</option><option>나트륨</option><option>메탈할라이드</option></select></div>
+      <div><label class="f" for="nLat">위도</label><input class="f-in" id="nLat" inputmode="decimal" placeholder="35.146"></div>
+      <div><label class="f" for="nLng">경도</label><input class="f-in" id="nLng" inputmode="decimal" placeholder="126.92"></div>
+    </div>
+    <div class="split"><button class="btn" id="addLight">등록</button><button class="btn ghost" data-scan="admin" type="button">표찰 스캔</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button></div>
+  </div>`:""}`;
+}
+function vReport(){
+  const mine=S.me?S.reports.filter(r=>r.reporterId===S.me):[];
+  return `<div class="panel" style="background:var(--sodium-soft);border-color:transparent">
+    <h3>고장 난 가로등을 알려주세요</h3>
+    <div class="muted" style="color:var(--ink)">기둥에 붙은 파란 표찰(예: 산수동 642)의 QR을 찍거나 사진을 올리면 번호가 자동으로 들어가요. 전선이 노출된 경우에는 가까이 가지 말고 신고만 해 주세요.</div>
+    <div class="split"><button class="btn sodium" data-scan="report">표찰 스캔</button></div></div>
+  ${!S.canWrite?`<div class="notice">이 링크는 보기 전용이라 신고를 저장할 수 없어요. 구청에서 받은 신고용 링크로 접속해 주세요.</div>`:""}
+  <h2>신고하기</h2>
+  <div class="panel">
+    <label class="f">어떤 문제인가요?</label>
+    <div class="seg" id="issueSeg">${ISSUES.map((s,i)=>`<button type="button" data-issue="${esc(s)}" aria-pressed="${i===0}">${esc(s)}</button>`).join("")}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
+      <div><label class="f" for="rDong">표찰 동 이름</label><select class="f-in" id="rDong"><option value="">모름</option>${DONGS.map(d=>`<option>${d}</option>`).join("")}</select></div>
+      <div><label class="f" for="rNum">표찰 번호 (선택)</label><input class="f-in" id="rNum" inputmode="numeric" placeholder="642"></div>
+    </div>
+    <label class="f" for="rLoc">위치</label><input class="f-in" id="rLoc" placeholder="예: 동명동 카페거리 OO빌딩 맞은편">
+    <label class="f" for="rDesc">자세한 내용 (선택)</label><textarea class="f-in" id="rDesc" placeholder="언제부터, 어느 쪽 등이 문제인지 알려주세요"></textarea>
+    <label class="f">사진 (선택)</label>
+    <div class="photo-in"><input type="file" id="rPhoto" accept="image/*" capture="environment"><img id="rPrev" alt="" hidden></div>
+    <p class="muted">연락처는 받지 않아요. 처리 결과는 아래 ‘내 신고’에서 확인할 수 있어요.</p>
+    <button class="btn sodium block" id="sendReport" ${S.canWrite?"":"disabled"}>신고 접수하기</button>
+  </div>
+  <h2>내 신고 <span class="muted">${mine.length}</span></h2>
+  <div class="list">${mine.length?mine.map(r=>reportCard(r,false)).join(""):`<div class="empty">아직 접수한 신고가 없어요.</div>`}</div>`;
+}
+
+/* ---------- sheets ---------- */
+function openSheet(html){$("#sheetIn").innerHTML=`<div class="grab"></div>`+html;$("#sheet").classList.add("open");$("#sheetBg").classList.add("open");$("#sheet").scrollTop=0;document.body.style.overflow="hidden";setTimeout(()=>{const f=$("#sheet .x");f&&f.focus()},30)}
+let closeSheet=function(){$("#sheet").classList.remove("open");$("#sheetBg").classList.remove("open");document.body.style.overflow="";draft=null};
+let draft=null;
+async function openLight(id){
+  const l=byId(id);if(!l)return;
+  draft={lightId:id,checks:{},photo:null,result:null};
+  openSheet(`<div class="sheet-head st-${esc(l.status)}"><div><h3 style="font-size:19px">${esc(l.code)} <span class="chip">${esc(l.status)}</span></h3>
+    <div class="muted">${esc(l.dong)} · ${esc(l.address)}</div><div class="muted">${esc(l.kind||"가로등")} · ${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}</div></div>
+    <button class="x" aria-label="닫기" data-close>×</button></div>
+    ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}</div>`:""}
+    <h2>점검표</h2>
+    <div class="panel" id="checks">${CHECKS.map(([k,t,s])=>`<div class="check"><div class="q">${t}<small>${s}</small></div><div class="pair" role="group" aria-label="${t}"><button class="g" data-ck="${k}" data-v="ok" aria-pressed="false">양호</button><button class="b" data-ck="${k}" data-v="bad" aria-pressed="false">불량</button></div></div>`).join("")}
+      <div class="split"><button class="btn ghost sm" id="allOk">모두 양호</button><button class="btn ghost sm" id="tiltBtn">등주 기울기 측정</button></div>
+      <div id="tiltBox" hidden></div></div>
+    <label class="f">점검 결과</label>
+    <div class="seg" id="resSeg">${["정상","점검필요","고장"].map(s=>`<button type="button" data-res="${s}" aria-pressed="false">${s}</button>`).join("")}</div>
+    <p class="muted" id="resHint">불량 항목을 체크하면 결과가 자동으로 제안돼요.</p>
+    <label class="f" for="iMemo">메모</label><textarea class="f-in" id="iMemo" placeholder="측정값, 조치 내용, 필요한 부품 등"></textarea>
+    <label class="f">현장 사진</label><div class="photo-in"><input type="file" id="iPhoto" accept="image/*" capture="environment"><img id="iPrev" alt="" hidden></div>
+    <div style="margin-top:16px"><button class="btn sodium block" id="saveInsp" ${S.canWrite?"":"disabled"}>점검 결과 저장</button></div>
+    <h2>점검 이력</h2><div id="histBox" class="muted">불러오는 중…</div>`);
+  if(!db){$("#histBox").textContent="기록을 불러올 수 없어요.";return}
+  try{
+    const snap=await db.collection("inspections").where("lightId","==",id).limit(20).get();
+    const rows=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.date-a.date);
+    const box=$("#histBox");if(!box||!draft||draft.lightId!==id)return;
+    box.innerHTML=rows.length?rows.map(i=>`<div class="hist st-${esc(i.result)}"><b>${fmtDT(i.date)}</b> <span class="chip">${esc(i.result)}</span> <span>${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${typeof i.tiltDeg==="number"?`<div>등주 기울기 ${i.tiltDeg.toFixed(1)}°</div>`:""}${i.faults&&i.faults.length?`<div>불량: ${i.faults.map(esc).join(", ")}</div>`:""}${i.memo?`<div>${esc(i.memo)}</div>`:""}${i.photo?`<img class="thumb" src="${esc(i.photo)}" alt="점검 사진" style="max-height:200px">`:""}</div>`).join(""):"아직 점검 기록이 없어요.";
+  }catch(e){const b=$("#histBox");if(b)b.textContent="기록을 불러오지 못했어요."}
+}
+function suggestResult(){
+  const bad=CHECKS.filter(([k])=>draft.checks[k]==="bad").map(([k])=>k);
+  const severe=bad.some(k=>["lamp","leak","pole"].includes(k));
+  const r=Object.keys(draft.checks).length===0?null:severe?"고장":bad.length?"점검필요":"정상";
+  if(r&&!draft.manual){draft.result=r;document.querySelectorAll("#resSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.res===r))}
+  const h=$("#resHint");if(h)h.textContent=severe?"점등·누전·등주 불량은 고장으로 제안돼요.":bad.length?`불량 ${bad.length}개 항목이 있어요.`:"불량 항목을 체크하면 결과가 자동으로 제안돼요.";
+}
+async function saveInspection(){
+  const l=byId(draft.lightId);if(!l)return;
+  const done=Object.keys(draft.checks).length;
+  if(done<CHECKS.length){toast(`점검 항목 ${CHECKS.length-done}개가 남았어요.`);return}
+  if(!draft.result){toast("점검 결과를 선택해 주세요.");return}
+  const btn=$("#saveInsp");btn.disabled=true;btn.textContent="저장 중…";
+  const now=Date.now();
+  const faults=CHECKS.filter(([k])=>draft.checks[k]==="bad").map(([,t])=>t);
+  const rec={lightId:l.id,code:l.code,dong:l.dong,date:now,checks:{...draft.checks},faults,result:draft.result,memo:($("#iMemo").value||"").trim().slice(0,1000),inspector:S.me||null};
+  if(typeof draft.tilt==="number")rec.tiltDeg=draft.tilt;
+  if(draft.photo)rec.photo=draft.photo;
+  const ok=await write(async()=>{await db.collection("inspections").add(rec);await db.doc("lights/"+l.id).update({status:draft.result,lastInspected:now,lastResult:draft.result,updatedAt:now})},"점검 결과를 저장했어요.");
+  if(ok)closeSheet();else if(btn){btn.disabled=false;btn.textContent="점검 결과 저장"}
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click",async e=>{
+  const t=e.target.closest("button,circle");if(!t)return;
+  if(t.dataset.tab){S.tab=t.dataset.tab;render();window.scrollTo(0,0);return}
+  if(t.dataset.close!==undefined){closeSheet();return}
+  if(t.dataset.light){openLight(t.dataset.light);return}
+  if(t.dataset.stat){S.stat=S.stat===t.dataset.stat?null:t.dataset.stat;render();return}
+  if(t.dataset.ck&&draft){draft.checks[t.dataset.ck]=t.dataset.v;t.parentElement.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b===t));suggestResult();return}
+  if(t.id==="allOk"&&draft){CHECKS.forEach(([k])=>draft.checks[k]="ok");document.querySelectorAll("#checks .pair button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v==="ok"));draft.manual=false;suggestResult();return}
+  if(t.dataset.res&&draft){draft.result=t.dataset.res;draft.manual=true;document.querySelectorAll("#resSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
+  if(t.id==="saveInsp"){saveInspection();return}
+  if(t.id==="tiltBtn"){startTilt();return}
+  if(t.id==="tiltKeep"){keepTilt();return}
+  if(t.id==="tiltStop"){stopTilt();return}
+  if(t.dataset.lstat&&draft){const id=draft.lightId,to=t.dataset.lstat;if(await write(()=>db.doc("lights/"+id).update({status:to,updatedAt:Date.now()}),`${to}(으)로 변경했어요.`))closeSheet();return}
+  if(t.dataset.issue){document.querySelectorAll("#issueSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
+  if(t.id==="sendReport"){sendReport(t);return}
+  if(t.dataset.rstat){const to=t.dataset.to;write(()=>db.doc("reports/"+t.dataset.rstat).update({status:to,updatedAt:Date.now()}),`신고를 ${to}(으)로 변경했어요.`);return}
+  if(t.dataset.tofault){const r=S.reports.find(x=>x.id===t.dataset.tofault);if(!r)return;write(async()=>{await db.doc("lights/"+r.lightId).update({status:"고장",updatedAt:Date.now()});if(r.status==="접수")await db.doc("reports/"+r.id).update({status:"처리중",updatedAt:Date.now()})},"가로등을 고장으로 등록했어요.");return}
+  if(t.id==="addLight"){addLight();return}
+  if(t.id==="gps"){if(!navigator.geolocation){toast("이 기기에서는 위치를 가져올 수 없어요.");return}navigator.geolocation.getCurrentPosition(p=>{$("#nLat").value=p.coords.latitude.toFixed(5);$("#nLng").value=p.coords.longitude.toFixed(5)},()=>toast("위치 권한이 없어 좌표를 직접 입력해 주세요."));return}
+  if(t.id==="csv"||t.id==="csv2"){exportCSV(t.id==="csv")}
+  if(t.dataset.scan){openScanner(t.dataset.scan);return}
+  if(t.id==="scanStop"){stopCam();return}
+  if(t.id==="scanStart"){startCam();return}
+  if(t.dataset.apply){applyScan(t.dataset.apply);return}
+});
+$("#sheetBg").addEventListener("click",()=>closeSheet());
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classList.contains("open"))closeSheet()});
+document.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
+document.addEventListener("change",async e=>{
+  if(e.target.id==="dong"){S.dong=e.target.value;render();return}
+  if(e.target.id==="iPhoto"||e.target.id==="rPhoto"){
+    const f=e.target.files&&e.target.files[0];if(!f)return;
+    try{const d=await compress(f);const prev=$(e.target.id==="iPhoto"?"#iPrev":"#rPrev");prev.src=d;prev.hidden=false;if(e.target.id==="iPhoto"&&draft)draft.photo=d;else e.target.dataset.photo="1",window.__rPhoto=d}
+    catch(err){toast("사진을 읽지 못했어요. 다른 사진을 골라 주세요.")}
+  }
+});
+async function sendReport(btn){
+  const loc=$("#rLoc").value.trim();
+  if(!loc){toast("위치를 적어 주세요.");$("#rLoc").focus();return}
+  const issue=(document.querySelector("#issueSeg button[aria-pressed='true']")||{}).dataset?.issue||"기타";
+  const rd=$("#rDong").value,rn=$("#rNum").value.trim().replace(/\D/g,"");
+  const code=rd&&rn?codeOf(rd,rn):"";
+  const l=code?byId(idOf(rd,rn)):null;
+  const rec={issue,location:loc.slice(0,200),dong:rd||"",code,lightId:l?l.id:null,desc:$("#rDesc").value.trim().slice(0,1000),status:"접수",createdAt:Date.now(),reporterId:S.me||null};
+  if(window.__rPhoto)rec.photo=window.__rPhoto;
+  btn.disabled=true;btn.textContent="접수 중…";
+  const ok=await write(()=>db.collection("reports").add(rec),"신고가 접수됐어요. 감사합니다.");
+  if(ok){window.__rPhoto=null;render()}else{btn.disabled=false;btn.textContent="신고 접수하기"}
+}
+async function addLight(){
+  const dong=$("#nDong").value,num=$("#nNum").value.trim().replace(/\D/g,""),addr=$("#nAddr").value.trim();
+  if(!num){toast("표찰 번호를 숫자로 적어 주세요. 예: 642");return}
+  const id=idOf(dong,num),code=codeOf(dong,num);
+  if(byId(id)){toast(`${code}는 이미 등록돼 있어요.`);return}
+  if(!addr){toast("설치 위치를 적어 주세요.");return}
+  const lat=parseFloat($("#nLat").value),lng=parseFloat($("#nLng").value);
+  const pole=$("#nPole").value.trim().toUpperCase().replace(/\s+/g,"");
+  const rec={code,dong,num,kind:$("#nKind").value,poleNo:pole||null,address:addr.slice(0,200),lampType:$("#nType").value,status:"정상",lastInspected:null,installedYear:new Date().getFullYear(),updatedAt:Date.now()};
+  if(isFinite(lat)&&isFinite(lng)){rec.lat=lat;rec.lng=lng}
+  if(await write(()=>db.doc("lights/"+id).set(rec),`${code}를 등록했어요.`))render();
+}
+async function exportCSV(insp){
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+  let rows;
+  if(insp){
+    let data=S.insp;
+    try{const s=await db.collection("inspections").orderBy("date","desc").limit(1000).get();data=s.docs.map(d=>d.data())}catch(e){}
+    rows=[["점검일시","관리번호","행정동","결과","불량항목","메모"],...data.map(i=>[fmtDT(i.date),i.code,i.dong,i.result,(i.faults||[]).join("/"),i.memo])];
+  }else rows=[["표찰번호","동","종류","전주번호","위치","광원","상태","마지막점검","위도","경도"],...S.lights.map(l=>[l.code,l.dong,l.kind,l.poleNo,l.address,l.lampType,l.status,fmtD(l.lastInspected),l.lat,l.lng])];
+  const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
+  try{await dl.save({filename:`동구가로등_${insp?"점검이력":"대장"}_${fmtD(Date.now()).replace(/\./g,"")}.csv`,data:csv})}
+  catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
+}
+
+/* ---------- pole tilt (phone against the pole) ---------- */
+const TILT_WARN=2;
+let tilt={on:false,val:null,buf:[]};
+async function startTilt(){
+  const box=$("#tiltBox");if(!box)return;
+  if(!window.DeviceOrientationEvent){box.hidden=false;box.innerHTML=`<p class="muted">이 기기에서는 기울기 센서를 쓸 수 없어요.</p>`;return}
+  if(typeof DeviceOrientationEvent.requestPermission==="function"){
+    try{const r=await DeviceOrientationEvent.requestPermission();if(r!=="granted"){box.hidden=false;box.innerHTML=`<p class="muted">동작 센서 권한이 없어 측정할 수 없어요.</p>`;return}}
+    catch(e){box.hidden=false;box.innerHTML=`<p class="muted">동작 센서 권한이 없어 측정할 수 없어요.</p>`;return}
+  }
+  tilt={on:true,val:null,buf:[]};
+  box.hidden=false;
+  box.innerHTML=`<div class="tiltbox"><p class="muted" style="margin:4px 0">휴대폰 긴 면을 등주에 세로로 붙이고 잠시 기다리세요</p>
+    <div class="tilt-n" id="tiltN">–</div><div class="muted">수직 기준 기울기 · ${TILT_WARN}° 이상이면 불량 권장</div>
+    <div class="bubble"><i id="tiltDot"></i></div>
+    <div class="split" style="justify-content:center"><button class="btn sm" id="tiltKeep">이 값으로 기록</button><button class="btn ghost sm" id="tiltStop">닫기</button></div></div>`;
+  window.addEventListener("deviceorientation",onTilt);
+}
+function onTilt(e){
+  if(!tilt.on||e.beta==null||e.gamma==null)return;
+  const b=e.beta*Math.PI/180,g=e.gamma*Math.PI/180;
+  // angle between the phone's long axis and gravity, when held upright in portrait
+  const cosT=Math.abs(Math.sin(b)*Math.cos(g));
+  const deg=Math.acos(Math.min(1,Math.max(-1,cosT)))*180/Math.PI;
+  tilt.buf.push(deg);if(tilt.buf.length>12)tilt.buf.shift();
+  const avg=tilt.buf.reduce((s,x)=>s+x,0)/tilt.buf.length;tilt.val=avg;
+  const n=$("#tiltN"),d=$("#tiltDot");if(!n)return;
+  n.textContent=avg.toFixed(1)+"°";n.style.color=avg>=TILT_WARN?"var(--bad)":"var(--ok)";
+  if(d)d.style.left=`calc(50% - 5px + ${Math.max(-60,Math.min(60,(90-e.beta)*4))}px)`;
+}
+function keepTilt(){
+  if(tilt.val==null||!draft){toast("아직 값이 안 잡혔어요. 잠시 더 대 주세요.");return}
+  draft.tilt=Math.round(tilt.val*10)/10;
+  const m=$("#iMemo");if(m&&!/기울기/.test(m.value))m.value=(m.value?m.value+"\n":"")+`등주 기울기 ${draft.tilt.toFixed(1)}°`;
+  if(draft.tilt>=TILT_WARN){draft.checks.pole="bad";document.querySelectorAll('#checks [data-ck="pole"]').forEach(x=>x.setAttribute("aria-pressed",x.dataset.v==="bad"));draft.manual=false;suggestResult();toast(`${draft.tilt.toFixed(1)}° 기록. 등주 항목을 불량으로 표시했어요.`)}
+  else toast(`${draft.tilt.toFixed(1)}° 기록했어요.`);
+  stopTilt();
+}
+function stopTilt(){tilt.on=false;window.removeEventListener("deviceorientation",onTilt);const b=$("#tiltBox");if(b){b.hidden=true;b.innerHTML=""}}
+
+/* ---------- label scanner ---------- */
+let scan={ctx:null,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null};
+let sampleNs=null;
+async function openScanner(ctx){
+  scan={ctx,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null};
+  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">표찰 스캔</h3><div class="muted">표찰 QR을 비추면 그 등의 상태가 화면 위에 바로 떠요. QR이 없거나 흐리면 사진으로 읽어요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+    <div class="panel" style="padding:0;overflow:hidden;position:relative;background:#000"><video id="cam" playsinline muted style="width:100%;max-height:52vh;display:block;object-fit:cover"></video>
+      <div class="reticle"></div><div id="camOv" class="ov"></div>
+      <div id="camHint" class="muted" style="position:absolute;left:0;right:0;bottom:0;padding:8px 12px;background:rgba(0,0,0,.55);color:#fff;font-size:13px">카메라 준비 중…</div></div>
+    <div class="split"><button class="btn ghost sm" id="scanStart">카메라 다시 켜기</button><button class="btn ghost sm" id="scanStop">카메라 끄기</button></div>
+    <label class="f">또는 표찰 사진으로 읽기</label>
+    <div class="photo-in"><input type="file" id="scanPhoto" accept="image/*" capture="environment"><img id="scanPrev" alt="" hidden></div>
+    <p class="muted" id="scanNote">사진 인식은 AI가 표찰 글자를 읽어요. 처음 한 번 동의가 필요하고, 읽은 결과는 저장 전에 확인할 수 있어요.</p>
+    <div id="scanResult"></div>`);
+  if(!sampleNs&&window.claude&&window.claude.use){claude.use("sample").then(async s=>{sampleNs=s;try{const lim=s&&await s.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}const n=$("#scanNote");if(n&&!scan.sampleImg)n.textContent="이 화면에서는 사진 인식을 쓸 수 없어요. QR 스캔이나 직접 입력을 이용하세요."})}
+  startCam();
+}
+async function startCam(){
+  stopCam(false);scan.liveKey=null;const o=$("#camOv");if(o)o.className="ov";
+  const v=$("#cam"),hint=$("#camHint");if(!v)return;
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){hint.textContent="이 기기에서는 카메라를 쓸 수 없어요. 아래에서 사진으로 읽어 주세요.";return}
+  try{
+    scan.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280}},audio:false});
+    v.srcObject=scan.stream;await v.play();hint.textContent="표찰 QR을 네모 안에 맞춰 주세요";
+    const c=document.createElement("canvas"),g=c.getContext("2d",{willReadFrequently:true});
+    const tick=()=>{
+      if(!scan.stream)return;
+      if(v.readyState>=2&&window.jsQR){
+        const s=Math.min(v.videoWidth,v.videoHeight,640);c.width=c.height=s;
+        g.drawImage(v,(v.videoWidth-s)/2,(v.videoHeight-s)/2,s,s,0,0,s,s);
+        const d=g.getImageData(0,0,s,s);const r=jsQR(d.data,s,s,{inversionAttempts:"dontInvert"});
+        if(r&&r.data)onLive(r.data);
+      }
+      scan.raf=requestAnimationFrame(tick);
+    };
+    scan.raf=requestAnimationFrame(tick);
+  }catch(e){hint.textContent="카메라 권한이 없어요. 아래에서 사진으로 읽어 주세요."}
+}
+function stopCam(updateHint=true){
+  cancelAnimationFrame(scan.raf);
+  if(scan.stream){scan.stream.getTracks().forEach(t=>t.stop());scan.stream=null}
+  const v=$("#cam");if(v)v.srcObject=null;
+  const h=$("#camHint");if(h&&updateHint)h.textContent="카메라가 꺼져 있어요";
+}
+function onLive(text){
+  const p=parseCode(text);const key=p?idOf(p.dong,p.num):"raw:"+text;
+  if(scan.liveKey===key)return;scan.liveKey=key;
+  const ov=$("#camOv");if(!ov)return;
+  const pole=parsePole(text);
+  if(!p){ov.className="ov show st-점검필요";ov.innerHTML=`<b style="font-size:15px">표찰 번호를 못 찾았어요</b><div class="muted" style="word-break:break-all">${esc(String(text).slice(0,120))}</div>`;return}
+  const l=byId(key);scan.found={code:p,pole,raw:text,how:"qr"};
+  const rOpen=l?S.reports.filter(r=>r.lightId===l.id&&r.status!=="완료").length:0;
+  const due=l&&isDue(l);
+  ov.className="ov show "+(l?`st-${l.status}`:"st-수리중");
+  ov.innerHTML=l?`<b>${esc(l.code)}</b> <span class="chip">${esc(l.status)}</span>
+    <div class="muted">${esc(l.kind||"가로등")} · ${esc(l.lampType||"")} · ${esc(l.address)}</div>
+    <div class="muted">마지막 점검 ${fmtD(l.lastInspected)}${due?" · <span style='color:var(--sodium)'>점검주기 경과</span>":""}${rOpen?` · <span style='color:#FFB4A8'>미처리 신고 ${rOpen}건</span>`:""}</div>
+    ${l.poleNo?`<div class="muted">전주 ${esc(l.poleNo)}</div>`:""}
+    <div class="split" style="margin-top:8px">${scan.ctx==="report"?`<button class="btn sm" data-apply="report">신고 양식에 넣기</button>`:`<button class="btn sm" data-apply="open">${scan.ctx==="inspect"?"이 등 점검하기":"이 등 열기"}</button>`}</div>`
+  :`<b>${esc(codeOf(p.dong,p.num))}</b> <span class="chip">미등록</span><div class="muted">대장에 없는 번호예요.</div>
+    <div class="split" style="margin-top:8px">${scan.ctx==="report"?`<button class="btn sm" data-apply="report">신고 양식에 넣기</button>`:S.canWrite?`<button class="btn sm" data-apply="register">신규 등록</button>`:""}</div>`;
+  if(navigator.vibrate)navigator.vibrate(30);
+}
+function onDecoded(text,how){
+  stopCam(false);
+  const p=parseCode(text),pole=parsePole(text);
+  showScanResult({code:p,pole,raw:text,how});
+}
+function showScanResult(r){
+  scan.found=r;const box=$("#scanResult");if(!box)return;
+  const l=r.code?byId(idOf(r.code.dong,r.code.num)):null;
+  const isCodeless=!r.code;
+  box.innerHTML=`<div class="panel" style="margin-top:12px;border-left:5px solid ${isCodeless?"var(--warn)":l?"var(--ok)":"var(--fix)"}">
+    <h3>${r.how==="qr"?"QR에서 읽음":"사진에서 읽음"}</h3>
+    ${r.code?`<div style="font-size:22px;font-weight:700">${esc(r.code.dong)} ${esc(r.code.num)}</div>`:`<div>표찰 번호를 찾지 못했어요.</div>`}
+    ${r.pole?`<div class="muted">한전 전주번호 ${esc(r.pole)}</div>`:""}
+    ${r.kind?`<div class="muted">${esc(r.kind)}</div>`:""}
+    ${r.code?(l?`<div class="muted">대장에 있는 등이에요 · ${esc(l.address)} · <span class="chip st-${esc(l.status)}">${esc(l.status)}</span></div>`:`<div class="muted">대장에 없는 번호예요. 신규 등록으로 이어갈 수 있어요.</div>`):""}
+    ${r.raw&&!r.code?`<div class="muted" style="word-break:break-all;margin-top:4px">읽은 내용: ${esc(String(r.raw).slice(0,160))}</div>`:""}
+    <div class="split">
+      ${r.code&&l&&scan.ctx==="inspect"?`<button class="btn" data-apply="open">이 등 점검하기</button>`:""}
+      ${r.code&&l&&scan.ctx==="admin"?`<button class="btn" data-apply="open">이 등 열기</button>`:""}
+      ${r.code&&!l&&S.canWrite&&scan.ctx!=="report"?`<button class="btn" data-apply="register">신규 등록 양식에 넣기</button>`:""}
+      ${r.code&&scan.ctx==="report"?`<button class="btn sodium" data-apply="report">신고 양식에 넣기</button>`:""}
+      ${r.code&&!l&&scan.ctx==="inspect"&&S.canWrite?`<button class="btn ghost" data-apply="register">신규 등록</button>`:""}
+      <button class="btn ghost" id="scanStart">다시 스캔</button>
+    </div></div>`;
+  box.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+function applyScan(what){
+  const r=scan.found;if(!r||!r.code)return;
+  const {dong,num}=r.code;
+  if(what==="open"){stopCam(false);openLight(idOf(dong,num));return}
+  stopCam(false);closeSheet();
+  if(what==="report"){S.tab="report";render();$("#rDong").value=dong;$("#rNum").value=num;$("#rLoc").focus();toast(`${codeOf(dong,num)} 번호를 넣었어요.`);return}
+  if(what==="register"){S.tab="admin";render();const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}d.value=dong;$("#nNum").value=num;if(r.pole)$("#nPole").value=r.pole;if(r.kind&&KINDS.includes(r.kind))$("#nKind").value=r.kind;$("#nAddr").scrollIntoView({behavior:"smooth",block:"center"});$("#nAddr").focus();toast(`${codeOf(dong,num)} 번호를 넣었어요. 위치를 적고 등록하세요.`)}
+}
+async function readLabelPhoto(file){
+  const prev=$("#scanPrev");try{prev.src=await compress(file);prev.hidden=false}catch(e){}
+  const box=$("#scanResult");
+  // 1) try QR in the still photo first
+  try{
+    const img=new Image();img.src=prev.src;await img.decode();
+    const c=document.createElement("canvas");c.width=img.width;c.height=img.height;const g=c.getContext("2d");g.drawImage(img,0,0);
+    const d=g.getImageData(0,0,c.width,c.height);const r=window.jsQR&&jsQR(d.data,c.width,c.height);
+    if(r&&r.data&&parseCode(r.data)){onDecoded(r.data,"qr");return}
+  }catch(e){}
+  // 2) ask Claude to read the label text
+  if(!sampleNs||!scan.sampleImg){showScanResult({code:null,raw:"사진 인식을 쓸 수 없는 화면이에요. 번호를 직접 입력해 주세요.",how:"photo"});return}
+  if(scan.busy)return;scan.busy=true;
+  box.innerHTML=`<div class="panel" style="margin-top:12px"><span class="muted">표찰을 읽는 중…</span></div>`;
+  try{
+    const blob=await (await fetch(prev.src)).blob();
+    const out=await sampleNs.json(`사진은 한국 광주광역시 동구의 가로등 또는 보안등 기둥(전주)입니다. 기둥에 붙은 표찰을 읽어 주세요.
+- 파란색 "고장신고" 표찰: 동 이름(예: 산수동, 충장동, 동명동, 계림동, 지산동, 서남동, 학동, 학운동, 지원동)과 숫자 번호가 있습니다. 종류는 표찰에 "가로등" 또는 "보안등"으로 적혀 있습니다.
+- 한국전력 전주번호판(흰색, "위험" 표시): 숫자4자리+영문1자+숫자3자리 형식(예: 9792C742)입니다.
+반드시 아래 JSON 하나만 출력하세요. 못 읽은 항목은 null로 두세요.
+{"dong": string|null, "num": string|null, "kind": "가로등"|"보안등"|null, "pole": string|null, "confidence": "high"|"low"}`,{images:blob,modelTier:"quick"});
+    const dn=out&&typeof out.dong==="string"?out.dong.replace(/\s/g,""):"";
+    const dong=DONGS.find(d=>d===dn)||DONGS.find(d=>dn&&dn.startsWith(d.replace("동","")));
+    const num=out&&out.num?String(out.num).replace(/\D/g,""):"";
+    const pole=parsePole(out&&out.pole||"");
+    showScanResult({code:dong&&num?{dong,num}:null,pole,kind:out&&out.kind||null,raw:dong&&num?"":`인식 결과: ${JSON.stringify(out)}`,how:"photo"});
+    if(out&&out.confidence==="low"&&dong&&num)toast("표찰이 흐려 번호가 틀릴 수 있어요. 확인해 주세요.");
+  }catch(e){
+    const msg=e&&e.code==="not_granted"?"사진 인식에 동의하지 않아 번호를 읽지 못했어요. 직접 입력해 주세요.":e&&e.code==="rate_limited"?"요청이 많아요. 잠시 후 다시 시도해 주세요.":"사진에서 표찰을 읽지 못했어요. 더 가까이서 다시 찍어 주세요.";
+    showScanResult({code:null,raw:msg,how:"photo"});
+  }finally{scan.busy=false}
+}
+document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
+const _close=closeSheet;closeSheet=function(){stopCam(false);stopTilt();_close()};
+
+render();
+boot();
+</script>
+</body>
+</html>
