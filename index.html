@@ -115,7 +115,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 .pair button.g[aria-pressed="true"]{background:var(--ok);color:#fff}
 .pair button.b[aria-pressed="true"]{background:var(--bad);color:#fff}
 
-.photo-in{display:flex;gap:10px;align-items:center}
+.photo-in{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .photo-in img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
 .thumb{max-width:100%;border-radius:8px;margin-top:8px;display:block}
 
@@ -465,7 +465,7 @@ function vReport(){
     <label class="f" for="rLoc">위치</label><input class="f-in" id="rLoc" placeholder="예: 동명동 카페거리 OO빌딩 맞은편">
     <label class="f" for="rDesc">자세한 내용 (선택)</label><textarea class="f-in" id="rDesc" placeholder="언제부터, 어느 쪽 등이 문제인지 알려주세요"></textarea>
     <label class="f">사진 (선택)</label>
-    <div class="photo-in"><input type="file" id="rPhoto" accept="image/*" capture="environment"><img id="rPrev" alt="" hidden></div>
+    <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="rPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="rPhotoLib">앨범에서 선택</button><input type="file" id="rPhoto" accept="image/*" capture="environment" hidden><input type="file" id="rPhotoLib" accept="image/*" hidden><img id="rPrev" alt="" hidden></div>
     <p class="muted">연락처는 받지 않아요. 처리 결과는 아래 ‘내 신고’에서 확인할 수 있어요.</p>
     <button class="btn sodium block" id="sendReport" ${S.canWrite?"":"disabled"}>신고 접수하기</button>
   </div>
@@ -492,7 +492,7 @@ async function openLight(id){
     <div class="seg" id="resSeg">${["정상","점검필요","고장"].map(s=>`<button type="button" data-res="${s}" aria-pressed="false">${s}</button>`).join("")}</div>
     <p class="muted" id="resHint">불량 항목을 체크하면 결과가 자동으로 제안돼요.</p>
     <label class="f" for="iMemo">메모</label><textarea class="f-in" id="iMemo" placeholder="측정값, 조치 내용, 필요한 부품 등"></textarea>
-    <label class="f">현장 사진</label><div class="photo-in"><input type="file" id="iPhoto" accept="image/*" capture="environment"><img id="iPrev" alt="" hidden></div>
+    <label class="f">현장 사진</label><div class="photo-in"><button type="button" class="btn ghost sm" data-pick="iPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="iPhotoLib">앨범에서 선택</button><input type="file" id="iPhoto" accept="image/*" capture="environment" hidden><input type="file" id="iPhotoLib" accept="image/*" hidden><img id="iPrev" alt="" hidden></div>
     <div style="margin-top:16px"><button class="btn sodium block" id="saveInsp" ${S.canWrite?"":"disabled"}>점검 결과 저장</button></div>
     <h2>점검 이력</h2><div id="histBox" class="muted">불러오는 중…</div>`);
   if(!db){$("#histBox").textContent="기록을 불러올 수 없어요.";return}
@@ -548,6 +548,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="addLight"){addLight();return}
   if(t.id==="gps"){if(!navigator.geolocation){toast("이 기기에서는 위치를 가져올 수 없어요.");return}navigator.geolocation.getCurrentPosition(p=>{$("#nLat").value=p.coords.latitude.toFixed(5);$("#nLng").value=p.coords.longitude.toFixed(5)},()=>toast("위치 권한이 없어 좌표를 직접 입력해 주세요."));return}
   if(t.id==="csv"||t.id==="csv2"){exportCSV(t.id==="csv")}
+  if(t.dataset.pick){const inp=document.getElementById(t.dataset.pick);if(inp){inp.value="";inp.click()}return}
   if(t.dataset.scan){openScanner(t.dataset.scan);return}
   if(t.id==="arBtn"){openAR();return}
   if(t.dataset.mapscope){openMap(t.dataset.mapscope);return}
@@ -564,9 +565,10 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classLi
 document.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
 document.addEventListener("change",async e=>{
   if(e.target.id==="dong"){S.dong=e.target.value;render();return}
-  if(e.target.id==="iPhoto"||e.target.id==="rPhoto"){
+  const pid=e.target.id.replace(/Lib$/,"");
+  if(pid==="iPhoto"||pid==="rPhoto"){
     const f=e.target.files&&e.target.files[0];if(!f)return;
-    try{const d=await compress(f);const prev=$(e.target.id==="iPhoto"?"#iPrev":"#rPrev");prev.src=d;prev.hidden=false;if(e.target.id==="iPhoto"&&draft)draft.photo=d;else e.target.dataset.photo="1",window.__rPhoto=d}
+    try{const d=await compress(f);const prev=$(pid==="iPhoto"?"#iPrev":"#rPrev");prev.src=d;prev.hidden=false;if(pid==="iPhoto"&&draft)draft.photo=d;else window.__rPhoto=d}
     catch(err){toast("사진을 읽지 못했어요. 다른 사진을 골라 주세요.")}
   }
 });
@@ -778,8 +780,8 @@ async function openScanner(ctx){
       <div class="reticle"></div><div id="camOv" class="ov"></div>
       <div id="camHint" class="muted" style="position:absolute;left:0;right:0;bottom:0;padding:8px 12px;background:rgba(0,0,0,.55);color:#fff;font-size:13px">카메라 준비 중…</div></div>
     <div class="split"><button class="btn ghost sm" id="scanStart">카메라 다시 켜기</button><button class="btn ghost sm" id="scanStop">카메라 끄기</button></div>
-    <label class="f">또는 표찰 사진으로 읽기</label>
-    <div class="photo-in"><input type="file" id="scanPhoto" accept="image/*" capture="environment"><img id="scanPrev" alt="" hidden></div>
+    <label class="f">또는 표찰 사진으로 읽기 <span class="muted" style="font-weight:400">(찍거나 앨범에서 골라요)</span></label>
+    <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="scanPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="scanPhotoLib">앨범에서 선택</button><input type="file" id="scanPhoto" accept="image/*" capture="environment" hidden><input type="file" id="scanPhotoLib" accept="image/*" hidden><img id="scanPrev" alt="" hidden></div>
     <p class="muted" id="scanNote">사진 인식은 AI가 표찰 글자를 읽어요. 처음 한 번 동의가 필요하고, 읽은 결과는 저장 전에 확인할 수 있어요.</p>
     <div id="scanResult"></div>`);
   if(!sampleNs&&window.claude&&window.claude.use){claude.use("sample").then(async s=>{sampleNs=s;try{const lim=s&&await s.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}const n=$("#scanNote");if(n&&!scan.sampleImg)n.textContent="이 화면에서는 사진 인식을 쓸 수 없어요. QR 스캔이나 직접 입력을 이용하세요."})}
@@ -903,7 +905,7 @@ async function readLabelPhoto(file){
     showScanResult({code:null,raw:msg,how:"photo"});
   }finally{scan.busy=false}
 }
-document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
+document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"||e.target.id==="scanPhotoLib"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
 const _close=closeSheet;closeSheet=function(){stopCam(false);stopTilt();arStop();if(gmap){gmap.remove();gmap=null;gmapMe=null}_close()};
 
 render();
