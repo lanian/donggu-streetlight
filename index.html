@@ -264,9 +264,10 @@ function localDb(){
     add:async rec=>{const id="l"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);(data[col]=data[col]||{})[id]=rec;save();return{id}}
   });
   const seed=async()=>{
-    if(Object.keys(data.lights).length)return;
-    try{const m=await (await fetch("seed/manifest.json")).json();
-      await Promise.all(m.map(async e=>{const d=await (await fetch("seed/"+e.file)).json();(data[e.collection]=data[e.collection]||{})[e.doc_id]=d}));save()}catch(e){}
+    try{const m=await (await fetch("seed/manifest.json",{cache:"no-cache"})).json();
+      const missing=m.filter(e=>!(data[e.collection]&&data[e.collection][e.doc_id]));
+      if(!missing.length)return;
+      await Promise.all(missing.map(async e=>{const d=await (await fetch("seed/"+e.file,{cache:"no-cache"})).json();(data[e.collection]=data[e.collection]||{})[e.doc_id]=d}));save()}catch(e){}
   };
   return{seed,collection:c=>query(c),doc:path=>{const [c,id]=path.split("/");return{
     set:async rec=>{(data[c]=data[c]||{})[id]=rec;save()},
@@ -355,7 +356,7 @@ function vInspect(){
   <p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${DUE_DAYS}일) 경과 ${due}개.</p>
   <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색"><button class="btn sm" data-scan="inspect" aria-label="표찰 스캔">표찰 스캔</button><button class="btn sm ghost" id="arBtn" aria-label="주변 등 찾기">주변 찾기</button>
   <select id="dong" aria-label="행정동">${["전체",...DONGS].map(d=>`<option ${d===S.dong?"selected":""}>${d}</option>`).join("")}</select></div>
-  <div class="list">${list.length?list.map(lightRow).join(""):`<div class="empty">${S.lights.length?"조건에 맞는 가로등이 없어요.":(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}</div>`;
+  <div class="list">${list.length?list.map(lightRow).join(""):`<div class="empty">${S.lights.length?`조건에 맞는 가로등이 없어요.<div class="muted" style="margin-top:4px">${[S.dong!=="전체"?`동: ${esc(S.dong)}`:"",S.stat?`상태: ${esc(S.stat)}`:"",S.q.trim()?`검색: ${esc(S.q)}`:""].filter(Boolean).join(" · ")}</div><div class="split" style="justify-content:center"><button class="btn ghost sm" id="clearFilters">필터 모두 해제</button></div>`:(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}</div>`;
 }
 function mapSVG(){
   const pts=S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
@@ -509,6 +510,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.close!==undefined){closeSheet();return}
   if(t.dataset.light){openLight(t.dataset.light);return}
   if(t.dataset.stat){S.stat=S.stat===t.dataset.stat?null:t.dataset.stat;render();return}
+  if(t.id==="clearFilters"){S.stat=null;S.dong="전체";S.q="";render();return}
   if(t.dataset.ck&&draft){draft.checks[t.dataset.ck]=t.dataset.v;t.parentElement.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b===t));suggestResult();return}
   if(t.id==="allOk"&&draft){CHECKS.forEach(([k])=>draft.checks[k]="ok");document.querySelectorAll("#checks .pair button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v==="ok"));draft.manual=false;suggestResult();return}
   if(t.dataset.res&&draft){draft.result=t.dataset.res;draft.manual=true;document.querySelectorAll("#resSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
