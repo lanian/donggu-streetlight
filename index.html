@@ -234,6 +234,13 @@ function parseCode(text){
   const u=t.match(/(?:no|num|id|code|lamp)=([^&\s]+)/i);if(u){const p=parseCode(decodeURIComponent(u[1]));if(p)return p}
   return null;
 }
+// OCR text is noisy: match the first two syllables of a dong name, tolerate a wrong third syllable
+function parseCodeFuzzy(text){
+  const p=parseCode(text);if(p)return p;
+  const t=String(text||"").replace(/[^\uac00-\ud7a3\d\s]/g," ").replace(/\s+/g," ");
+  for(const d of DONGS){const m=t.match(new RegExp(d.slice(0,2)+"\\s?[\uac00-\ud7a3]?\\s*(\\d{1,5})"));if(m)return{dong:d,num:m[1]}}
+  return null;
+}
 function parsePole(text){const m=String(text||"").replace(/\s+/g,"").match(/\d{4}[A-Z]\d{3}/);return m?m[0]:null}
 const LSTAT=["정상","점검필요","고장","수리중"];
 const RSTAT=["접수","처리중","완료"];
@@ -770,6 +777,46 @@ function arStop(reset=true){
   window.removeEventListener("deviceorientation",onHeading);window.removeEventListener("deviceorientationabsolute",onHeading);
 }
 
+/* ---------- on-device OCR fallback (Tesseract.js) for plain hosting ---------- */
+let ocrWorker=null,ocrLoading=null;
+function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=()=>rej(new Error("load "+src));document.head.appendChild(s)})}
+async function getOcr(onProgress){
+  if(ocrWorker)return ocrWorker;
+  if(!ocrLoading)ocrLoading=(async()=>{
+    if(!window.Tesseract){try{await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js")}catch(e){await loadScript("https://unpkg.com/tesseract.js@5/dist/tesseract.min.js")}}
+    const w=await Tesseract.createWorker(["kor","eng"],1,{logger:m=>onProgress&&onProgress(m)});
+    await w.setParameters({tessedit_char_whitelist:"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ가나다라마바사아자차카타파하간계구국군금기김남노농대도동두로리림마명문미민방백법보봉부북산삼상서석선성소수시신안양연영오운원유읍일장전정제조주중지진창천청충치판평포하학한해현화효후흥",preserve_interword_spaces:"1"});
+    ocrWorker=w;return w;
+  })();
+  return ocrLoading;
+}
+function prepForOcr(canvas){
+  // grayscale + contrast stretch; labels are dark text on light plates
+  const c=document.createElement("canvas"),g=c.getContext("2d");c.width=canvas.width;c.height=canvas.height;g.drawImage(canvas,0,0);
+  const d=g.getImageData(0,0,c.width,c.height),a=d.data;let lo=255,hi=0;
+  for(let i=0;i<a.length;i+=4){const v=(a[i]*.3+a[i+1]*.59+a[i+2]*.11)|0;a[i]=a[i+1]=a[i+2]=v;if(v<lo)lo=v;if(v>hi)hi=v}
+  const k=255/Math.max(1,hi-lo);for(let i=0;i<a.length;i+=4){const v=Math.min(255,Math.max(0,(a[i]-lo)*k));a[i]=a[i+1]=a[i+2]=v}
+  g.putImageData(d,0,0);return c;
+}
+async function ocrLabel(pic,file){
+  const box=$("#scanResult");if(scan.busy)return;scan.busy=true;
+  const say=t=>{if(box)box.innerHTML=`<div class="panel" style="margin-top:12px"><span class="muted">${esc(t)}</span></div>`};
+  say("글자 인식 준비 중… (처음 한 번은 한글 데이터를 내려받아요)");
+  try{
+    const w=await getOcr(m=>{if(m.status==="loading language traineddata"||m.status==="loading tesseract core")say(`인식 엔진 내려받는 중 ${Math.round((m.progress||0)*100)}%`);else if(m.status==="recognizing text")say(`표찰 읽는 중 ${Math.round((m.progress||0)*100)}%`)});
+    const big=await compressBlob(file,1600,.9);
+    const {data}=await w.recognize(prepForOcr(big.canvas));
+    const text=(data&&data.text||"").trim();
+    const code=parseCodeFuzzy(text),pole=parsePole(text.toUpperCase());
+    const kind=/보안/.test(text)?"보안등":/가로/.test(text)?"가로등":null;
+    showScanResult({code,pole,kind,raw:code?"":`기기 OCR 결과: ${text.replace(/\s+/g," ").slice(0,120)||"(글자를 찾지 못함)"} — 표찰이 화면에 크게, 정면으로 나오게 다시 찍어 보세요.`,how:"photo"});
+    const n=$("#scanNote");if(n)n.textContent="체험 모드에서는 기기 내 OCR로 읽어요. 공유 운영 링크의 AI 인식보다 정확도가 낮으니 번호를 꼭 확인하세요.";
+    if(code)toast("기기 OCR로 읽은 번호예요. 맞는지 확인해 주세요.");
+  }catch(e){
+    showScanResult({code:null,raw:"기기 내 글자 인식을 불러오지 못했어요(네트워크 필요). 번호를 직접 입력해 주세요.",how:"photo"});
+  }finally{scan.busy=false}
+}
+
 /* ---------- label scanner ---------- */
 let scan={ctx:null,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null};
 let sampleNs=null;
@@ -782,7 +829,7 @@ async function openScanner(ctx){
     <div class="split"><button class="btn ghost sm" id="scanStart">카메라 다시 켜기</button><button class="btn ghost sm" id="scanStop">카메라 끄기</button></div>
     <label class="f">또는 표찰 사진으로 읽기 <span class="muted" style="font-weight:400">(찍거나 앨범에서 골라요)</span></label>
     <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="scanPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="scanPhotoLib">앨범에서 선택</button><input type="file" id="scanPhoto" accept="image/*" capture="environment" hidden><input type="file" id="scanPhotoLib" accept="image/*" hidden><img id="scanPrev" alt="" hidden></div>
-    <p class="muted" id="scanNote">사진 인식은 AI가 표찰 글자를 읽어요. 처음 한 번 동의가 필요하고, 읽은 결과는 저장 전에 확인할 수 있어요.</p>
+    <p class="muted" id="scanNote">${window.claude&&window.claude.use?"사진 인식은 AI가 표찰 글자를 읽어요. 처음 한 번 동의가 필요하고, 읽은 결과는 저장 전에 확인할 수 있어요.":"체험 모드에서는 휴대폰 안에서 글자를 읽어요(기기 OCR). 처음 한 번 한글 인식 데이터를 내려받고, 정확도가 낮을 수 있으니 번호를 확인하세요."}</p>
     <div id="scanResult"></div>`);
   if(!sampleNs&&window.claude&&window.claude.use){claude.use("sample").then(async s=>{sampleNs=s;try{const lim=s&&await s.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}const n=$("#scanNote");if(n&&!scan.sampleImg)n.textContent="이 화면에서는 사진 인식을 쓸 수 없어요. QR 스캔이나 직접 입력을 이용하세요."})}
   startCam();
@@ -879,7 +926,7 @@ async function readLabelPhoto(file){
     if(r&&r.data&&parseCode(r.data)){onDecoded(r.data,"qr");return}
   }catch(e){}
   // 2) ask Claude to read the label text
-  if(!window.claude||!window.claude.use){showScanResult({code:null,raw:"체험 모드(GitHub Pages)에서는 AI 사진 인식이 동작하지 않아요. QR 스캔은 되고, 번호는 직접 입력할 수 있어요.",how:"photo"});return}
+  if(!window.claude||!window.claude.use){await ocrLabel(pic,file);return}
   if(!sampleNs){try{sampleNs=await claude.use("sample");const lim=await sampleNs.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}}
   if(!sampleNs||!scan.sampleImg){showScanResult({code:null,raw:"이 계정/화면에서는 사진 인식을 쓸 수 없어요. 번호를 직접 입력해 주세요.",how:"photo"});return}
   if(scan.busy)return;scan.busy=true;
