@@ -1,0 +1,247 @@
+[
+{
+"collection": "inspections",
+"doc_id": "sample-1",
+"file": "i_1.json"
+},
+{
+"collection": "inspections",
+"doc_id": "sample-2",
+"file": "i_2.json"
+},
+{
+"collection": "inspections",
+"doc_id": "sample-3",
+"file": "i_3.json"
+},
+{
+"collection": "inspections",
+"doc_id": "sample-4",
+"file": "i_4.json"
+},
+{
+"collection": "inspections",
+"doc_id": "sample-5",
+"file": "i_5.json"
+},
+{
+"collection": "inspections",
+"doc_id": "sample-6",
+"file": "i_6.json"
+},
+{
+"collection": "lights",
+"doc_id": "cj-367",
+"file": "l_cj-367.json"
+},
+{
+"collection": "lights",
+"doc_id": "cj-528",
+"file": "l_cj-528.json"
+},
+{
+"collection": "lights",
+"doc_id": "cj-536",
+"file": "l_cj-536.json"
+},
+{
+"collection": "lights",
+"doc_id": "cj-543",
+"file": "l_cj-543.json"
+},
+{
+"collection": "lights",
+"doc_id": "cj-687",
+"file": "l_cj-687.json"
+},
+{
+"collection": "lights",
+"doc_id": "dm-147",
+"file": "l_dm-147.json"
+},
+{
+"collection": "lights",
+"doc_id": "dm-355",
+"file": "l_dm-355.json"
+},
+{
+"collection": "lights",
+"doc_id": "dm-537",
+"file": "l_dm-537.json"
+},
+{
+"collection": "lights",
+"doc_id": "dm-642",
+"file": "l_dm-642.json"
+},
+{
+"collection": "lights",
+"doc_id": "dm-948",
+"file": "l_dm-948.json"
+},
+{
+"collection": "lights",
+"doc_id": "gr-100",
+"file": "l_gr-100.json"
+},
+{
+"collection": "lights",
+"doc_id": "gr-226",
+"file": "l_gr-226.json"
+},
+{
+"collection": "lights",
+"doc_id": "gr-30",
+"file": "l_gr-30.json"
+},
+{
+"collection": "lights",
+"doc_id": "gr-300",
+"file": "l_gr-300.json"
+},
+{
+"collection": "lights",
+"doc_id": "gr-77",
+"file": "l_gr-77.json"
+},
+{
+"collection": "lights",
+"doc_id": "hd-275",
+"file": "l_hd-275.json"
+},
+{
+"collection": "lights",
+"doc_id": "hd-276",
+"file": "l_hd-276.json"
+},
+{
+"collection": "lights",
+"doc_id": "hd-564",
+"file": "l_hd-564.json"
+},
+{
+"collection": "lights",
+"doc_id": "hd-644",
+"file": "l_hd-644.json"
+},
+{
+"collection": "lights",
+"doc_id": "hu-145",
+"file": "l_hu-145.json"
+},
+{
+"collection": "lights",
+"doc_id": "hu-476",
+"file": "l_hu-476.json"
+},
+{
+"collection": "lights",
+"doc_id": "hu-522",
+"file": "l_hu-522.json"
+},
+{
+"collection": "lights",
+"doc_id": "hu-543",
+"file": "l_hu-543.json"
+},
+{
+"collection": "lights",
+"doc_id": "js-17",
+"file": "l_js-17.json"
+},
+{
+"collection": "lights",
+"doc_id": "js-668",
+"file": "l_js-668.json"
+},
+{
+"collection": "lights",
+"doc_id": "js-828",
+"file": "l_js-828.json"
+},
+{
+"collection": "lights",
+"doc_id": "js-86",
+"file": "l_js-86.json"
+},
+{
+"collection": "lights",
+"doc_id": "jw-174",
+"file": "l_jw-174.json"
+},
+{
+"collection": "lights",
+"doc_id": "jw-554",
+"file": "l_jw-554.json"
+},
+{
+"collection": "lights",
+"doc_id": "jw-687",
+"file": "l_jw-687.json"
+},
+{
+"collection": "lights",
+"doc_id": "jw-898",
+"file": "l_jw-898.json"
+},
+{
+"collection": "lights",
+"doc_id": "sn-229",
+"file": "l_sn-229.json"
+},
+{
+"collection": "lights",
+"doc_id": "sn-667",
+"file": "l_sn-667.json"
+},
+{
+"collection": "lights",
+"doc_id": "sn-965",
+"file": "l_sn-965.json"
+},
+{
+"collection": "lights",
+"doc_id": "sn-978",
+"file": "l_sn-978.json"
+},
+{
+"collection": "lights",
+"doc_id": "ss-642",
+"file": "l_ss-642.json"
+},
+{
+"collection": "lights",
+"doc_id": "ss-651",
+"file": "l_ss-651.json"
+},
+{
+"collection": "lights",
+"doc_id": "ss-934",
+"file": "l_ss-934.json"
+},
+{
+"collection": "lights",
+"doc_id": "ss-944",
+"file": "l_ss-944.json"
+},
+{
+"collection": "reports",
+"doc_id": "sample-1",
+"file": "r_1.json"
+},
+{
+"collection": "reports",
+"doc_id": "sample-2",
+"file": "r_2.json"
+},
+{
+"collection": "reports",
+"doc_id": "sample-3",
+"file": "r_3.json"
+},
+{
+"collection": "reports",
+"doc_id": "sample-4",
+"file": "r_4.json"
+}
+]

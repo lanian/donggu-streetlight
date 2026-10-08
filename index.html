@@ -229,8 +229,43 @@ const byId=id=>S.lights.find(l=>l.id===id);
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("show"),2600)}
 
 /* ---------- data ---------- */
+/* Local fallback store (GitHub Pages / plain hosting): same API surface as the shared db,
+   backed by this browser's localStorage, seeded from seed/manifest.json. Not shared between devices. */
+function localDb(){
+  const KEY="donggu-streetlight-local";let data={lights:{},inspections:{},reports:{}};const subs=[];
+  try{const s=localStorage.getItem(KEY);if(s)data=JSON.parse(s)}catch(e){}
+  const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}subs.forEach(f=>f())};
+  const snapOf=(col,q)=>{let rows=Object.entries(data[col]||{}).map(([id,d])=>({id,data:()=>d}));
+    if(q.where)rows=rows.filter(r=>r.data()[q.where[0]]===q.where[2]);
+    if(q.order)rows.sort((x,y)=>{const a=x.data()[q.order[0]]||0,b=y.data()[q.order[0]]||0;return q.order[1]==="desc"?b-a:a-b});
+    if(q.lim)rows=rows.slice(0,q.lim);return{docs:rows}};
+  const query=(col,q={})=>({
+    where:(f,op,v)=>query(col,{...q,where:[f,op,v]}),orderBy:(f,d)=>query(col,{...q,order:[f,d]}),limit:n=>query(col,{...q,lim:n}),
+    get:async()=>snapOf(col,q),
+    onSnapshot:cb=>{const f=()=>cb(snapOf(col,q));subs.push(f);f();return()=>{const i=subs.indexOf(f);if(i>=0)subs.splice(i,1)}},
+    add:async rec=>{const id="l"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);(data[col]=data[col]||{})[id]=rec;save();return{id}}
+  });
+  const seed=async()=>{
+    if(Object.keys(data.lights).length)return;
+    try{const m=await (await fetch("seed/manifest.json")).json();
+      await Promise.all(m.map(async e=>{const d=await (await fetch("seed/"+e.file)).json();(data[e.collection]=data[e.collection]||{})[e.doc_id]=d}));save()}catch(e){}
+  };
+  return{seed,collection:c=>query(c),doc:path=>{const [c,id]=path.split("/");return{
+    set:async rec=>{(data[c]=data[c]||{})[id]=rec;save()},
+    update:async patch=>{data[c][id]=Object.assign(data[c][id]||{},patch);save()}}}};
+}
 async function boot(){
-  if(!window.claude||!window.claude.use){render();setSync(false,"오프라인 미리보기");return}
+  if(!window.claude||!window.claude.use){
+    db=localDb();S.me="local";setSync(false,"이 기기에만 저장");
+    const o=$("#sync");o.title="공유 서버 없이 이 브라우저에만 저장되는 체험 모드예요.";
+    await db.seed();
+    const sub=(q,key)=>q.onSnapshot(snap=>{S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));S.live=true;render()});
+    sub(db.collection("lights"),"lights");
+    sub(db.collection("inspections").orderBy("date","desc").limit(40),"insp");
+    sub(db.collection("reports").orderBy("createdAt","desc").limit(100),"reports");
+    dl={save:async({filename,data})=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([data],{type:"text/csv"}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)}};
+    return;
+  }
   try{
     [db,user]=await Promise.all([claude.use("db"),claude.use("user")]);
     claude.use("downloads").then(d=>{dl=d;if(S.tab==="admin")render()});
@@ -297,6 +332,7 @@ function vInspect(){
   const due=S.lights.filter(isDue).length;
   return `${tally(true)}
   ${!S.canWrite?`<div class="notice">보기 전용 권한이에요. 점검 결과를 저장하려면 공유 설정에서 참여자 권한을 받아야 해요.</div>`:""}
+  ${S.me==="local"?`<div class="notice">체험 모드예요. 점검·신고 내용은 이 브라우저에만 저장되고 다른 사람과 공유되지 않아요. 사진 인식은 공유 운영 링크에서만 동작해요.</div>`:""}
   <h2>점검할 가로등</h2>
   <p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${DUE_DAYS}일) 경과 ${due}개.</p>
   <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색"><button class="btn sm" data-scan="inspect" aria-label="표찰 스캔">표찰 스캔</button>
