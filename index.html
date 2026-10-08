@@ -8,6 +8,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script>if(!window.jsQR){document.write('<script src="vendor/jsQR.js"><\/script>')}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>if(!window.L){document.write('<script src="vendor/leaflet.js"><\/script>')}</script>
+<style>
+/* Leaflet 1.9.4 core CSS (BSD-2), image refs removed */
+.leaflet-pane, .leaflet-tile, .leaflet-marker-icon, .leaflet-marker-shadow, .leaflet-tile-container, .leaflet-pane > svg, .leaflet-pane > canvas, .leaflet-zoom-box, .leaflet-image-layer, .leaflet-layer { position: absolute; left: 0; top: 0; } .leaflet-container { overflow: hidden; } .leaflet-tile, .leaflet-marker-icon, .leaflet-marker-shadow { -webkit-user-select: none; -moz-user-select: none; user-select: none; -webkit-user-drag: none; } .leaflet-tile::selection { background: transparent; } .leaflet-safari .leaflet-tile { image-rendering: -webkit-optimize-contrast; } .leaflet-safari .leaflet-tile-container { width: 1600px; height: 1600px; -webkit-transform-origin: 0 0; } .leaflet-marker-icon, .leaflet-marker-shadow { display: block; } .leaflet-container .leaflet-overlay-pane svg { max-width: none !important; max-height: none !important; } .leaflet-container .leaflet-marker-pane img, .leaflet-container .leaflet-shadow-pane img, .leaflet-container .leaflet-tile-pane img, .leaflet-container img.leaflet-image-layer, .leaflet-container .leaflet-tile { max-width: none !important; max-height: none !important; width: auto; padding: 0; } .leaflet-container img.leaflet-tile { mix-blend-mode: plus-lighter; } .leaflet-container.leaflet-touch-zoom { -ms-touch-action: pan-x pan-y; touch-action: pan-x pan-y; } .leaflet-container.leaflet-touch-drag { -ms-touch-action: pinch-zoom; touch-action: none; touch-action: pinch-zoom; } .leaflet-container.leaflet-touch-drag.leaflet-touch-zoom { -ms-touch-action: none; touch-action: none; } .leaflet-container { -webkit-tap-highlight-color: transparent; } .leaflet-container a { -webkit-tap-highlight-color: rgba(51, 181, 229, 0.4); } .leaflet-tile { filter: inherit; visibility: hidden; } .leaflet-tile-loaded { visibility: inherit; } .leaflet-zoom-box { width: 0; height: 0; -moz-box-sizing: border-box; box-sizing: border-box; z-index: 800; } .leaflet-overlay-pane svg { -moz-user-select: none; } .leaflet-pane { z-index: 400; } .leaflet-tile-pane { z-index: 200; } .leaflet-overlay-pane { z-index: 400; } .leaflet-shadow-pane { z-index: 500; } .leaflet-marker-pane { z-index: 600; } .leaflet-tooltip-pane { z-index: 650; } .leaflet-popup-pane { z-index: 700; } .leaflet-map-pane canvas { z-index: 100; } .leaflet-map-pane svg { z-index: 200; } .leaflet-vml-shape { width: 1px; height: 1px; } .lvml { behavior: none; display: inline-block; position: absolute; } .leaflet-control { position: relative; z-index: 800; pointer-events: visiblePainted; pointer-events: auto; } .leaflet-top, .leaflet-bottom { position: absolute; z-index: 1000; pointer-events: none; } .leaflet-top { top: 0; } .leaflet-right { right: 0; } .leaflet-bottom { bottom: 0; } .leaflet-left { left: 0; } .leaflet-control { float: left; clear: both; } .leaflet-right .leaflet-control { float: right; } .leaflet-top .leaflet-control { margin-top: 10px; } .leaflet-bottom .leaflet-control { margin-bottom: 10px; } .leaflet-left .leaflet-control { margin-left: 10px; } .leaflet-right .leaflet-control { margin-right: 10px; } .leaflet-fade-anim .leaflet-popup { opacity: 0; -webkit-transition: opacity 0.2s linear; -moz-transition: opacity 0.2s linear; transition: opacity 0.2s linear; } .leaflet-fade-anim .leaflet-map-pane .leaflet-popup { opacity: 1; } .leaflet-zoom-animated { -webkit-transform-origin: 0 0; -ms-transform-origin: 0 0; transform-origin: 0 0; } svg.leaflet-zoom-animated { will-change: transform; } .leaflet-zoom-anim .leaflet-zoom-animated { -webkit-transition: -webkit-transform 0.25s cubic-bezier(0,0,0.25,1); -moz-transition: -moz-transform 0.25s cubic-bezier(0,0,0.25,1); transition: transform 0.25s cubic-bezier(0,0,0.25,1); } .leaflet-zoom-anim .leaflet-tile, .leaflet-pan-anim .leaflet-tile { -webkit-transition: none; -moz-transition: none; transition: none; } .leaflet-zoom-anim .leaflet-zoom-hide { visibility: hidden; } .leaflet-interactive { cursor: pointer; } .leaflet-grab { cursor: -webkit-grab; cursor: -moz-grab; cursor: grab; } .leaflet-crosshair, .leaflet-crosshair .leaflet-interactive { cursor: crosshair; } .leaflet-popup-pane, .leaflet-control { cursor: auto; } .leaflet-dragging .leaflet-grab, .leaflet-dragging .leaflet-grab .leaflet-interactive, .leaflet-dragging .leaflet-marker-draggable { cursor: move; cursor: -webkit-grabbing; cursor: -moz-grabbing; cursor: grabbing; } .leaflet-marker-icon, .leaflet-marker-shadow, .leaflet-image-layer, .leaflet-pane > svg path, .leaflet-tile-container { pointer-events: none; } .leaflet-marker-icon.leaflet-interactive, .leaflet-image-layer.leaflet-interactive, .leaflet-pane > svg path.leaflet-interactive, svg.leaflet-image-layer.leaflet-interactive path { pointer-events: visiblePainted; pointer-events: auto; } .leaflet-container { background: #ddd; outline-offset: 1px; } .leaflet-container a { color: #0078A8; } .leaflet-zoom-box { border: 2px dotted #38f; background: rgba(255,255,255,0.5); } .leaflet-container { font-family: "Helvetica Neue", Arial, Helvetica, sans-serif; font-size: 12px; font-size: 0.75rem; line-height: 1.5; } .leaflet-bar { box-shadow: 0 1px 5px rgba(0,0,0,0.65); border-radius: 4px; } .leaflet-bar a { background-color: #fff; border-bottom: 1px solid #ccc; width: 26px; height: 26px; line-height: 26px; display: block; text-align: center; text-decoration: none; color: black; } .leaflet-bar a, .leaflet-control-layers-toggle { background-position: 50% 50%; background-repeat: no-repeat; display: block; } .leaflet-bar a:hover, .leaflet-bar a:focus { background-color: #f4f4f4; } .leaflet-bar a:first-child { border-top-left-radius: 4px; border-top-right-radius: 4px; } .leaflet-bar a:last-child { border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; border-bottom: none; } .leaflet-bar a.leaflet-disabled { cursor: default; background-color: #f4f4f4; color: #bbb; } .leaflet-touch .leaflet-bar a { width: 30px; height: 30px; line-height: 30px; } .leaflet-touch .leaflet-bar a:first-child { border-top-left-radius: 2px; border-top-right-radius: 2px; } .leaflet-touch .leaflet-bar a:last-child { border-bottom-left-radius: 2px; border-bottom-right-radius: 2px; } .leaflet-control-zoom-in, .leaflet-control-zoom-out { font: bold 18px 'Lucida Console', Monaco, monospace; text-indent: 1px; } .leaflet-touch .leaflet-control-zoom-in, .leaflet-touch .leaflet-control-zoom-out { font-size: 22px; } .leaflet-control-layers { box-shadow: 0 1px 5px rgba(0,0,0,0.4); background: #fff; border-radius: 5px; } .leaflet-control-layers-toggle { background-image: none; width: 36px; height: 36px; } .leaflet-retina .leaflet-control-layers-toggle { background-image: none; background-size: 26px 26px; } .leaflet-touch .leaflet-control-layers-toggle { width: 44px; height: 44px; } .leaflet-control-layers .leaflet-control-layers-list, .leaflet-control-layers-expanded .leaflet-control-layers-toggle { display: none; } .leaflet-control-layers-expanded .leaflet-control-layers-list { display: block; position: relative; } .leaflet-control-layers-expanded { padding: 6px 10px 6px 6px; color: #333; background: #fff; } .leaflet-control-layers-scrollbar { overflow-y: scroll; overflow-x: hidden; padding-right: 5px; } .leaflet-control-layers-selector { margin-top: 2px; position: relative; top: 1px; } .leaflet-control-layers label { display: block; font-size: 13px; font-size: 1.08333em; } .leaflet-control-layers-separator { height: 0; border-top: 1px solid #ddd; margin: 5px -10px 5px -6px; } .leaflet-default-icon-path { background-image: none; } .leaflet-container .leaflet-control-attribution { background: #fff; background: rgba(255, 255, 255, 0.8); margin: 0; } .leaflet-control-attribution, .leaflet-control-scale-line { padding: 0 5px; color: #333; line-height: 1.4; } .leaflet-control-attribution a { text-decoration: none; } .leaflet-control-attribution a:hover, .leaflet-control-attribution a:focus { text-decoration: underline; } .leaflet-attribution-flag { display: inline !important; vertical-align: baseline !important; width: 1em; height: 0.6669em; } .leaflet-left .leaflet-control-scale { margin-left: 5px; } .leaflet-bottom .leaflet-control-scale { margin-bottom: 5px; } .leaflet-control-scale-line { border: 2px solid #777; border-top: none; line-height: 1.1; padding: 2px 5px 1px; white-space: nowrap; -moz-box-sizing: border-box; box-sizing: border-box; background: rgba(255, 255, 255, 0.8); text-shadow: 1px 1px #fff; } .leaflet-control-scale-line:not(:first-child) { border-top: 2px solid #777; border-bottom: none; margin-top: -2px; } .leaflet-control-scale-line:not(:first-child):not(:last-child) { border-bottom: 2px solid #777; } .leaflet-touch .leaflet-control-attribution, .leaflet-touch .leaflet-control-layers, .leaflet-touch .leaflet-bar { box-shadow: none; } .leaflet-touch .leaflet-control-layers, .leaflet-touch .leaflet-bar { border: 2px solid rgba(0,0,0,0.2); background-clip: padding-box; } .leaflet-popup { position: absolute; text-align: center; margin-bottom: 20px; } .leaflet-popup-content-wrapper { padding: 1px; text-align: left; border-radius: 12px; } .leaflet-popup-content { margin: 13px 24px 13px 20px; line-height: 1.3; font-size: 13px; font-size: 1.08333em; min-height: 1px; } .leaflet-popup-content p { margin: 17px 0; margin: 1.3em 0; } .leaflet-popup-tip-container { width: 40px; height: 20px; position: absolute; left: 50%; margin-top: -1px; margin-left: -20px; overflow: hidden; pointer-events: none; } .leaflet-popup-tip { width: 17px; height: 17px; padding: 1px; margin: -10px auto 0; pointer-events: auto; -webkit-transform: rotate(45deg); -moz-transform: rotate(45deg); -ms-transform: rotate(45deg); transform: rotate(45deg); } .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: white; color: #333; box-shadow: 0 3px 14px rgba(0,0,0,0.4); } .leaflet-container a.leaflet-popup-close-button { position: absolute; top: 0; right: 0; border: none; text-align: center; width: 24px; height: 24px; font: 16px/24px Tahoma, Verdana, sans-serif; color: #757575; text-decoration: none; background: transparent; } .leaflet-container a.leaflet-popup-close-button:hover, .leaflet-container a.leaflet-popup-close-button:focus { color: #585858; } .leaflet-popup-scrolled { overflow: auto; } .leaflet-oldie .leaflet-popup-content-wrapper { -ms-zoom: 1; } .leaflet-oldie .leaflet-popup-tip { width: 24px; margin: 0 auto; -ms-filter: "progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678)"; filter: progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678); } .leaflet-oldie .leaflet-control-zoom, .leaflet-oldie .leaflet-control-layers, .leaflet-oldie .leaflet-popup-content-wrapper, .leaflet-oldie .leaflet-popup-tip { border: 1px solid #999; } .leaflet-div-icon { background: #fff; border: 1px solid #666; } .leaflet-tooltip { position: absolute; padding: 6px; background-color: #fff; border: 1px solid #fff; border-radius: 3px; color: #222; white-space: nowrap; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none; pointer-events: none; box-shadow: 0 1px 3px rgba(0,0,0,0.4); } .leaflet-tooltip.leaflet-interactive { cursor: pointer; pointer-events: auto; } .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { position: absolute; pointer-events: none; border: 6px solid transparent; background: transparent; content: ""; } .leaflet-tooltip-bottom { margin-top: 6px; } .leaflet-tooltip-top { margin-top: -6px; } .leaflet-tooltip-bottom:before, .leaflet-tooltip-top:before { left: 50%; margin-left: -6px; } .leaflet-tooltip-top:before { bottom: 0; margin-bottom: -12px; border-top-color: #fff; } .leaflet-tooltip-bottom:before { top: 0; margin-top: -12px; margin-left: -6px; border-bottom-color: #fff; } .leaflet-tooltip-left { margin-left: -6px; } .leaflet-tooltip-right { margin-left: 6px; } .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { top: 50%; margin-top: -6px; } .leaflet-tooltip-left:before { right: 0; margin-right: -12px; border-left-color: #fff; } .leaflet-tooltip-right:before { left: 0; margin-left: -12px; border-right-color: #fff; } @media print { .leaflet-control { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
 <style>
 :root{
   --ink:#16233D; --ink-2:#4A5873; --line:#D8DEE8; --bg:#EEF1F5; --card:#FFFFFF;
@@ -166,6 +173,13 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .radar i{position:absolute;width:7px;height:7px;border-radius:50%;background:var(--c);transform:translate(-50%,-50%)}
 .radar .me{width:6px;height:6px;background:#fff;left:50%;top:50%}
 .arlist .row{padding:8px 12px}
+.gmap{height:62vh;min-height:380px;border-radius:12px;overflow:hidden;background:var(--bg);position:relative;z-index:0}
+.gmap .leaflet-popup-content{margin:10px 12px;font-family:var(--font);font-size:13px;line-height:1.45}
+.gmap .leaflet-popup-content-wrapper{border-radius:10px}
+.gmap .leaflet-container{font-family:var(--font)}
+.locbtn{position:absolute;right:10px;top:10px;z-index:500}
+.maplegend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--ink-2);margin-top:8px;align-items:center}
+.maplegend i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:4px;border:2px solid #fff;box-shadow:0 0 0 1px #0003}
 .reticle{position:absolute;left:50%;top:50%;width:150px;height:150px;transform:translate(-50%,-50%);border:2px solid #fff9;border-radius:14px;pointer-events:none}
 .tiltbox{text-align:center;padding:10px 0}
 .tilt-n{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
@@ -316,13 +330,21 @@ async function write(fn,okMsg){
     render();return false;
   }
 }
-function compress(file){
-  return new Promise((res,rej)=>{
-    const img=new Image(),url=URL.createObjectURL(file);
-    img.onload=()=>{const m=640,r=Math.min(1,m/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*r);c.height=Math.round(img.height*r);c.getContext("2d").drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);res(c.toDataURL("image/jpeg",.6))};
-    img.onerror=()=>{URL.revokeObjectURL(url);rej()};img.src=url;
-  });
+// Downscale a photo. Returns a JPEG data URL; compressBlob returns a Blob too (no data: fetch needed).
+async function decodeFile(file){
+  if(window.createImageBitmap){try{return await createImageBitmap(file,{imageOrientation:"from-image"})}catch(e){}}
+  return new Promise((res,rej)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{URL.revokeObjectURL(url);res(img)};img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("decode"))};img.src=url});
 }
+async function compressBlob(file,max=640,q=.6){
+  const img=await decodeFile(file);
+  const w=img.width||img.naturalWidth,hh=img.height||img.naturalHeight;
+  const r=Math.min(1,max/Math.max(w,hh));const c=document.createElement("canvas");c.width=Math.round(w*r);c.height=Math.round(hh*r);
+  c.getContext("2d").drawImage(img,0,0,c.width,c.height);if(img.close)img.close();
+  const url=c.toDataURL("image/jpeg",q);
+  const blob=await new Promise(res=>c.toBlob(b=>res(b),"image/jpeg",q));
+  return{url,blob:blob||null,canvas:c};
+}
+async function compress(file){return (await compressBlob(file)).url}
 
 /* ---------- render ---------- */
 function render(){
@@ -354,7 +376,7 @@ function vInspect(){
   ${S.me==="local"?`<div class="notice">체험 모드예요. 점검·신고 내용은 이 브라우저에만 저장되고 다른 사람과 공유되지 않아요. 사진 인식은 공유 운영 링크에서만 동작해요.</div>`:""}
   <h2>점검할 가로등</h2>
   <p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${DUE_DAYS}일) 경과 ${due}개.</p>
-  <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색"><button class="btn sm" data-scan="inspect" aria-label="표찰 스캔">표찰 스캔</button><button class="btn sm ghost" id="arBtn" aria-label="주변 등 찾기">주변 찾기</button>
+  <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색"><button class="btn sm" data-scan="inspect" aria-label="표찰 스캔">표찰 스캔</button><button class="btn sm ghost" id="arBtn" aria-label="주변 등 찾기">주변 찾기</button><button class="btn sm ghost" id="mapBtn" data-mapscope="filtered" aria-label="지도로 보기">지도</button>
   <select id="dong" aria-label="행정동">${["전체",...DONGS].map(d=>`<option ${d===S.dong?"selected":""}>${d}</option>`).join("")}</select></div>
   <div class="list">${list.length?list.map(lightRow).join(""):`<div class="empty">${S.lights.length?`조건에 맞는 가로등이 없어요.<div class="muted" style="margin-top:4px">${[S.dong!=="전체"?`동: ${esc(S.dong)}`:"",S.stat?`상태: ${esc(S.stat)}`:"",S.q.trim()?`검색: ${esc(S.q)}`:""].filter(Boolean).join(" · ")}</div><div class="split" style="justify-content:center"><button class="btn ghost sm" id="clearFilters">필터 모두 해제</button></div>`:(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}</div>`;
 }
@@ -398,7 +420,7 @@ function vAdmin(){
   const rOpen=S.reports.filter(r=>r.status!=="완료");
   const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;
   return `${tally(false)}
-  <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건 · 미처리 신고 ${rOpen.length}건</span></div>${mapSVG()}</div>
+  <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건 · 미처리 신고 ${rOpen.length}건</span></div>${mapSVG()}<div class="split"><button class="btn sm" data-mapscope="all">지도에서 보기</button><button class="btn ghost sm" data-mapscope="open">조치 필요만 지도에서</button></div></div>
   <h2>조치가 필요한 가로등 <span class="muted">${open.length}</span></h2>
   <div class="list">${open.length?open.map(lightRow).join(""):`<div class="empty">모든 가로등이 정상이에요.</div>`}</div>
   <h2>주민 신고 <span class="muted">미처리 ${rOpen.length}</span></h2>
@@ -528,6 +550,9 @@ document.addEventListener("click",async e=>{
   if(t.id==="csv"||t.id==="csv2"){exportCSV(t.id==="csv")}
   if(t.dataset.scan){openScanner(t.dataset.scan);return}
   if(t.id==="arBtn"){openAR();return}
+  if(t.dataset.mapscope){openMap(t.dataset.mapscope);return}
+  if(t.id==="mapLoc"){mapLocate();return}
+  if(t.dataset.mapOpen){closeSheet();openLight(t.dataset.mapOpen);return}
   if(t.dataset.arOpen){arStop();openLight(t.dataset.arOpen);return}
   if(t.id==="arRetry"){arStart();return}
   if(t.id==="scanStop"){stopCam();return}
@@ -622,6 +647,42 @@ function keepTilt(){
   stopTilt();
 }
 function stopTilt(){tilt.on=false;window.removeEventListener("deviceorientation",onTilt);const b=$("#tiltBox");if(b){b.hidden=true;b.innerHTML=""}}
+
+/* ---------- street map (Leaflet + OpenStreetMap) ---------- */
+let gmap=null,gmapLayer=null,gmapMe=null;
+const STAT_COL={"정상":"#2C7A57","점검필요":"#B86E00","고장":"#C2372B","수리중":"#2F5DA8"};
+function openMap(scope){
+  const pts=(scope==="filtered"?filtered():scope==="open"?S.lights.filter(l=>l.status!=="정상"):S.lights).filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
+  const title=scope==="filtered"?"지도 · 현재 목록":scope==="open"?"지도 · 조치 필요":"지도 · 전체";
+  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted">${pts.length}개</span></h3><div class="muted">마커를 누르면 상태와 주소가 떠요. 고장·수리중은 위에 그려져요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+    <div class="gmap" id="gmap"><button class="btn sm locbtn" id="mapLoc">내 위치</button></div>
+    <div class="maplegend">${LSTAT.map(s=>`<span class="st-${s}"><i></i>${s}</span>`).join("")}<span id="mapNote" style="margin-left:auto"></span></div>
+    ${pts.length?"":`<div class="empty" style="margin-top:10px">위치 정보가 있는 등이 없어요.</div>`}`);
+  if(!window.L){$("#mapNote").textContent="지도 라이브러리를 불러오지 못했어요.";return}
+  if(gmap){gmap.remove();gmap=null}
+  gmap=L.map("gmap",{zoomControl:true,attributionControl:true,tap:true});
+  const tiles=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(gmap);
+  let errs=0;tiles.on("tileerror",()=>{if(++errs===4)$("#mapNote").textContent="지도 배경을 불러올 수 없어요. 마커 위치만 표시돼요."});
+  gmapLayer=L.layerGroup().addTo(gmap);
+  const order=[...pts].sort((a,b)=>({"정상":0,"점검필요":1,"수리중":2,"고장":3}[a.status]-{"정상":0,"점검필요":1,"수리중":2,"고장":3}[b.status]));
+  order.forEach(l=>{
+    const m=L.circleMarker([l.lat,l.lng],{radius:l.status==="정상"?6:8,color:"#fff",weight:2,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});
+    m.bindPopup(`<b style="font-size:14px">${esc(l.code)}</b> <span style="color:${STAT_COL[l.status]};font-weight:600">${esc(l.status)}</span><br>${esc(l.kind||"가로등")} · ${esc(l.lampType||"")}<br>${esc(l.address)}<br><span style="color:#667">마지막 점검 ${fmtD(l.lastInspected)}${isDue(l)?" · 주기 경과":""}</span><br><button class="btn sm" style="margin-top:6px" data-map-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button>`);
+    m.addTo(gmapLayer);
+  });
+  if(pts.length)gmap.fitBounds(L.latLngBounds(pts.map(l=>[l.lat,l.lng])).pad(.15),{maxZoom:17});
+  else gmap.setView([35.146,126.923],13);
+  setTimeout(()=>gmap&&gmap.invalidateSize(),250);
+}
+function mapLocate(){
+  if(!gmap||!navigator.geolocation){toast("위치를 가져올 수 없어요.");return}
+  navigator.geolocation.getCurrentPosition(p=>{
+    const ll=[p.coords.latitude,p.coords.longitude];
+    if(gmapMe)gmapMe.remove();
+    gmapMe=L.layerGroup([L.circle(ll,{radius:p.coords.accuracy,color:"#2F5DA8",weight:1,fillOpacity:.08}),L.circleMarker(ll,{radius:7,color:"#fff",weight:2,fillColor:"#2F5DA8",fillOpacity:1})]).addTo(gmap);
+    gmap.setView(ll,Math.max(gmap.getZoom(),16));
+  },()=>toast("위치 권한이 없어요."),{enableHighAccuracy:true,timeout:10000});
+}
 
 /* ---------- AR finder: lights around you, over the camera view ---------- */
 const AR_RANGE=200,AR_FOV=62;
@@ -805,21 +866,26 @@ function applyScan(what){
   if(what==="register"){S.tab="admin";render();const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}d.value=dong;$("#nNum").value=num;if(r.pole)$("#nPole").value=r.pole;if(r.kind&&KINDS.includes(r.kind))$("#nKind").value=r.kind;$("#nAddr").scrollIntoView({behavior:"smooth",block:"center"});$("#nAddr").focus();toast(`${codeOf(dong,num)} 번호를 넣었어요. 위치를 적고 등록하세요.`)}
 }
 async function readLabelPhoto(file){
-  const prev=$("#scanPrev");try{prev.src=await compress(file);prev.hidden=false}catch(e){}
-  const box=$("#scanResult");
+  const prev=$("#scanPrev"),box=$("#scanResult");
+  let pic;
+  try{pic=await compressBlob(file,1024,.8);prev.src=pic.url;prev.hidden=false}
+  catch(e){showScanResult({code:null,raw:`이 사진 파일을 열 수 없어요(${file.type||"형식 미상"}). 카메라로 바로 찍거나 JPG로 올려 주세요.`,how:"photo"});return}
   // 1) try QR in the still photo first
   try{
-    const img=new Image();img.src=prev.src;await img.decode();
-    const c=document.createElement("canvas");c.width=img.width;c.height=img.height;const g=c.getContext("2d");g.drawImage(img,0,0);
+    const c=pic.canvas,g=c.getContext("2d");
     const d=g.getImageData(0,0,c.width,c.height);const r=window.jsQR&&jsQR(d.data,c.width,c.height);
     if(r&&r.data&&parseCode(r.data)){onDecoded(r.data,"qr");return}
   }catch(e){}
   // 2) ask Claude to read the label text
-  if(!sampleNs||!scan.sampleImg){showScanResult({code:null,raw:"사진 인식을 쓸 수 없는 화면이에요. 번호를 직접 입력해 주세요.",how:"photo"});return}
+  if(!window.claude||!window.claude.use){showScanResult({code:null,raw:"체험 모드(GitHub Pages)에서는 AI 사진 인식이 동작하지 않아요. QR 스캔은 되고, 번호는 직접 입력할 수 있어요.",how:"photo"});return}
+  if(!sampleNs){try{sampleNs=await claude.use("sample");const lim=await sampleNs.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}}
+  if(!sampleNs||!scan.sampleImg){showScanResult({code:null,raw:"이 계정/화면에서는 사진 인식을 쓸 수 없어요. 번호를 직접 입력해 주세요.",how:"photo"});return}
   if(scan.busy)return;scan.busy=true;
   box.innerHTML=`<div class="panel" style="margin-top:12px"><span class="muted">표찰을 읽는 중…</span></div>`;
   try{
-    const blob=await (await fetch(prev.src)).blob();
+    let blob=pic.blob;
+    if(!blob){const small=await compressBlob(file,800,.7);blob=small.blob}
+    if(!blob)throw Object.assign(new Error("blob"),{code:"no_blob"});
     const out=await sampleNs.json(`사진은 한국 광주광역시 동구의 가로등 또는 보안등 기둥(전주)입니다. 기둥에 붙은 표찰을 읽어 주세요.
 - 파란색 "고장신고" 표찰: 동 이름(예: 산수동, 충장동, 동명동, 계림동, 지산동, 서남동, 학동, 학운동, 지원동)과 숫자 번호가 있습니다. 종류는 표찰에 "가로등" 또는 "보안등"으로 적혀 있습니다.
 - 한국전력 전주번호판(흰색, "위험" 표시): 숫자4자리+영문1자+숫자3자리 형식(예: 9792C742)입니다.
@@ -832,12 +898,13 @@ async function readLabelPhoto(file){
     showScanResult({code:dong&&num?{dong,num}:null,pole,kind:out&&out.kind||null,raw:dong&&num?"":`인식 결과: ${JSON.stringify(out)}`,how:"photo"});
     if(out&&out.confidence==="low"&&dong&&num)toast("표찰이 흐려 번호가 틀릴 수 있어요. 확인해 주세요.");
   }catch(e){
-    const msg=e&&e.code==="not_granted"?"사진 인식에 동의하지 않아 번호를 읽지 못했어요. 직접 입력해 주세요.":e&&e.code==="rate_limited"?"요청이 많아요. 잠시 후 다시 시도해 주세요.":"사진에서 표찰을 읽지 못했어요. 더 가까이서 다시 찍어 주세요.";
+    const code=e&&e.code;
+    const msg=code==="not_granted"?"사진 인식에 동의하지 않아 번호를 읽지 못했어요. 직접 입력해 주세요.":code==="rate_limited"?"요청이 많아요. 잠시 후 다시 시도해 주세요.":code==="image_rejected"||code==="images_unavailable"?"이 사진 형식은 보낼 수 없어요. 카메라로 바로 찍은 JPG로 다시 시도해 주세요.":`사진에서 표찰을 읽지 못했어요. 더 가까이서 다시 찍어 주세요.${code?` (${code})`:""}`;
     showScanResult({code:null,raw:msg,how:"photo"});
   }finally{scan.busy=false}
 }
 document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
-const _close=closeSheet;closeSheet=function(){stopCam(false);stopTilt();arStop();_close()};
+const _close=closeSheet;closeSheet=function(){stopCam(false);stopTilt();arStop();if(gmap){gmap.remove();gmap=null;gmapMe=null}_close()};
 
 render();
 boot();
