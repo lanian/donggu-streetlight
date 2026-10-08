@@ -243,5 +243,65 @@
 "collection": "reports",
 "doc_id": "sample-4",
 "file": "r_4.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-101",
+"file": "l_hs-101.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-102",
+"file": "l_hs-102.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-103",
+"file": "l_hs-103.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-104",
+"file": "l_hs-104.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-105",
+"file": "l_hs-105.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-106",
+"file": "l_hs-106.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-107",
+"file": "l_hs-107.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-108",
+"file": "l_hs-108.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-109",
+"file": "l_hs-109.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-110",
+"file": "l_hs-110.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-111",
+"file": "l_hs-111.json"
+},
+{
+"collection": "lights",
+"doc_id": "hs-112",
+"file": "l_hs-112.json"
 }
 ]
