@@ -191,6 +191,12 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .locbtn{position:absolute;right:10px;top:10px;z-index:500}
 .maplegend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--ink-2);margin-top:8px;align-items:center}
 .maplegend i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:4px;border:2px solid #fff;box-shadow:0 0 0 1px #0003}
+.stage{background:#000;border-radius:12px;overflow:hidden;display:flex;justify-content:center}
+.stage canvas{display:block;max-width:100%}
+.stage-status{margin:8px 0 0;display:flex;align-items:center;gap:8px}
+.spin{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--sodium);border-radius:50%;animation:sp .8s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
 .reticle{position:absolute;left:50%;top:50%;width:150px;height:150px;transform:translate(-50%,-50%);border:2px solid #fff9;border-radius:14px;pointer-events:none}
 .tiltbox{text-align:center;padding:10px 0}
 .tilt-n{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
@@ -619,6 +625,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="scanStart"){startCam();return}
   if(t.dataset.apply){applyScan(t.dataset.apply);return}
   if(t.id==="cropManual"){openManualCrop();return}
+  if(t.id==="camBack"){backToCam();return}
   if(t.id==="pkGo"){confirmPick();return}
 });
 $("#sheetBg").addEventListener("click",()=>closeSheet());
@@ -922,16 +929,15 @@ function fuzzyRoad(tokens){const rs=knownRoads();for(const r of rs){const k=r.re
 let ocrState={src:null,box:null};
 async function ocrLabel(pic,file,manualBox){
   const box0=$("#scanResult");if(scan.busy)return;scan.busy=true;
-  const say=t=>{const b=$("#scanResult");if(b)b.innerHTML=`<div class="panel" style="margin-top:12px"><span class="muted">${esc(t)}</span></div>`};
+  const say=t=>{stageStatus(t);const b=$("#scanResult");if(b)b.innerHTML=""};
   try{
     let src=ocrState.src;
-    if(!src||!manualBox){const big=await compressBlob(file,2400,.92);src=big.canvas;ocrState.src=src}
-    const box=manualBox||findPlate(src)||{x:src.width*.15,y:src.height*.15,w:src.width*.7,h:src.height*.7};ocrState.box=box;
-    const auto=!manualBox&&!!findPlate(src);
+    if(!src){const big=await compressBlob(file,2400,.92);src=big.canvas;ocrState.src=src}
+    const found=manualBox||findPlate(src);const box=found||{x:src.width*.15,y:src.height*.15,w:src.width*.7,h:src.height*.7};ocrState.box=box;
+    const auto=!!found;showStage(src,box,"");
     const plate=cropTo(src,box,1000);
-    // 1) QR inside the plate crop (small QRs decode better after cropping)
-    if(window.jsQR){for(const k of [1,1.6]){const c=k===1?plate:cropTo(src,box,1600);const g=c.getContext("2d");const d=g.getImageData(0,0,c.width,c.height);const r=jsQR(d.data,c.width,c.height,{inversionAttempts:"attemptBoth"});if(r&&r.data&&parseCode(r.data)){scan.busy=false;onDecoded(r.data,"qr");return}}}
-    say(auto?"표찰을 찾았어요. 글자 인식 준비 중…":"표찰 위치를 자동으로 찾지 못해 가운데를 읽어요. 준비 중…");
+    if(manualBox){const g=plate.getContext("2d");const d=g.getImageData(0,0,plate.width,plate.height);const r=window.jsQR&&jsQR(d.data,plate.width,plate.height,{inversionAttempts:"attemptBoth"});if(r&&r.data&&parseCode(r.data)){scan.busy=false;onDecoded(r.data,"qr");return}}
+    say(auto?"표찰 영역의 글자를 읽을 준비 중…":"표찰 위치를 자동으로 찾지 못해 가운데를 읽어요. 준비 중…");
     const w=await getOcr(m=>{if(m.status==="loading language traineddata"||m.status==="loading tesseract core")say(`인식 엔진 내려받는 중 ${Math.round((m.progress||0)*100)}%`);else if(m.status==="recognizing text")say(`표찰 읽는 중 ${Math.round((m.progress||0)*100)}%`)});
     const gray=grayContrast(plate);
     // 2) digits pass: biggest digit token wins
@@ -966,9 +972,11 @@ async function ocrLabel(pic,file,manualBox){
     if(kind==="가로등"&&hy){const [a,b]=numTok.split("-");code={kind,road:road||"",main:a,sub:b}}
     else if(kind==="보안등"&&numTok&&dong)code={kind,dong,num:numTok.replace(/\D/g,"")};
     const n=$("#scanNote");if(n)n.textContent="체험 모드에서는 휴대폰 안에서 글자를 읽어요(기기 OCR). 번호를 꼭 확인하세요.";
+    stageStatus(code?"읽었어요. 아래에서 확인하세요.":"번호를 읽지 못했어요. 아래에서 직접 적거나 영역을 지정하세요.",false);
     showScanResult({code,kind,how:"photo",plate:plate.toDataURL("image/jpeg",.7),pick:{kind:kind||"보안등",num:numTok,dong:dong||"",road:road||"",auto},raw:""});
     if(code)toast("기기 OCR로 읽은 번호예요. 표찰과 맞는지 확인해 주세요.");
   }catch(e){
+    stageStatus("",false);
     showScanResult({code:null,raw:"기기 내 글자 인식을 불러오지 못했어요(네트워크 필요). 아래에서 번호를 직접 입력해 주세요.",how:"photo",pick:{kind:"보안등",num:"",dong:"",road:""}});
   }finally{scan.busy=false}
 }
@@ -1003,12 +1011,14 @@ let sampleNs=null;
 async function openScanner(ctx){
   scan={ctx,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null};
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">표찰 스캔</h3><div class="muted">표찰 QR을 비추면 그 등의 상태가 화면 위에 바로 떠요. QR이 없거나 흐리면 사진으로 읽어요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
-    <div class="panel" style="padding:0;overflow:hidden;position:relative;background:#000"><video id="cam" playsinline muted style="width:100%;max-height:52vh;display:block;object-fit:cover"></video>
+    <div id="camPanel"><div class="panel" style="padding:0;overflow:hidden;position:relative;background:#000"><video id="cam" playsinline muted style="width:100%;max-height:52vh;display:block;object-fit:cover"></video>
       <div class="reticle"></div><div id="camOv" class="ov"></div>
       <div id="camHint" class="muted" style="position:absolute;left:0;right:0;bottom:0;padding:8px 12px;background:rgba(0,0,0,.55);color:#fff;font-size:13px">카메라 준비 중…</div></div>
-    <div class="split"><button class="btn ghost sm" id="scanStart">카메라 다시 켜기</button><button class="btn ghost sm" id="scanStop">카메라 끄기</button></div>
-    <label class="f">또는 표찰 사진으로 읽기 <span class="muted" style="font-weight:400">(찍거나 앨범에서 골라요)</span></label>
-    <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="scanPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="scanPhotoLib">앨범에서 선택</button><input type="file" id="scanPhoto" accept="image/*" capture="environment" hidden><input type="file" id="scanPhotoLib" accept="image/*" hidden><img id="scanPrev" alt="" hidden></div>
+    <div class="split"><button class="btn ghost sm" id="scanStart">카메라 다시 켜기</button><button class="btn ghost sm" id="scanStop">카메라 끄기</button></div></div>
+    <div id="photoStage" hidden><div class="stage"><canvas id="stageCanvas"></canvas></div><div id="stageStatus" class="muted stage-status" hidden></div>
+      <div class="split"><button class="btn ghost sm" data-pick="scanPhotoLib">다른 사진 고르기</button><button class="btn ghost sm" data-pick="scanPhoto">다시 찍기</button><button class="btn ghost sm" id="camBack">카메라로 돌아가기</button></div></div>
+    <div id="photoPick"><label class="f">또는 표찰 사진으로 읽기 <span class="muted" style="font-weight:400">(찍거나 앨범에서 골라요)</span></label>
+    <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="scanPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="scanPhotoLib">앨범에서 선택</button><input type="file" id="scanPhoto" accept="image/*" capture="environment" hidden><input type="file" id="scanPhotoLib" accept="image/*" hidden><img id="scanPrev" alt="" hidden style="display:none"></div></div>
     <p class="muted" id="scanNote">${window.claude&&window.claude.use?"사진 인식은 AI가 표찰 글자를 읽어요. 처음 한 번 동의가 필요하고, 읽은 결과는 저장 전에 확인할 수 있어요.":"체험 모드에서는 휴대폰 안에서 글자를 읽어요(기기 OCR). 처음 한 번 한글 인식 데이터를 내려받고, 정확도가 낮을 수 있으니 번호를 확인하세요."}</p>
     <div id="scanResult"></div>`);
   if(!sampleNs&&window.claude&&window.claude.use){claude.use("sample").then(async s=>{sampleNs=s;try{const lim=s&&await s.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}const n=$("#scanNote");if(n&&!scan.sampleImg)n.textContent="이 화면에서는 사진 인식을 쓸 수 없어요. QR 스캔이나 직접 입력을 이용하세요."})}
@@ -1016,6 +1026,7 @@ async function openScanner(ctx){
 }
 async function startCam(){
   stopCam(false);scan.liveKey=null;const o=$("#camOv");if(o)o.className="ov";
+  {const cp=$("#camPanel"),st=$("#photoStage"),pk=$("#photoPick");if(cp)cp.hidden=false;if(st)st.hidden=true;if(pk)pk.hidden=false}
   const v=$("#cam"),hint=$("#camHint");if(!v)return;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){hint.textContent="이 기기에서는 카메라를 쓸 수 없어요. 아래에서 사진으로 읽어 주세요.";return}
   try{
@@ -1104,34 +1115,54 @@ function applyScan(what){
     $("#nKind").value=p.kind;$("#nNum").value=p.kind==="가로등"?`${p.main}-${p.sub}`:p.num;$("#nNum").placeholder=p.kind==="가로등"?"65-5":"642";$("#nRoadBox").hidden=p.kind!=="가로등";if(p.road)$("#nRoad").value=p.road;if(p.dong)d.value=p.dong;if(r.pole)$("#nPole").value=r.pole;
     $("#nAddr").scrollIntoView({behavior:"smooth",block:"center"});$("#nAddr").focus();toast(`${txt} 번호를 넣었어요. ${p.kind==="가로등"?"행정동과 ":""}위치를 적고 등록하세요.`)}
 }
+/* photo stage: shown instead of the camera once a photo is chosen */
+function showStage(src,box,status){
+  const cp=$("#camPanel"),st=$("#photoStage");if(!cp||!st)return;
+  cp.hidden=true;st.hidden=false;const pk=$("#photoPick");if(pk)pk.hidden=true;
+  const c=$("#stageCanvas");const maxW=st.clientWidth||340;const k=Math.min(1,maxW/src.width,(window.innerHeight*.42)/src.height);
+  c.width=Math.round(src.width*k);c.height=Math.round(src.height*k);c.style.width=c.width+"px";c.style.height=c.height+"px";
+  const g=c.getContext("2d");g.drawImage(src,0,0,c.width,c.height);
+  if(box){g.strokeStyle="#E89A0C";g.lineWidth=3;g.setLineDash([8,5]);g.strokeRect(box.x*k,box.y*k,box.w*k,box.h*k);g.setLineDash([]);
+    g.fillStyle="rgba(0,0,0,.35)";g.fillRect(0,0,c.width,box.y*k);g.fillRect(0,(box.y+box.h)*k,c.width,c.height-(box.y+box.h)*k);g.fillRect(0,box.y*k,box.x*k,box.h*k);g.fillRect((box.x+box.w)*k,box.y*k,c.width-(box.x+box.w)*k,box.h*k)}
+  stageStatus(status);
+  st.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function stageStatus(t,spin=true){const s=$("#stageStatus");if(!s)return;s.innerHTML=t?`${spin?'<span class="spin"></span>':""}${esc(t)}`:"";s.hidden=!t}
+function backToCam(){const cp=$("#camPanel"),st=$("#photoStage");if(cp)cp.hidden=false;if(st)st.hidden=true;const r=$("#scanResult");if(r)r.innerHTML="";startCam()}
 async function readLabelPhoto(file){
-  const prev=$("#scanPrev"),box=$("#scanResult");
-  let pic;
-  try{pic=await compressBlob(file,1024,.8);prev.src=pic.url;prev.hidden=false}
-  catch(e){showScanResult({code:null,raw:`이 사진 파일을 열 수 없어요(${file.type||"형식 미상"}). 카메라로 바로 찍거나 JPG로 올려 주세요.`,how:"photo"});return}
-  // 1) try QR in the still photo first
+  if(scan.busy){toast("아직 앞 사진을 읽는 중이에요.");return}
+  scan.busy=true;stopCam(false);
+  const box=$("#scanResult");if(box)box.innerHTML="";
+  let src;
+  try{const big=await compressBlob(file,2400,.92);src=big.canvas;ocrState.src=src}
+  catch(e){scan.busy=false;showScanResult({code:null,raw:`이 사진 파일을 열 수 없어요(${file.type||"형식 미상"}). 카메라로 바로 찍거나 JPG로 올려 주세요.`,how:"photo",pick:{kind:"보안등",num:"",dong:"",road:""}});return}
+  const plateBox=findPlate(src);ocrState.box=plateBox;
+  showStage(src,plateBox,plateBox?"표찰을 찾았어요. QR 확인 중…":"표찰 틀을 자동으로 찾지 못했어요. 사진 전체를 읽어요…");
+  // 1) QR: plate crop first (small QRs decode better after cropping), then the whole photo
   try{
-    const c=pic.canvas,g=c.getContext("2d");
-    const d=g.getImageData(0,0,c.width,c.height);const r=window.jsQR&&jsQR(d.data,c.width,c.height);
-    if(r&&r.data&&parseCode(r.data)){onDecoded(r.data,"qr");return}
+    const tries=[];if(plateBox){tries.push(cropTo(src,plateBox,1000));tries.push(cropTo(src,plateBox,1600))}
+    const whole=cropTo(src,{x:0,y:0,w:src.width,h:src.height},Math.min(1600,src.width));tries.push(whole);
+    for(const c of tries){const d=c.getContext("2d").getImageData(0,0,c.width,c.height);const r=window.jsQR&&jsQR(d.data,c.width,c.height,{inversionAttempts:"attemptBoth"});if(r&&r.data&&parseCode(r.data)){scan.busy=false;stageStatus("QR에서 읽었어요",false);onDecoded(r.data,"qr");return}}
   }catch(e){}
-  // 2) ask Claude to read the label text
-  if(!window.claude||!window.claude.use){await ocrLabel(pic,file);return}
-  if(!sampleNs){try{sampleNs=await claude.use("sample");const lim=await sampleNs.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}}
-  if(!sampleNs||!scan.sampleImg){showScanResult({code:null,raw:"이 계정/화면에서는 사진 인식을 쓸 수 없어요. 번호를 직접 입력해 주세요.",how:"photo"});return}
-  if(scan.busy)return;scan.busy=true;
-  box.innerHTML=`<div class="panel" style="margin-top:12px"><span class="muted">표찰을 읽는 중…</span></div>`;
+  // 2) demo mode → on-device OCR
+  if(!window.claude||!window.claude.use){scan.busy=false;await ocrLabel(null,file,plateBox||undefined);return}
+  // 3) shared link → Claude reads the plate (send the crop at full detail, plus the whole photo for context)
+  if(!sampleNs){try{sampleNs=await claude.use("sample");const lim=await sampleNs.limits();scan.sampleImg=!!(lim&&lim.images);scan.maxImg=lim&&lim.images?lim.images.maxCount:1}catch(e){}}
+  if(!sampleNs||!scan.sampleImg){scan.busy=false;showScanResult({code:null,raw:"이 계정/화면에서는 사진 인식을 쓸 수 없어요. 아래에서 번호를 직접 입력해 주세요.",how:"photo",pick:{kind:"보안등",num:"",dong:"",road:""}});return}
+  stageStatus("AI가 표찰을 읽는 중… (처음이면 사진 전송 동의 창이 떠요)");
   try{
-    let blob=pic.blob;
-    if(!blob){const small=await compressBlob(file,800,.7);blob=small.blob}
-    if(!blob)throw Object.assign(new Error("blob"),{code:"no_blob"});
-    const out=await sampleNs.json(`사진은 한국 광주광역시 동구의 가로등 또는 보안등 기둥입니다. 기둥에 붙은 관리 표찰을 읽어 주세요. 표찰은 두 종류입니다.
+    const toBlob=c=>new Promise(res=>c.toBlob(b=>res(b),"image/jpeg",.85));
+    const imgs=[];
+    if(plateBox)imgs.push(await toBlob(cropTo(src,plateBox,1000)));
+    if(!plateBox||(scan.maxImg||1)>=2)imgs.push(await toBlob(cropTo(src,{x:0,y:0,w:src.width,h:src.height},Math.min(1200,src.width))));
+    const plateUrl=plateBox?cropTo(src,plateBox,480).toDataURL("image/jpeg",.7):null;
+    const out=await sampleNs.json(`사진은 한국 광주광역시 동구의 가로등 또는 보안등 기둥입니다.${plateBox?" 첫 번째 사진은 표찰만 잘라 확대한 것이고, 두 번째가 있다면 전체 장면입니다.":""} 기둥에 붙은 관리 표찰을 읽어 주세요. 표찰은 두 종류입니다.
 1) 가로등 표찰(초록색 머리띠에 "가로등", 왼쪽에 파란 세로 띠 "관리번호"): 도로명(예: 지호로)과 그 아래 큰 숫자 "번호-가지번호"(예: 65-5)가 있습니다. 도로명이 없는 옛 표찰은 숫자만(예: 140-8) 있습니다. 이때 kind="가로등", road="지호로"(없으면 null), num="65-5".
 2) 보안등 표찰(파란색, "보안등 고장신고"): 동 이름(산수동, 충장동, 동명동, 계림동, 지산동, 서남동, 학동, 학운동, 지원동 중 하나)과 그 아래 큰 숫자가 있습니다. 예: 산수동 642. 이때 kind="보안등", dong="산수동", num="642".
 표찰의 전화번호(608-xxxx 등)는 번호가 아니니 무시하세요. 현수막·광고의 숫자도 무시하세요.
 3) 한국전력 전주번호판(흰색, "위험"): 숫자4자리+영문1자+숫자3자리 형식(예: 9792C742) → pole.
 반드시 아래 JSON 하나만 출력하세요. 못 읽은 항목은 null로 두세요.
-{"kind": "가로등"|"보안등"|null, "dong": string|null, "road": string|null, "num": string|null, "pole": string|null, "confidence": "high"|"low"}`,{images:blob,modelTier:"quick"});
+{"kind": "가로등"|"보안등"|null, "dong": string|null, "road": string|null, "num": string|null, "pole": string|null, "confidence": "high"|"low"}`,{images:imgs,modelTier:"quick"});
     const dn=out&&typeof out.dong==="string"?out.dong.replace(/\s/g,""):"";
     const dong=DONGS.find(d=>d===dn)||DONGS.find(d=>dn&&dn.startsWith(d.replace("동","")));
     const numRaw=out&&out.num?String(out.num).trim():"";
@@ -1141,12 +1172,15 @@ async function readLabelPhoto(file){
     const road=out&&typeof out.road==="string"?out.road.replace(/\s/g,""):"";
     if(g&&out.kind!=="보안등")code={kind:"가로등",road,main:g[1],sub:g[2]};
     else{const n=numRaw.replace(/\D/g,"");if(dong&&n)code={kind:"보안등",dong,num:n};else if(g)code={kind:"가로등",road,main:g[1],sub:g[2]}}
-    showScanResult({code,pole,kind:code?code.kind:(out&&out.kind||null),raw:code?"":`인식 결과: ${JSON.stringify(out)}`,how:"photo"});
+    const kind=code?code.kind:(out&&out.kind||"보안등");
+    stageStatus(code?"읽었어요. 아래에서 확인하세요.":"번호를 읽지 못했어요.",false);
+    showScanResult({code,pole,kind,how:"photo",plate:plateUrl,raw:code?"":`인식 결과: ${JSON.stringify(out)}`,pick:{kind,num:code?(code.kind==="가로등"?`${code.main}-${code.sub}`:code.num):numRaw,dong:dong||"",road:road||"",auto:!!plateBox}});
     if(out&&out.confidence==="low"&&code)toast("표찰이 흐려 번호가 틀릴 수 있어요. 확인해 주세요.");
   }catch(e){
     const code=e&&e.code;
-    const msg=code==="not_granted"?"사진 인식에 동의하지 않아 번호를 읽지 못했어요. 직접 입력해 주세요.":code==="rate_limited"?"요청이 많아요. 잠시 후 다시 시도해 주세요.":code==="image_rejected"||code==="images_unavailable"?"이 사진 형식은 보낼 수 없어요. 카메라로 바로 찍은 JPG로 다시 시도해 주세요.":`사진에서 표찰을 읽지 못했어요. 더 가까이서 다시 찍어 주세요.${code?` (${code})`:""}`;
-    showScanResult({code:null,raw:msg,how:"photo"});
+    const msg=code==="not_granted"?"사진 인식에 동의하지 않아 번호를 읽지 못했어요. 아래에서 직접 입력해 주세요.":code==="rate_limited"?"요청이 많아요. 잠시 후 다시 시도해 주세요.":code==="image_rejected"||code==="images_unavailable"?"이 사진 형식은 보낼 수 없어요. 카메라로 바로 찍은 JPG로 다시 시도해 주세요.":`사진에서 표찰을 읽지 못했어요. 더 가까이서 다시 찍어 주세요.${code?` (${code})`:""}`;
+    stageStatus("",false);
+    showScanResult({code:null,raw:msg,how:"photo",pick:{kind:"보안등",num:"",dong:"",road:""}});
   }finally{scan.busy=false}
 }
 document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"||e.target.id==="scanPhotoLib"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
