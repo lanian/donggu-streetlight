@@ -345,10 +345,11 @@ function localDb(){
     try{const mf=await (await fetch("seed/manifest.json",{cache:"no-cache"})).json();
       const m=Array.isArray(mf)?mf:mf.docs,ver=Array.isArray(mf)?1:mf.version;
       const refresh=data.seedVersion!==ver;
+      // a new seed version means the sample data changed: drop everything stored by older seeds (and test records made against them)
+      if(refresh&&mf.purge){data.lights={};data.inspections={};data.reports={};data.register={}}
       const todo=refresh?m:m.filter(e=>!(data[e.collection]&&data[e.collection][e.doc_id]));
-      if(!todo.length)return;
       await Promise.all(todo.map(async e=>{const d=await (await fetch("seed/"+e.file,{cache:"no-cache"})).json();(data[e.collection]=data[e.collection]||{})[e.doc_id]=d}));
-      data.seedVersion=ver;save()}catch(e){}
+      if(refresh||todo.length){data.seedVersion=ver;save()}}catch(e){}
   };
   return{seed,collection:c=>query(c),doc:path=>{const [c,id]=path.split("/");return{
     set:async rec=>{(data[c]=data[c]||{})[id]=rec;save()},
