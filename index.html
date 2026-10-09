@@ -571,7 +571,7 @@ function lightRow(l){
   return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>
     <span class="body">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:l.noPlate&&!l.plateFixed?`<span class="reg np">표찰없음</span>`:""}<span class="code">${esc(l.code)}</span> <span class="muted">${esc(l.dong)}${l.lampType?` · ${esc(l.lampType)}`:""}</span>
     <span class="addr" style="display:block">${esc(l.address)}</span></span>
-    <span class="meta">${S.near&&S.pos&&typeof l.lat==="number"?`<span class="dist">${fmtDist(distM(S.pos,l))}</span>`:""}<span class="chip">${esc(l.status)}</span>${isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${l.lastInspected?fmtD(l.lastInspected):"점검 기록 없음"}</span>`}</span></button>`;
+    <span class="meta">${S.near&&S.pos&&typeof l.lat==="number"?`<span class="dist">${fmtDist(distM(S.pos,l))}</span>`:""}<span class="chip">${esc(l.status)}</span>${l.redoNote&&l.status==="점검필요"?`<span class="due">재점검 요청</span>`:isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${l.lastInspected?fmtD(l.lastInspected):"점검 기록 없음"}</span>`}</span></button>`;
 }
 function filtered(){
   const q=S.q.trim().toLowerCase();
@@ -655,7 +655,7 @@ function vAdmin(){
   const rOpen=S.reports.filter(r=>r.status!=="완료");
   const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;
   const pend=pendingList().filter(l=>l.reg==="미등록").length,np=S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length;
-  const nav=[["sec-open","조치 필요",open.length],...(FEATURES.reports?[["sec-rep","신고",rOpen.length]]:[]),["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-patrol","순찰",S.patrols.length||null]].concat(can("admin")?[["sec-roles","권한",S.roles.length||null]]:[]).concat([["sec-edit","정보 수정",editedList().length||null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]):[]);
+  const nav=[["sec-open","조치 필요",open.length],...(FEATURES.reports?[["sec-rep","신고",rOpen.length]]:[]),["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","결과 확인",inspList().filter(i=>!i.reviewedAt).length||null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-patrol","순찰",S.patrols.length||null]].concat(can("admin")?[["sec-roles","권한",S.roles.length||null]]:[]).concat([["sec-edit","정보 수정",editedList().length||null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]):[]);
   const setupNotice=S.me&&S.me!=="local"&&!rolesReady()?`<div class="notice"><b>권한 설정 전이에요.</b> 지금은 참여자 모두가 미등록 처리·등 정보 수정까지 할 수 있어요. 관리자를 지정하면 그때부터 관리자만 그 일을 하고, 나머지는 점검자·주민으로 나뉘어요.${S.canWrite?` <button class="btn sm" id="claimAdmin" style="margin-left:6px">내가 관리자 되기</button>`:""}</div>`:"";
   return `${setupNotice}${tally(false)}
   <div class="chipbar quicknav">${nav.map(([id,t,n])=>`<button type="button" data-jump="${id}">${t}${n!=null?`<span class="secnum ${n?"":"zero"}">${n}</span>`:""}</button>`).join("")}</div>
@@ -672,9 +672,8 @@ function vAdmin(){
   <div class="panel">${S.lights.length?dongBars():`<span class="muted">데이터 없음</span>`}</div>
   <h2 id="sec-light">밝기 예측·보완 검토 ${S.review?`<span class="muted">${S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length}</span>`:""}</h2>
   ${reviewSection()}
-  <h2 id="sec-hist">최근 점검 이력</h2>
-  <div class="panel">${S.insp.length?S.insp.slice(0,12).map(i=>`<div class="hist st-${esc(i.result)}"><b>${esc(i.code)}</b> <span class="chip">${esc(i.result)}</span> <span class="muted">${fmtDT(i.date)} · ${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${i.faults&&i.faults.length?`<div class="muted">불량: ${i.faults.map(esc).join(", ")}</div>`:""}</div>`).join(""):`<span class="muted">아직 점검 기록이 없어요.</span>`}
-  ${dl?`<div class="split"><button class="btn ghost sm" id="csv">점검 이력 CSV 내려받기</button><button class="btn ghost sm" id="csv2">가로등 대장 CSV 내려받기</button></div>`:""}</div>
+  <h2 id="sec-hist">점검 결과 확인 <span class="muted">${(()=>{const u=inspList().filter(i=>!i.reviewedAt).length;return u?`미확인 ${u}`:""})()}</span></h2>
+  ${inspReviewSection()}
   ${S.canWrite?`<h2 id="sec-reg">현장 등록 (대장에 없는 등)</h2>
   <p class="muted" style="margin:-6px 0 10px">대장에 없는 등이나 표찰이 없는 등주를 발견하면 여기에 남겨요. 저장되면 '미등록'으로 표시되고, 아래 미등록 관리에서 대장 반영 여부를 추적해요.</p>
   <div class="panel">
@@ -749,6 +748,7 @@ async function openLight(id){
     <div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address)}</div><div class="muted">${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.lampId?` · 관리ID ${esc(l.lampId)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}${PT_LAST[l.id]?` · 순찰 통과 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" 점등 확인"}`:""}</div></div>
     <button class="x" aria-label="닫기" data-close>×</button></div>
     ${(()=>{const li=lightInfo(l);if(!li)return"";return `<div class="muted" style="margin:2px 0 6px">💡 예상 조명 반경 ${li.reach}m${li.on===0?" · 현재 꺼짐":li.on<1?" · 점검필요로 감쇠":""}${li.n1?` · 가장 가까운 등 ${esc(li.n1.code)} ${li.n1.d}m`:""}${li.gapNow?` · <span style="color:var(--warn)">이웃 등과 간격이 넓어요</span>`:""}${li.riskIfOut?` · <span style="color:var(--bad)">꺼지면 ${li.riskIfOut}개 구간이 어두워져요</span>`:""}</div>`})()}
+    ${l.redoNote&&l.status==="점검필요"?`<div class="notice slim"><b>재점검 요청</b> ${esc(l.redoNote)}</div>`:""}
     ${l.removed?`<div class="muted" style="margin:2px 0 6px;color:var(--bad)">철거된 등으로 기록돼 있어요${l.removedAt?` (${fmtD(l.removedAt)})`:""}.</div>`:""}${l.note?`<div class="muted" style="margin:2px 0 6px">📝 ${esc(l.note)}</div>`:""}
     ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}${can("admin")?`<button class="btn ghost sm" data-ledit="${esc(l.id)}" style="margin-left:auto">등 정보 수정</button>`:""}</div>`:""}
     <h2>점검표</h2>
@@ -796,7 +796,7 @@ async function saveInspection(){
     if(photos.length){rec.thumbs=[];for(const ph of photos){const ref=await db.collection("photos").add({lightId:l.id,code:l.code,dong:l.dong,label:ph.label,note:ph.note||"",data:ph.data,w:ph.w,h:ph.h,at:now,by:S.me||null,kind:"inspection"});rec.thumbs.push({id:ref.id,label:ph.label,t:ph.thumb})}rec.photoN=photos.length}
     const iref=await db.collection("inspections").add(rec);
     if(rec.thumbs)for(const t of rec.thumbs)try{await db.doc("photos/"+t.id).update({inspId:iref.id})}catch(e){}
-    await patchLight(l.id,{status:draft.result,lastInspected:now,lastResult:draft.result,updatedAt:now})},"점검 결과를 저장했어요.");
+    await patchLight(l.id,{status:draft.result,lastInspected:now,lastResult:draft.result,redoNote:null,updatedAt:now})},"점검 결과를 저장했어요.");
   if(ok)closeSheet();else if(btn){btn.disabled=false;btn.textContent="점검 결과 저장"}
 }
 
@@ -842,6 +842,11 @@ document.addEventListener("click",async e=>{
   if(t.dataset.reglink){if(need("admin"))regLink(t.dataset.reglink);return}
   if(t.dataset.regdel){if(!need("admin"))return;const l=byId(t.dataset.regdel);if(!l)return;if(!confirm(`${l.code} 미등록 항목을 삭제할까요? 되돌릴 수 없어요.`))return;write(()=>db.doc("lights/"+l.id).delete(),"삭제했어요.");return}
   if(t.dataset.platefix){if(need("inspect"))plateFix(t.dataset.platefix);return}
+  if(t.dataset.ir){IR[t.dataset.ir]=t.dataset.ir==="period"?+t.dataset.v:t.dataset.v;IR.show=30;render();return}
+  if(t.id==="irMore"){IR.show+=30;render();return}
+  if(t.id==="irLoad"){inspLoadMore();render();return}
+  if(t.dataset.ichk){if(need("admin"))inspReview(t.dataset.ichk,false);return}
+  if(t.dataset.iredo){if(need("admin"))inspReview(t.dataset.iredo,true);return}
   if(t.dataset.pdel){if(draft&&draft.photos){draft.photos.splice(+t.dataset.pdel,1);renderPhotoStrip()}return}
   if(t.dataset.pedit){const ph=draft&&draft.photos&&draft.photos[+t.dataset.pedit];if(ph)editPhotoMeta(ph);return}
   if(t.dataset.pview){openPhotoViewer(t.dataset.pview);return}
@@ -909,6 +914,8 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classLi
 document.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;S.limit=60;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
 document.addEventListener("change",async e=>{
   if(e.target.id==="rvNoLight"){S.rvNoLight=e.target.checked;render();return}
+  if(e.target.id==="irWho"){IR.who=e.target.value;IR.show=30;render();return}
+  if(e.target.id==="irOnly"){IR.only=e.target.checked;IR.show=30;render();return}
   if(e.target.id==="ptDong"){pt.dong=e.target.value;pt.total=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&(pt.dong==="전체"||l.dong===pt.dong)).length;ptDraw(true);return}
   if(e.target.id==="demoRole"){S.demoRole=e.target.value;try{localStorage.setItem("dg-role",S.demoRole)}catch(x){}toast(`체험: ${ROLE_LABEL[S.demoRole]} 화면으로 바꿨어요.`);render();return}
   if(e.target.dataset.rolesel){if(!need("admin")){render();return}setRole(e.target.dataset.rolesel,e.target.value);return}
@@ -992,6 +999,40 @@ async function regLink(id){
   if(!t||t.reg){toast("대장에서 그 번호를 찾지 못했어요.");return}
   if(!confirm(`${t.code} (${t.dong}) 에 연결하고, 이 미등록 항목은 '대장반영'으로 바꿀까요?`))return;
   await write(async()=>{await patchLight(id,{reg:"대장반영",linkedId:t.id,updatedAt:Date.now()});if(l.status&&l.status!=="정상")await patchLight(t.id,{status:l.status,updatedAt:Date.now()})},`${t.code}에 연결했어요.`);
+}
+/* ---------- inspection review: the office checks what came back from the field, stamps it as seen, or sends it back ---------- */
+const IR={period:7,result:"전체",who:"전체",only:false,show:30,more:null,loading:false};
+function inspList(){const base=IR.more||S.insp;const cut=IR.period?Date.now()-IR.period*86400000:0;return base.filter(i=>(!cut||i.date>=cut)&&(IR.result==="전체"||i.result===IR.result)&&(IR.who==="전체"||i.inspector===IR.who)&&(!IR.only||!i.reviewedAt))}
+async function inspLoadMore(){if(IR.loading||!db)return;IR.loading=true;try{const snap=await db.collection("inspections").orderBy("date","desc").limit(400).get();IR.more=snap.docs.map(d=>({id:d.id,...d.data()}))}catch(e){}IR.loading=false;render();resolveNames()}
+function inspReviewSection(){
+  const all=IR.more||S.insp;const ls=inspList();const who=[...new Set(all.map(i=>i.inspector).filter(Boolean))];
+  const seg=(key,opts,cur)=>`<div class="seg" style="margin:0 0 8px">${opts.map(([v,t])=>`<button type="button" data-ir="${key}" data-v="${v}" aria-pressed="${String(cur)===String(v)}">${t}</button>`).join("")}</div>`;
+  const byWho=who.map(w=>({w,n:ls.filter(i=>i.inspector===w).length})).filter(x=>x.n).sort((a,b)=>b.n-a.n);
+  const cnt=r=>ls.filter(i=>i.result===r).length;
+  const faultTop=(()=>{const m={};ls.forEach(i=>(i.faults||[]).forEach(f=>m[f]=(m[f]||0)+1));return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,4)})();
+  return `<p class="muted" style="margin:-6px 0 10px">현장에서 올라온 점검 결과를 기간·점검자·결과별로 훑어보고, 사진과 점검표를 확인한 뒤 "확인"을 눌러 검수 도장을 찍어요. 다시 봐야 하면 "재점검 요청"으로 돌려보내요.</p>
+  ${seg("period",[[7,"7일"],[30,"30일"],[90,"90일"],[0,"전체"]],IR.period)}
+  ${seg("result",[["전체","모든 결과"],["정상","정상"],["점검필요","점검필요"],["고장","고장"]],IR.result)}
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px"><select class="f-in" id="irWho" style="flex:1"><option value="전체">모든 점검자</option>${who.map(w=>`<option value="${esc(w)}" ${IR.who===w?"selected":""}>${esc(S.names[w]||"점검자 "+w.slice(0,6))}</option>`).join("")}</select>
+    <label class="muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="irOnly" ${IR.only?"checked":""}> 미확인만</label></div>
+  <div class="tally" style="margin:4px 0 10px"><button tabindex=-1 style="--c:var(--ink-2)"><b>${ls.length}</b><span>점검 건</span></button><button tabindex=-1 style="--c:var(--ok)"><b>${cnt("정상")}</b><span>정상</span></button><button tabindex=-1 style="--c:var(--warn)"><b>${cnt("점검필요")}</b><span>점검필요</span></button><button tabindex=-1 style="--c:var(--bad)"><b>${cnt("고장")}</b><span>고장</span></button></div>
+  ${byWho.length?`<div class="muted" style="margin:0 0 8px">점검자별: ${byWho.map(x=>`${esc(S.names[x.w]||"점검자")} ${x.n}건`).join(" · ")}${faultTop.length?`<br>불량 항목: ${faultTop.map(([f,n])=>`${esc(f)} ${n}`).join(" · ")}`:""}</div>`:""}
+  ${ls.length?`<div class="list">${ls.slice(0,IR.show).map(i=>{const l=byId(i.lightId);return `<div class="panel" style="border-left:5px solid ${i.result==="고장"?"var(--bad)":i.result==="점검필요"?"var(--warn)":"var(--ok)"}">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${l?kindBadge(l.kind):""}<b>${esc(i.code)}</b><span class="chip st-${esc(i.result)}">${esc(i.result)}</span>${i.patrol?`<span class="reg">순찰</span>`:""}${i.redo?`<span class="reg np">재점검 요청</span>`:""}<span class="muted" style="margin-left:auto">${fmtDT(i.date)}</span></div>
+    <div class="muted">${esc(S.names[i.inspector]||"점검자")}${l?` · ${esc(l.dong)}`:""}${typeof i.tiltDeg==="number"?` · 기울기 ${i.tiltDeg.toFixed(1)}°`:""}${i.checks&&Object.keys(i.checks).length?` · 점검표 ${Object.values(i.checks).filter(v=>v==="ok").length}/${Object.keys(i.checks).length} 양호`:""}</div>
+    ${i.faults&&i.faults.length?`<div class="muted">불량: ${i.faults.map(esc).join(", ")}</div>`:""}${i.memo?`<div style="margin-top:4px">${esc(i.memo)}</div>`:""}
+    ${i.thumbs&&i.thumbs.length?`<div class="pgrid">${i.thumbs.map(t=>`<button type="button" data-pview="${esc(t.id)}"><img src="${esc(t.t)}" alt="${esc(t.label||"")}" loading="lazy"><div class="lab">${esc(t.label||"")}</div></button>`).join("")}</div>`:i.photo?`<img class="thumb" src="${esc(i.photo)}" alt="" style="max-height:140px">`:""}
+    <div class="split">${i.reviewedAt?`<span class="muted" style="align-self:center">✓ ${esc(S.names[i.reviewedBy]||"관리자")} 확인 ${fmtD(i.reviewedAt)}</span>`:can("admin")?`<button class="btn sm" data-ichk="${esc(i.id)}">확인</button>`:`<span class="muted" style="align-self:center">미확인</span>`}${can("admin")&&!i.redo&&!i.patrol?`<button class="btn ghost sm" data-iredo="${esc(i.id)}">재점검 요청</button>`:""}<button class="btn ghost sm" data-light="${esc(i.lightId)}">등 열기</button></div></div>`}).join("")}
+    ${ls.length>IR.show?`<button class="btn ghost block" id="irMore">더 보기 · ${ls.length-IR.show}건 남음</button>`:""}</div>`:`<div class="empty">이 조건에 맞는 점검 기록이 없어요.</div>`}
+  <div class="split">${!IR.more?`<button class="btn ghost sm" id="irLoad" ${IR.loading?"disabled":""}>${IR.loading?"불러오는 중…":"지난 기록 더 불러오기 (최근 400건)"}</button>`:`<span class="muted" style="align-self:center">최근 ${IR.more.length}건 기준</span>`}${dl?`<button class="btn ghost sm" id="csv">점검 이력 CSV 내려받기</button><button class="btn ghost sm" id="csv2">가로등 대장 CSV 내려받기</button>`:""}</div>`;
+}
+async function inspReview(id,redo){
+  const i=(IR.more||S.insp).find(x=>x.id===id);if(!i)return;
+  if(redo){const why=prompt(`${i.code} 재점검을 요청하는 이유 (점검자에게 보여요)`,"");if(why==null)return;
+    await write(async()=>{await db.doc("inspections/"+id).update({redo:true,redoNote:why.trim().slice(0,200),redoBy:S.me||null,redoAt:Date.now()});await patchLight(i.lightId,{status:"점검필요",lastResult:"점검필요",redoNote:why.trim().slice(0,200),updatedAt:Date.now()})},`${i.code} 재점검을 요청했어요. 등 상태가 점검필요로 바뀌었어요.`)}
+  else await write(()=>db.doc("inspections/"+id).update({reviewedBy:S.me||null,reviewedAt:Date.now()}),`${i.code} 점검 결과를 확인했어요.`);
+  if(IR.more){const j=IR.more.findIndex(x=>x.id===id);if(j>=0)IR.more[j]={...IR.more[j],...(redo?{redo:true}:{reviewedBy:S.me||null,reviewedAt:Date.now()})}}
+  render();
 }
 /* ---------- inspection photos: several per inspection, each its own doc in "photos" (≈80 KB), a tiny thumb kept
    in the inspection record; an in-app editor adds a label, red-pen marks and a burned-in caption ---------- */
