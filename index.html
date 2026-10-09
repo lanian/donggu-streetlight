@@ -411,7 +411,7 @@ function mergeLights(){
   const seen=new Set();
   const out=BASE.map(b=>{seen.add(b.id);const o=OV[b.id];return o?{...b,...o,id:b.id}:b});
   for(const [id,o] of Object.entries(OV))if(!seen.has(id)&&o.code)out.push({...o,id});
-  S.lights=out;LIDX=null;
+  S.lights=out;LIDX=null;LG=null;
 }
 function onLights(snap){OV={};snap.docs.forEach(d=>{OV[d.id]=d.data()});mergeLights()}
 // write field changes for one light without touching the registry fields
@@ -520,7 +520,7 @@ function vInspect(){
     <button id="mapBtn" data-mapscope="filtered">${ICONS.map}지도<small>현재 목록</small></button>
   </div>
   <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색" enterkeyhint="search">
-  <select id="dong" aria-label="법정동">${["전체",...DONGS].map(d=>`<option ${d===S.dong?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select></div>
+  <select id="dong" aria-label="법정동">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===S.dong?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select></div>
   <div class="chipbar" id="kindFilter">
     <button type="button" id="nearSort" aria-pressed="${S.near}">${S.near?"📍 내 주변 순":"📍 내 주변 순"}</button>
     <button type="button" id="openOnly" aria-pressed="${S.stat==="고장"||S.stat==="점검필요"||S.stat==="수리중"}">조치 필요만${open?` <span class="muted" style="font-size:11px">${open}</span>`:""}</button>
@@ -573,7 +573,7 @@ function vAdmin(){
   const rOpen=S.reports.filter(r=>r.status!=="완료");
   const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;
   const pend=pendingList().filter(l=>l.reg==="미등록").length,np=S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length;
-  const nav=[["sec-open","조치 필요",open.length],["sec-rep","신고",rOpen.length],["sec-kind","종류별",null],["sec-dong","동별",null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]:[]);
+  const nav=[["sec-open","조치 필요",open.length],["sec-rep","신고",rOpen.length],["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?S.review.cands.length:null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]:[]);
   return `${tally(false)}
   <div class="chipbar quicknav">${nav.map(([id,t,n])=>`<button type="button" data-jump="${id}">${t}${n!=null?`<span class="secnum ${n?"":"zero"}">${n}</span>`:""}</button>`).join("")}</div>
   <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length.toLocaleString()}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건 · 미처리 신고 ${rOpen.length}건</span></div>${mapSVG()}<div class="split"><button class="btn sm" data-mapscope="all">지도에서 보기</button><button class="btn ghost sm" data-mapscope="open">조치 필요만 지도에서</button></div></div>
@@ -587,6 +587,8 @@ function vAdmin(){
     <p class="muted" style="margin:10px 0 0">표찰 색과 같아요. 초록은 가로등(도로명+번호), 파랑은 보안등(동 이름+번호).</p></div>
   <h2 id="sec-dong">법정동별 현황</h2>
   <div class="panel">${S.lights.length?dongBars():`<span class="muted">데이터 없음</span>`}</div>
+  <h2 id="sec-light">밝기 예측·보완 검토 ${S.review?`<span class="muted">${S.review.cands.length}</span>`:""}</h2>
+  ${reviewSection()}
   <h2 id="sec-hist">최근 점검 이력</h2>
   <div class="panel">${S.insp.length?S.insp.slice(0,12).map(i=>`<div class="hist st-${esc(i.result)}"><b>${esc(i.code)}</b> <span class="chip">${esc(i.result)}</span> <span class="muted">${fmtDT(i.date)} · ${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${i.faults&&i.faults.length?`<div class="muted">불량: ${i.faults.map(esc).join(", ")}</div>`:""}</div>`).join(""):`<span class="muted">아직 점검 기록이 없어요.</span>`}
   ${dl?`<div class="split"><button class="btn ghost sm" id="csv">점검 이력 CSV 내려받기</button><button class="btn ghost sm" id="csv2">가로등 대장 CSV 내려받기</button></div>`:""}</div>
@@ -658,6 +660,7 @@ async function openLight(id){
   openSheet(`<div class="sheet-head st-${esc(l.status)}"><div><h3 style="font-size:19px">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:""}${esc(l.code)} <span class="chip">${esc(l.status)}</span></h3>
     <div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address)}</div><div class="muted">${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.lampId?` · 관리ID ${esc(l.lampId)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}</div></div>
     <button class="x" aria-label="닫기" data-close>×</button></div>
+    ${(()=>{const li=lightInfo(l);if(!li)return"";return `<div class="muted" style="margin:2px 0 6px">💡 예상 조명 반경 ${li.reach}m${li.on===0?" · 현재 꺼짐":li.on<1?" · 점검필요로 감쇠":""}${li.n1?` · 가장 가까운 등 ${esc(li.n1.code)} ${li.n1.d}m`:""}${li.gapNow?` · <span style="color:var(--warn)">이웃 등과 간격이 넓어요</span>`:""}${li.riskIfOut?` · <span style="color:var(--bad)">꺼지면 ${li.riskIfOut}개 구간이 어두워져요</span>`:""}</div>`})()}
     ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}</div>`:""}
     <h2>점검표</h2>
     <div class="panel" id="checks">${CHECKS.map(([k,t,s])=>`<div class="check"><div class="q">${t}<small>${s}</small></div><div class="pair" role="group" aria-label="${t}"><button class="g" data-ck="${k}" data-v="ok" aria-pressed="false">양호</button><button class="b" data-ck="${k}" data-v="bad" aria-pressed="false">불량</button></div></div>`).join("")}
@@ -710,6 +713,11 @@ document.addEventListener("click",async e=>{
   if(t.id==="moreList"){S.limit+=100;render();return}
   if(t.id==="clearFilters"){S.stat=null;S.dong="전체";S.kind="전체";S.q="";S.limit=60;render();return}
   if(t.id==="nearSort"){nearToggle();return}
+  if(t.id==="rvRun"){const dong=$("#rvDong").value,kind=$("#rvKind").value;t.disabled=true;t.textContent="계산 중…";setTimeout(()=>{const cands=lightReview(dong,kind);S.review={dong,kind,cands,show:20,n:S.lights.filter(l=>(dong==="전체"||l.dong===dong)&&(kind==="전체"||l.kind===kind)).length};render();const el=document.getElementById("sec-light");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64})},30);return}
+  if(t.id==="rvMore"){S.review.show+=30;render();return}
+  if(t.dataset.rvmap){openReviewMap(t.dataset.rvmap);return}
+  if(t.dataset.rvreg){reviewToForm(t.dataset.rvreg);return}
+  if(t.id==="csv4"){exportReviewCSV();return}
   if(t.dataset.jump){const el=document.getElementById(t.dataset.jump);if(el){const y=el.getBoundingClientRect().top+window.scrollY-64;window.scrollTo({top:y,behavior:"smooth"})}return}
   if(t.id==="openOnly"){S.stat=S.stat&&S.stat!=="정상"?null:"__open";S.limit=60;render();return}
   if(t.dataset.kind&&t.closest("#kindFilter")){S.kind=t.dataset.kind;S.limit=60;render();return}
@@ -914,6 +922,130 @@ function keepTilt(){
   stopTilt();
 }
 function stopTilt(){tilt.on=false;window.removeEventListener("deviceorientation",onTilt);const b=$("#tiltBox");if(b){b.hidden=true;b.innerHTML=""}}
+
+/* ---------- brightness estimate & gap review ----------
+   A model, not a measurement: each light gets an effective radius from its kind and lamp type (a 9m 가로등 pole
+   lights farther than a 5m 보안등 on a KEPCO pole), broken lights count as dark, and the midpoint between every pair
+   of neighbouring lights is checked for weak combined light. Without road geometry, a candidate only says
+   "two lights are farther apart than their reach — walk this stretch". Thresholds live in LIGHT_MODEL. */
+const LIGHT_MODEL={
+  radius:{"가로등":18,"보안등":11,"공원등":9,"특이등":11},
+  lamp:{"LED일반형":1,"LED소켓형":.8,"CDM":.95,"메탈":1,"나트륨":.85,"삼파장":.6},
+  status:{"정상":1,"점검필요":.75,"고장":0,"수리중":0},
+  pairMax:{"가로등":95,"보안등":62,"공원등":50,"특이등":62},
+  gapFactor:1.15,   // pair spacing beyond (r1+r2)×factor is a gap candidate
+  weak:.3           // combined light at the midpoint below this is "weak"
+};
+let CALIB=null; // per-kind spacing the district actually uses (90th percentile of nearest-neighbour distance)
+const reachOf=l=>{const base=CALIB&&CALIB[l.kind]?CALIB[l.kind].r:(LIGHT_MODEL.radius[l.kind]||11);return Math.round(base*(LIGHT_MODEL.lamp[l.lampType]||.9)*10)/10};
+const onOf=l=>l.removed?0:(LIGHT_MODEL.status[l.status]??1);
+let LG=null; // metric grid of lights for neighbour queries
+function lightGrid(){
+  if(LG&&LG.n===S.lights.length)return LG;
+  const pts=S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
+  const lat0=35.14,lng0=126.93,kx=111320*Math.cos(lat0*Math.PI/180),ky=110540,cell=30,cells=new Map();
+  const items=pts.map(l=>{const x=(l.lng-lng0)*kx,y=(l.lat-lat0)*ky;const it={l,x,y,r:0,on:onOf(l)};const k=`${Math.floor(x/cell)},${Math.floor(y/cell)}`;(cells.get(k)||cells.set(k,[]).get(k)).push(it);return it});
+  const near=(x,y,R)=>{const out=[];const c0=Math.floor((x-R)/cell),c1=Math.floor((x+R)/cell),r0=Math.floor((y-R)/cell),r1=Math.floor((y+R)/cell);
+    for(let cx=c0;cx<=c1;cx++)for(let cy=r0;cy<=r1;cy++){const b=cells.get(`${cx},${cy}`);if(b)for(const it of b){const d=Math.hypot(it.x-x,it.y-y);if(d<=R)out.push({it,d})}}return out};
+  // calibrate: what spacing is normal here? the widest 10% of neighbour gaps per kind become the review threshold
+  CALIB={};for(const k of KINDS){const ds=items.filter(it=>it.l.kind===k&&!it.l.removed).map(me=>{let best=999;for(const {it,d} of near(me.x,me.y,120))if(it!==me&&!it.l.removed&&d<best)best=d;return best}).filter(d=>d<999).sort((a,b)=>a-b);
+    if(ds.length>=30){const p90=ds[Math.floor(ds.length*.9)];CALIB[k]={p50:Math.round(ds[Math.floor(ds.length*.5)]),p90:Math.round(p90),r:Math.max(8,Math.round(p90/(2*LIGHT_MODEL.gapFactor)*10)/10)}}}
+  items.forEach(it=>{it.r=reachOf(it.l)});
+  const lightAt=(x,y)=>near(x,y,60).reduce((s,{it,d})=>s+it.on/(1+(d/(.6*it.r))**2),0);
+  return LG={n:S.lights.length,items,near,lightAt,toLL:(x,y)=>({lat:lat0+y/ky,lng:lng0+x/kx}),toXY:l=>({x:(l.lng-lng0)*kx,y:(l.lat-lat0)*ky})};
+}
+function lightReview(dong,kind){
+  const G=lightGrid();const seen=new Set();const cands=[];
+  const items=G.items.filter(it=>(dong==="전체"||it.l.dong===dong)&&(kind==="전체"||it.l.kind===kind)&&!it.l.removed);
+  for(const a of items){
+    const R=LIGHT_MODEL.pairMax[a.l.kind]||62;
+    for(const {it:b,d} of G.near(a.x,a.y,R)){
+      if(b===a||b.l.removed||b.l.id<a.l.id)continue;
+      if(kind!=="전체"&&b.l.kind!==kind)continue;
+      const need=(a.r+b.r)*LIGHT_MODEL.gapFactor;
+      if(d<=need&&a.on>0&&b.on>0)continue;                 // close enough and both lit
+      const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;const E=G.lightAt(mx,my);
+      if(E>=LIGHT_MODEL.weak)continue;
+      // skip when a third light sits between them (they are not really neighbours)
+      if(G.near(mx,my,d*.35).some(({it})=>it!==a&&it!==b&&it.on>0))continue;
+      const key=`${Math.round(mx/15)},${Math.round(my/15)}`;if(seen.has(key))continue;seen.add(key);
+      const dark=a.on===0||b.on===0;
+      cands.push({a:a.l,b:b.l,d:Math.round(d),need:Math.round(need),E:Math.round(E*100)/100,dark,mid:G.toLL(mx,my),score:(dark?60:0)+(d-need)+(LIGHT_MODEL.weak-E)*40,dong:a.l.dong});
+    }
+  }
+  cands.sort((x,y)=>y.score-x.score);
+  return cands;
+}
+function lightInfo(l){
+  if(typeof l.lat!=="number")return null;
+  const G=lightGrid();const me=G.items.find(it=>it.l===l);if(!me)return null;
+  const nb=G.near(me.x,me.y,120).filter(o=>o.it!==me&&!o.it.l.removed).sort((p,q)=>p.d-q.d);
+  const n1=nb[0];const worst=nb.filter(o=>o.d<=(LIGHT_MODEL.pairMax[l.kind]||62)).some(o=>o.d>(me.r+o.it.r)*LIGHT_MODEL.gapFactor);
+  // how dark would the midpoints get if this light went out
+  const risk=nb.slice(0,4).filter(o=>o.d<=(LIGHT_MODEL.pairMax[l.kind]||62)).map(o=>{const mx=(me.x+o.it.x)/2,my=(me.y+o.it.y)/2;const E=G.lightAt(mx,my)-me.on/(1+((o.d/2)/(.6*me.r))**2);return E}).filter(E=>E<LIGHT_MODEL.weak).length;
+  return{reach:me.r,on:me.on,n1:n1?{code:n1.it.l.code,d:Math.round(n1.d)}:null,gapNow:worst,riskIfOut:risk};
+}
+function reviewSection(){
+  const rv=S.review;
+  const dongSel=`<select class="f-in" id="rvDong" style="flex:1">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===(rv?rv.dong:"전체")?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select>`;
+  const kindSel=`<select class="f-in" id="rvKind" style="flex:0 0 auto">${["전체",...KINDS.slice(0,2)].map(k=>`<option value="${k}" ${k===(rv?rv.kind:"전체")?"selected":""}>${k==="전체"?"모든 종류":k}</option>`).join("")}</select>`;
+  let body="";
+  if(rv){
+    const cs=rv.cands;const dark=cs.filter(c=>c.dark).length;
+    body=`<div class="muted" style="margin:10px 0 6px">${rv.dong==="전체"?"동구 전체":rv.dong} · 검토 후보 <b>${cs.length}</b>곳${dark?` (그중 고장·수리중 등 때문에 어두운 곳 ${dark})`:""} · 등 ${rv.n.toLocaleString()}개 기준</div>
+    ${cs.length?`<div class="list">${cs.slice(0,rv.show).map((c,i)=>`<div class="panel" style="border-left:5px solid ${c.dark?"var(--bad)":"var(--sodium)"}">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>#${i+1}</b> ${kindBadge(c.a.kind)}<b>${esc(c.a.code)}</b> <span class="muted">↔</span> ${kindBadge(c.b.kind)}<b>${esc(c.b.code)}</b><span class="chip ${c.dark?"st-고장":"st-점검필요"}" style="margin-left:auto">${c.dark?"고장으로 암부":"간격 과다"}</span></div>
+      <div class="muted">${esc(c.a.dong)} · 두 등 사이 ${c.d}m (적정 ${c.need}m 이내) · 중간 지점 예상 밝기 ${Math.round(c.E*100)}%${c.dark?` · ${[c.a,c.b].filter(l=>onOf(l)===0).map(l=>esc(l.code)+" "+esc(l.status)).join(", ")}`:""}</div>
+      <div class="split"><button class="btn sm" data-rvmap="${i}">지도</button><button class="btn ghost sm" data-rvreg="${i}">보완 등 미등록 양식에</button><button class="btn ghost sm" data-light="${esc(c.a.id)}">${esc(c.a.code)} 열기</button><button class="btn ghost sm" data-light="${esc(c.b.id)}">${esc(c.b.code)} 열기</button></div></div>`).join("")}
+      ${cs.length>rv.show?`<button class="btn ghost block" id="rvMore">더 보기 · ${cs.length-rv.show}곳 남음</button>`:""}</div>
+      <div class="split"><button class="btn sm" data-rvmap="all">후보 전체 지도</button>${dl?`<button class="btn ghost sm" id="csv4">검토 후보 CSV</button>`:""}</div>`
+    :`<div class="empty">이 범위에서는 모델상 어두운 구간이 안 잡혔어요.</div>`}`;
+  }
+  return `<div class="panel">
+    <p class="muted" style="margin:0 0 8px">동구 대장의 실제 설치 간격을 기준으로 삼아요${(()=>{const c=lightGrid()&&CALIB;return c&&c["가로등"]&&c["보안등"]?` (이웃 간격 중앙값 가로등 ${c["가로등"].p50}m·보안등 ${c["보안등"].p50}m, 상위 10% 기준 ${c["가로등"].p90}m·${c["보안등"].p90}m)`:""})()}. 두 등 사이가 그보다 넓거나 고장·수리중 등 때문에 중간이 어두워지는 곳을 찾고, 광원 종류(LED·CDM·삼파장 등)로 밝기를 보정해요. 실측 조도나 도로 형상은 반영되지 않으니 <b>현장 확인 순서를 정하는 용도</b>로 보세요.</p>
+    <div class="split" style="margin:0">${dongSel}${kindSel}<button class="btn sm" id="rvRun">검토 실행</button></div>${body}</div>`;
+}
+async function exportReviewCSV(){
+  const rv=S.review;if(!rv)return;const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+  const rows=[["순위","구분","동","등A","등A상태","등B","등B상태","거리m","적정m","중간예상밝기%","중간위도","중간경도"],...rv.cands.map((c,i)=>[i+1,c.dark?"고장으로 암부":"간격 과다",c.a.dong,c.a.code,c.a.status,c.b.code,c.b.status,c.d,c.need,Math.round(c.E*100),c.mid.lat.toFixed(6),c.mid.lng.toFixed(6)])];
+  const csv="﻿"+rows.map(r=>r.map(q).join(",")).join("\r\n");
+  try{await dl.save({filename:`동구가로등_밝기검토_${fmtD(Date.now()).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
+}
+function openReviewMap(idx){
+  const rv=S.review;if(!rv)return;
+  const cs=idx==="all"?rv.cands.slice(0,200):[rv.cands[+idx]];
+  const center=idx==="all"?null:cs[0].mid;
+  const pts=S.lights.filter(l=>typeof l.lat==="number"&&(idx==="all"?(rv.dong==="전체"||l.dong===rv.dong):distM(center,l)<=160));
+  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">밝기 검토 지도 <span class="muted">${cs.length}곳</span></h3><div class="muted">노란 원은 예상 조명 범위, ⚠ 는 중간이 어두운 구간이에요. 원을 누르면 등 정보가 떠요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+    <div class="gmap" id="gmap"><button class="btn sm locbtn" id="mapLoc">내 위치</button></div>
+    <div class="maplegend"><span><i style="background:#F5C542;border-color:#F5C542"></i>예상 조명 범위</span><span><i style="background:#C2372B;border-color:#C2372B"></i>고장·수리중(꺼짐)</span><span>⚠ 검토 구간</span><span id="mapNote" style="margin-left:auto"></span></div>`);
+  if(!window.L){$("#mapNote").textContent="지도 라이브러리를 불러오지 못했어요.";return}
+  if(gmap){gmap.remove();gmap=null}
+  gmap=L.map("gmap",{zoomControl:true,attributionControl:true,tap:true,preferCanvas:true});
+  const tiles=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(gmap);
+  let errs=0;tiles.on("tileerror",()=>{if(++errs===4)$("#mapNote").textContent="지도 배경을 불러올 수 없어요."});
+  gmapLayer=L.layerGroup().addTo(gmap);gmapPts=[];
+  pts.forEach(l=>{const on=onOf(l),r=reachOf(l);
+    L.circle([l.lat,l.lng],{radius:on?r:r*.5,stroke:false,fillColor:on?"#F5C542":"#C2372B",fillOpacity:on?.22*on:.18}).addTo(gmapLayer);
+    const m=L.circleMarker([l.lat,l.lng],{radius:4,color:"#fff",weight:1.5,fillColor:on?"#8a6a00":"#C2372B",fillOpacity:1});
+    m.bindPopup(`${kindBadge(l.kind)}<b>${esc(l.code)}</b> <span class="chip st-${esc(l.status)}">${esc(l.status)}</span><br>${esc(l.lampType||"")} · 예상 반경 ${r}m<br><button class="btn sm" style="margin-top:6px" data-map-open="${esc(l.id)}">열기</button>`);m.addTo(gmapLayer)});
+  cs.forEach((c,i)=>{
+    L.polyline([[c.a.lat,c.a.lng],[c.b.lat,c.b.lng]],{color:c.dark?"#C2372B":"#E89A0C",weight:3,dashArray:"6 5",opacity:.9}).addTo(gmapLayer);
+    const mk=L.marker([c.mid.lat,c.mid.lng],{icon:L.divIcon({className:"",html:`<div style="font-size:22px;line-height:1;filter:drop-shadow(0 1px 2px #0008)">⚠</div>`,iconSize:[24,24],iconAnchor:[12,12]})});
+    mk.bindPopup(`<b>${esc(c.a.code)} ↔ ${esc(c.b.code)}</b><br>${c.d}m 간격 (적정 ${c.need}m) · 중간 밝기 ${Math.round(c.E*100)}%${c.dark?"<br><span style='color:#C2372B'>고장·수리중 등으로 어두움</span>":""}<br><button class="btn sm" style="margin-top:6px" data-rvreg="${idx==="all"?i:idx}">보완 등 양식에</button>`);mk.addTo(gmapLayer)});
+  if(center)gmap.setView([center.lat,center.lng],18);else if(pts.length)gmap.fitBounds(L.latLngBounds(pts.map(l=>[l.lat,l.lng])).pad(.1),{maxZoom:17});
+  setTimeout(()=>gmap&&gmap.invalidateSize(),250);
+}
+function reviewToForm(idx){
+  const c=S.review&&S.review.cands[+idx];if(!c)return;
+  closeSheet();S.tab="admin";render();const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
+  $("#nNoPlate").checked=true;["nNum","nRoad"].forEach(x=>{const el=$("#"+x);if(el)el.disabled=true});
+  $("#nKind").value=c.a.kind;if(DONGS.includes(c.a.dong))d.value=c.a.dong;
+  $("#nLat").value=c.mid.lat.toFixed(5);$("#nLng").value=c.mid.lng.toFixed(5);
+  $("#nAddr").value=`${c.a.code} ↔ ${c.b.code} 사이`;$("#nNote").value=`밝기 검토 후보: 간격 ${c.d}m, 중간 밝기 ${Math.round(c.E*100)}%${c.dark?", 고장 등 영향":""}`;
+  const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});
+  toast("보완 지점 좌표를 양식에 넣었어요. 현장 확인 후 저장하세요.");
+}
 
 /* ---------- street map (Leaflet + OpenStreetMap) ---------- */
 let gmap=null,gmapLayer=null,gmapMe=null,gmapPts=[],gmapKind="전체";
