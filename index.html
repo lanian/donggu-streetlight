@@ -88,6 +88,11 @@ h3{font-size:15px;margin:0 0 6px}
 .kind{display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;color:#fff;vertical-align:1px;margin-right:4px;letter-spacing:.02em}
 .k-가로등{background:#1E7A4A}.k-보안등{background:#2A47B8}.k-공원등{background:#8A6A1F}.k-특이등{background:#6B3FA0}
 .kindseg{margin:0 0 10px}
+.reg{display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:4px;vertical-align:1px;background:var(--sodium-soft);color:var(--warn);border:1px solid var(--warn)}
+.reg.np{background:var(--bad-soft);color:var(--bad);border-color:var(--bad)}
+.reg.ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+.pend{border-left:5px solid var(--sodium)}
+.pend .thumb{max-height:140px;width:auto}
 .kindseg button i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:0}
 .kindseg button[aria-pressed="true"] i{outline:1px solid #fff8}
 .kindtab{display:grid;grid-template-columns:1fr auto auto auto auto;gap:6px 10px;font-size:13px;align-items:center}
@@ -368,7 +373,8 @@ function localDb(){
   };
   return{seed,collection:c=>query(c),doc:path=>{const [c,id]=path.split("/");return{
     set:async rec=>{(data[c]=data[c]||{})[id]=rec;save()},
-    update:async patch=>{data[c][id]=Object.assign(data[c][id]||{},patch);save()}}}};
+    update:async patch=>{data[c][id]=Object.assign(data[c][id]||{},patch);save()},
+    delete:async()=>{if(data[c])delete data[c][id];save()}}}};
 }
 /* Registry: the light list ships with the page (data/lights.json, converted from getPoint.json).
    The shared "lights" collection only holds what changes in the field — status, last inspection —
@@ -463,7 +469,7 @@ function tally(clickable){
 }
 function lightRow(l){
   return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>
-    <span class="body">${kindBadge(l.kind)}<span class="code">${esc(l.code)}</span> <span class="muted">${esc(l.dong)}${l.lampType?` · ${esc(l.lampType)}`:""}</span>
+    <span class="body">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:l.noPlate&&!l.plateFixed?`<span class="reg np">표찰없음</span>`:""}<span class="code">${esc(l.code)}</span> <span class="muted">${esc(l.dong)}${l.lampType?` · ${esc(l.lampType)}`:""}</span>
     <span class="addr" style="display:block">${esc(l.address)}</span></span>
     <span class="meta"><span class="chip">${esc(l.status)}</span>${isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${l.lastInspected?fmtD(l.lastInspected):"점검 기록 없음"}</span>`}</span></button>`;
 }
@@ -543,7 +549,8 @@ function vAdmin(){
   <h2>최근 점검 이력</h2>
   <div class="panel">${S.insp.length?S.insp.slice(0,12).map(i=>`<div class="hist st-${esc(i.result)}"><b>${esc(i.code)}</b> <span class="chip">${esc(i.result)}</span> <span class="muted">${fmtDT(i.date)} · ${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${i.faults&&i.faults.length?`<div class="muted">불량: ${i.faults.map(esc).join(", ")}</div>`:""}</div>`).join(""):`<span class="muted">아직 점검 기록이 없어요.</span>`}
   ${dl?`<div class="split"><button class="btn ghost sm" id="csv">점검 이력 CSV 내려받기</button><button class="btn ghost sm" id="csv2">가로등 대장 CSV 내려받기</button></div>`:""}</div>
-  ${S.canWrite?`<h2>가로등·보안등 등록</h2>
+  ${S.canWrite?`<h2>현장 등록 (대장에 없는 등)</h2>
+  <p class="muted" style="margin:-6px 0 10px">대장에 없는 등이나 표찰이 없는 등주를 발견하면 여기에 남겨요. 저장되면 '미등록'으로 표시되고, 아래 미등록 관리에서 대장 반영 여부를 추적해요.</p>
   <div class="panel">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
       <div><label class="f" for="nKind">종류</label><select class="f-in" id="nKind">${KINDS.map(d=>`<option>${d}</option>`).join("")}</select></div>
@@ -552,6 +559,7 @@ function vAdmin(){
       <div><label class="f" for="nDong">행정동</label><select class="f-in" id="nDong">${DONGS.map(d=>`<option>${d}</option>`).join("")}</select></div>
       <div><label class="f" for="nPole">한전 전주번호 (선택)</label><input class="f-in" id="nPole" placeholder="9792C742"></div>
     </div>
+    <label class="f" style="display:flex;align-items:center;gap:8px;font-weight:500"><input type="checkbox" id="nNoPlate"> 표찰이 없거나 읽을 수 없어요 (번호 없이 위치만 등록)</label>
     <p class="muted" id="nHint" style="margin:4px 0 0">가로등(초록 표찰)은 도로명과 번호(예: 지호로 65-5, 도로명이 없으면 140-8), 보안등(파란 표찰)은 동 이름 아래 숫자(예: 642)를 적어요.</p>
     <label class="f" for="nAddr">설치 위치</label><input class="f-in" id="nAddr" placeholder="예: 산수로 120 앞 보도">
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px">
@@ -559,8 +567,15 @@ function vAdmin(){
       <div><label class="f" for="nLat">위도</label><input class="f-in" id="nLat" inputmode="decimal" placeholder="35.146"></div>
       <div><label class="f" for="nLng">경도</label><input class="f-in" id="nLng" inputmode="decimal" placeholder="126.92"></div>
     </div>
-    <div class="split"><button class="btn" id="addLight">등록</button><button class="btn ghost" data-scan="admin" type="button">표찰 스캔</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button></div>
-  </div>`:""}`;
+    <label class="f">현장 사진 (선택)</label>
+    <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="nPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="nPhotoLib">앨범에서 선택</button><input type="file" id="nPhoto" accept="image/*" capture="environment" hidden><input type="file" id="nPhotoLib" accept="image/*" hidden><img id="nPrev" alt="" hidden></div>
+    <label class="f" for="nNote">메모 (선택)</label><input class="f-in" id="nNote" placeholder="예: 표찰 탈락, 신설 등, 전주 이설">
+    <div class="split"><button class="btn" id="addLight">미등록으로 저장</button><button class="btn ghost" data-scan="admin" type="button">표찰 스캔</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button></div>
+  </div>
+  <h2>미등록 관리 <span class="muted">${pendingList().length}</span></h2>
+  ${pendingSection()}
+  <h2>표찰 없는 등 (대장 기준) <span class="muted">${S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length}</span></h2>
+  ${noPlateSection()}`:""}`;
 }
 function vReport(){
   const mine=S.me?S.reports.filter(r=>r.reporterId===S.me):[];
@@ -595,7 +610,7 @@ let draft=null;
 async function openLight(id){
   const l=byId(id);if(!l)return;
   draft={lightId:id,checks:{},photo:null,result:null};
-  openSheet(`<div class="sheet-head st-${esc(l.status)}"><div><h3 style="font-size:19px">${kindBadge(l.kind)}${esc(l.code)} <span class="chip">${esc(l.status)}</span></h3>
+  openSheet(`<div class="sheet-head st-${esc(l.status)}"><div><h3 style="font-size:19px">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:""}${esc(l.code)} <span class="chip">${esc(l.status)}</span></h3>
     <div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address)}</div><div class="muted">${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.lampId?` · 관리ID ${esc(l.lampId)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}</div></div>
     <button class="x" aria-label="닫기" data-close>×</button></div>
     ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}</div>`:""}
@@ -665,7 +680,13 @@ document.addEventListener("click",async e=>{
   if(t.dataset.rstat){const to=t.dataset.to;write(()=>db.doc("reports/"+t.dataset.rstat).update({status:to,updatedAt:Date.now()}),`신고를 ${to}(으)로 변경했어요.`);return}
   if(t.dataset.tofault){const r=S.reports.find(x=>x.id===t.dataset.tofault);if(!r)return;write(async()=>{await patchLight(r.lightId,{status:"고장",updatedAt:Date.now()});if(r.status==="접수")await db.doc("reports/"+r.id).update({status:"처리중",updatedAt:Date.now()})},"가로등을 고장으로 등록했어요.");return}
   if(t.id==="addLight"){addLight();return}
-  if(t.id==="gps"){if(!navigator.geolocation){toast("이 기기에서는 위치를 가져올 수 없어요.");return}navigator.geolocation.getCurrentPosition(p=>{$("#nLat").value=p.coords.latitude.toFixed(5);$("#nLng").value=p.coords.longitude.toFixed(5)},()=>toast("위치 권한이 없어 좌표를 직접 입력해 주세요."));return}
+  if(t.dataset.regset){const to=t.dataset.to;write(()=>patchLight(t.dataset.regset,{reg:to,regAt:Date.now(),updatedAt:Date.now()}),`'${to}'(으)로 바꿨어요.`);return}
+  if(t.dataset.reglink){regLink(t.dataset.reglink);return}
+  if(t.dataset.regdel){const l=byId(t.dataset.regdel);if(!l)return;if(!confirm(`${l.code} 미등록 항목을 삭제할까요? 되돌릴 수 없어요.`))return;write(()=>db.doc("lights/"+l.id).delete(),"삭제했어요.");return}
+  if(t.dataset.platefix){plateFix(t.dataset.platefix);return}
+  if(t.dataset.mapone){const l=byId(t.dataset.mapone);if(l)openMap("one",l);return}
+  if(t.id==="csv3"){exportPendingCSV();return}
+  if(t.id==="gps"){if(!navigator.geolocation){toast("이 기기에서는 위치를 가져올 수 없어요.");return}navigator.geolocation.getCurrentPosition(p=>{$("#nLat").value=p.coords.latitude.toFixed(5);$("#nLng").value=p.coords.longitude.toFixed(5);window.__nAcc=Math.round(p.coords.accuracy);toast(`현재 위치를 넣었어요 (±${Math.round(p.coords.accuracy)}m)`)},()=>toast("위치 권한이 없어 좌표를 직접 입력해 주세요."));return}
   if(t.id==="csv"||t.id==="csv2"){exportCSV(t.id==="csv")}
   if(t.dataset.pick){const inp=document.getElementById(t.dataset.pick);if(inp){inp.value="";inp.click()}return}
   if(t.dataset.scan){openScanner(t.dataset.scan);return}
@@ -700,6 +721,9 @@ document.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;S
 document.addEventListener("change",async e=>{
   if(e.target.id==="dong"){S.dong=e.target.value;S.limit=60;render();return}
   if(e.target.id==="pkKind"){const g=e.target.value==="가로등";$("#pkDongBox").hidden=g;$("#pkRoadBox").hidden=!g;$("#pkNum").placeholder=g?"65-5":"642";return}
+  if(e.target.id==="nNoPlate"){const on=e.target.checked;["nNum","nRoad"].forEach(id=>{const x=$("#"+id);if(x)x.disabled=on});return}
+  const pid0=e.target.id.replace(/Lib$/,"");
+  if(pid0==="nPhoto"){const f=e.target.files&&e.target.files[0];if(!f)return;try{const d=await compress(f);const prev=$("#nPrev");prev.src=d;prev.hidden=false;window.__nPhoto=d}catch(err){toast("사진을 읽지 못했어요.")}return}
   if(e.target.id==="nKind"){const n=$("#nNum"),rb=$("#nRoadBox");if(n)n.placeholder=e.target.value==="가로등"?"65-5":"642";if(rb)rb.hidden=e.target.value!=="가로등";return}
   const pid=e.target.id.replace(/Lib$/,"");
   if(pid==="iPhoto"||pid==="rPhoto"){
@@ -721,18 +745,74 @@ async function sendReport(btn){
   if(ok){window.__rPhoto=null;render()}else{btn.disabled=false;btn.textContent="신고 접수하기"}
 }
 async function addLight(){
-  const dong=$("#nDong").value,kind=$("#nKind").value,raw=$("#nNum").value.trim(),addr=$("#nAddr").value.trim();
-  let p;
-  if(kind==="가로등"){const q=parseTyped(raw,"");const road=($("#nRoad").value||"").trim()||(q&&q.road)||"";if(!q||q.kind!=="가로등"){toast("가로등 표찰 번호는 번호-가지번호 형식이에요. 예: 65-5");$("#nNum").focus();return}p={kind,road,main:q.main,sub:q.sub}}
-  else{const n=raw.replace(/\D/g,"");if(!n){toast("보안등 표찰 번호를 숫자로 적어 주세요. 예: 642");$("#nNum").focus();return}p={kind,dong,num:n}}
-  const code=labelText(p),id=newIdFor(p);
-  if(lookup(p)||byId(id)){toast(`${code}는 이미 등록돼 있어요.`);return}
-  if(!addr){toast("설치 위치를 적어 주세요.");return}
+  const dong=$("#nDong").value,kind=$("#nKind").value,raw=$("#nNum").value.trim(),addr=$("#nAddr").value.trim(),noPlate=$("#nNoPlate").checked;
+  let p=null,code,id;
+  if(!noPlate){
+    if(kind==="가로등"){const q=parseTyped(raw,"");const road=($("#nRoad").value||"").trim()||(q&&q.road)||"";if(!q||q.kind!=="가로등"){toast("가로등 표찰 번호는 번호-가지번호 형식이에요. 예: 65-5 (표찰이 없으면 위 체크)");$("#nNum").focus();return}p={kind,road,main:q.main,sub:q.sub}}
+    else{const n=raw.replace(/\D/g,"");if(!n){toast("보안등 표찰 번호를 숫자로 적어 주세요. 예: 642 (표찰이 없으면 위 체크)");$("#nNum").focus();return}p={kind,dong,num:n}}
+    code=labelText(p);id=newIdFor(p);
+    const dup=lookup(p)||byId(id);if(dup){toast(`${code}는 이미 ${dup.reg?"미등록으로 저장돼":"대장에"} 있어요.`);return}
+  }else{id="np-"+Date.now().toString(36)+Math.random().toString(36).slice(2,5);code=`${dong} 표찰없음(현장)`}
   const lat=parseFloat($("#nLat").value),lng=parseFloat($("#nLng").value);
+  if(!addr&&!(isFinite(lat)&&isFinite(lng))){toast("설치 위치를 적거나 현재 위치를 넣어 주세요.");return}
   const pole=$("#nPole").value.trim().toUpperCase().replace(/\s+/g,"");
-  const rec={code,dong,kind,num:p.num||null,road:p.road||null,main:p.main||null,sub:p.sub||null,poleNo:pole||null,address:addr.slice(0,200),lampType:$("#nType").value,status:"정상",lastInspected:null,installedYear:new Date().getFullYear(),updatedAt:Date.now()};
-  if(isFinite(lat)&&isFinite(lng)){rec.lat=lat;rec.lng=lng}
-  if(await write(()=>db.doc("lights/"+id).set(rec),`${code}를 등록했어요.`))render();
+  const rec={code,dong,kind,num:p&&p.num||null,road:p&&p.road||null,main:p&&p.main||null,sub:p&&p.sub||null,poleNo:pole||null,address:addr.slice(0,200),lampType:$("#nType").value,status:"정상",lastInspected:null,
+    reg:"미등록",noPlate:noPlate||undefined,note:($("#nNote").value||"").trim().slice(0,300)||null,foundAt:Date.now(),foundBy:S.me||null,updatedAt:Date.now()};
+  if(window.__nPhoto)rec.photo=window.__nPhoto;
+  if(isFinite(lat)&&isFinite(lng)){rec.lat=lat;rec.lng=lng;if(window.__nAcc)rec.acc=window.__nAcc}
+  if(await write(()=>db.doc("lights/"+id).set(rec),`${code}을(를) 미등록으로 저장했어요.`)){window.__nPhoto=null;render()}
+}
+/* ---------- unregistered lights: field finds that are not in the registry yet ---------- */
+const REG_STATES=["미등록","대장반영","반려"];
+function pendingList(){return S.lights.filter(l=>l.reg).sort((a,b)=>(a.reg==="미등록"?0:1)-(b.reg==="미등록"?0:1)||(b.foundAt||0)-(a.foundAt||0))}
+function pendingSection(){
+  const ls=pendingList();
+  if(!ls.length)return `<div class="empty">현장에서 저장한 미등록 등이 없어요. 표찰 스캔에서 '대장에 없는 번호'가 나오거나, 표찰 없는 등주를 발견하면 위 양식으로 남기세요.</div>`;
+  return `<div class="list">${ls.map(l=>`<div class="panel pend">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${kindBadge(l.kind)}<b>${esc(l.code)}</b><span class="reg ${l.reg==="대장반영"?"ok":l.noPlate?"np":""}">${esc(l.reg)}${l.noPlate?" · 표찰없음":""}</span><span class="chip st-${esc(l.status)}" style="margin-left:auto">${esc(l.status)}</span></div>
+    <div class="muted">${esc(l.dong)} · ${esc(l.address||"")}${typeof l.lat==="number"?` · ${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}${l.acc?` (±${Math.round(l.acc)}m)`:""}`:" · 좌표 없음"}</div>
+    <div class="muted">${esc(l.lampType||"")}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.note?` · ${esc(l.note)}`:""} · ${fmtDT(l.foundAt)} ${esc(S.names[l.foundBy]||"")}</div>
+    ${l.photo?`<img class="thumb" src="${esc(l.photo)}" alt="현장 사진" loading="lazy">`:""}
+    ${l.linkedId?`<div class="muted">대장 ${esc((byId(l.linkedId)||{}).code||l.linkedId)}에 연결됨</div>`:""}
+    <div class="split">
+      <button class="btn ghost sm" data-light="${esc(l.id)}">열기</button>
+      ${l.reg==="미등록"?`<button class="btn sm" data-regset="${esc(l.id)}" data-to="대장반영">대장 반영 완료</button><button class="btn ghost sm" data-reglink="${esc(l.id)}">기존 등과 연결</button><button class="btn ghost sm" data-regset="${esc(l.id)}" data-to="반려">반려</button>`:`<button class="btn ghost sm" data-regset="${esc(l.id)}" data-to="미등록">미등록으로 되돌리기</button>`}
+      ${typeof l.lat==="number"?`<button class="btn ghost sm" data-mapone="${esc(l.id)}">지도</button>`:""}
+      <button class="btn ghost sm" data-regdel="${esc(l.id)}" style="color:var(--bad)">삭제</button>
+    </div></div>`).join("")}</div>
+  ${dl?`<div class="split"><button class="btn ghost sm" id="csv3">미등록 목록 CSV 내려받기</button></div>`:""}`;
+}
+function noPlateSection(){
+  const ls=S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed);
+  if(!ls.length)return `<div class="empty">대장에 '표찰없음'으로 남은 등이 없어요.</div>`;
+  return `<p class="muted" style="margin:-4px 0 8px">관리시스템 대장에 표찰 번호 없이 올라 있는 등이에요. 현장에서 표찰을 달면 그 번호를 여기에 기록하세요.</p>
+  <div class="list">${ls.slice(0,30).map(l=>`<div class="panel" style="border-left:5px solid var(--bad)">
+    <div style="display:flex;gap:8px;align-items:center">${kindBadge(l.kind)}<b>${esc(l.code)}</b><span class="reg np">표찰없음</span><span class="muted" style="margin-left:auto">ID ${esc(l.lampId||"")}</span></div>
+    <div class="muted">${esc(l.dong)} · ${esc(l.address||"")}</div>
+    <div class="split"><button class="btn sm" data-platefix="${esc(l.id)}">표찰 번호 기록</button><button class="btn ghost sm" data-light="${esc(l.id)}">열기</button>${typeof l.lat==="number"?`<button class="btn ghost sm" data-mapone="${esc(l.id)}">지도</button>`:""}</div></div>`).join("")}${ls.length>30?`<div class="muted">외 ${ls.length-30}개</div>`:""}</div>`;
+}
+async function regLink(id){
+  const l=byId(id);if(!l)return;
+  const txt=prompt(`${l.code} 을(를) 대장의 어느 등에 연결할까요?\n표찰 번호를 적어 주세요 (예: 산수동 642, 지호로 65-5)`);if(!txt)return;
+  const p=parseCode(txt);const t=p&&lookup(p);
+  if(!t||t.reg){toast("대장에서 그 번호를 찾지 못했어요.");return}
+  if(!confirm(`${t.code} (${t.dong}) 에 연결하고, 이 미등록 항목은 '대장반영'으로 바꿀까요?`))return;
+  await write(async()=>{await patchLight(id,{reg:"대장반영",linkedId:t.id,updatedAt:Date.now()});if(l.status&&l.status!=="정상")await patchLight(t.id,{status:l.status,updatedAt:Date.now()})},`${t.code}에 연결했어요.`);
+}
+async function plateFix(id){
+  const l=byId(id);if(!l)return;
+  const txt=prompt(`${l.code} 에 새로 단 표찰 번호를 적어 주세요 (예: 산수동 915)`);if(!txt)return;
+  const p=parseCode(txt);if(!p){toast("번호 형식을 못 읽었어요. 예: 산수동 915, 지호로 65-5");return}
+  const dup=lookup(p);if(dup&&dup.id!==id){toast(`${labelText(p)}은(는) 이미 ${dup.code}로 등록돼 있어요.`);return}
+  const patch={code:labelText(p),plateFixed:true,plateFixedAt:Date.now(),updatedAt:Date.now()};
+  if(p.kind==="가로등"){patch.kind="가로등";patch.road=p.road||null;patch.main=p.main;patch.sub=p.sub;patch.num=null}else{patch.dong=p.dong;patch.num=p.num;patch.road=null;patch.main=null;patch.sub=null}
+  await write(()=>patchLight(id,patch),`${patch.code}로 기록했어요. 관리시스템 대장에도 반영해 주세요.`);
+}
+async function exportPendingCSV(){
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+  const rows=[["상태","표찰번호","종류","동","도로명","번호","위도","경도","GPS오차m","전주번호","광원","위치설명","메모","발견일시","연결대장번호"],...pendingList().map(l=>[l.reg,l.code,l.kind,l.dong,l.road,l.kind==="가로등"?`${l.main||""}${l.sub?"-"+l.sub:""}`:l.num,l.lat,l.lng,l.acc,l.poleNo,l.lampType,l.address,l.note,fmtDT(l.foundAt),l.linkedId?(byId(l.linkedId)||{}).code:""])];
+  const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
+  try{await dl.save({filename:`동구가로등_미등록_${fmtD(Date.now()).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
 }
 async function exportCSV(insp){
   const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
@@ -795,16 +875,16 @@ function drawMapMarkers(){
   const pts=gmapPts.filter(l=>gmapKind==="전체"||(l.kind||"가로등")===gmapKind);const many=pts.length>800;
   const order=[...pts].sort((a,b)=>({"정상":0,"점검필요":1,"수리중":2,"고장":3}[a.status]-{"정상":0,"점검필요":1,"수리중":2,"고장":3}[b.status]));
   order.forEach(l=>{
-    const m=L.circleMarker([l.lat,l.lng],{radius:l.status==="정상"?(many?4:6):8,color:KIND_COL[l.kind]||"#fff",weight:many&&l.status==="정상"?1.5:2.5,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});
-    m.bindPopup(`${kindBadge(l.kind)}<b style="font-size:14px">${esc(l.code)}</b> <span style="color:${STAT_COL[l.status]};font-weight:600">${esc(l.status)}</span><br>${esc(l.dong)} · ${esc(l.lampType||"")}<br>${esc(l.address)}<br><span style="color:#667">마지막 점검 ${fmtD(l.lastInspected)}${isDue(l)?" · 주기 경과":""}</span><br><button class="btn sm" style="margin-top:6px" data-map-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button>`);
+    const m=L.circleMarker([l.lat,l.lng],{radius:l.reg?9:l.status==="정상"?(many?4:6):8,color:l.reg?"#E89A0C":KIND_COL[l.kind]||"#fff",weight:l.reg?3:many&&l.status==="정상"?1.5:2.5,dashArray:l.reg?"3 3":null,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});
+    m.bindPopup(`${kindBadge(l.kind)}${l.reg?`<span class="reg">${esc(l.reg)}</span>`:""}<b style="font-size:14px">${esc(l.code)}</b> <span style="color:${STAT_COL[l.status]};font-weight:600">${esc(l.status)}</span><br>${esc(l.dong)} · ${esc(l.lampType||"")}<br>${esc(l.address)}<br><span style="color:#667">마지막 점검 ${fmtD(l.lastInspected)}${isDue(l)?" · 주기 경과":""}</span><br><button class="btn sm" style="margin-top:6px" data-map-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button>`);
     m.addTo(gmapLayer);
   });
   const c=$("#mapCount");if(c)c.textContent=`${pts.length.toLocaleString()}개`;
 }
 const STAT_COL={"정상":"#2C7A57","점검필요":"#B86E00","고장":"#C2372B","수리중":"#2F5DA8"};
-function openMap(scope){
-  const pts=(scope==="filtered"?filtered():scope==="open"?S.lights.filter(l=>l.status!=="정상"):S.lights).filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
-  const title=scope==="filtered"?"지도 · 현재 목록":scope==="open"?"지도 · 조치 필요":"지도 · 전체";
+function openMap(scope,one){
+  const pts=(scope==="one"?S.lights.filter(l=>l===one||(typeof l.lat==="number"&&distM(one,l)<=150)):scope==="filtered"?filtered():scope==="open"?S.lights.filter(l=>l.status!=="정상"):S.lights).filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
+  const title=scope==="one"?`지도 · ${one.code}`:scope==="filtered"?"지도 · 현재 목록":scope==="open"?"지도 · 조치 필요":"지도 · 전체";
   gmapKind="전체";
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted" id="mapCount">${pts.length.toLocaleString()}개</span></h3><div class="muted">마커 속은 상태, 테두리는 종류예요. 고장·수리중은 위에 그려져요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     ${kindChips("전체","mapKind",kindCounts(pts))}
@@ -817,7 +897,8 @@ function openMap(scope){
   const tiles=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(gmap);
   let errs=0;tiles.on("tileerror",()=>{if(++errs===4)$("#mapNote").textContent="지도 배경을 불러올 수 없어요. 마커 위치만 표시돼요."});
   gmapLayer=L.layerGroup().addTo(gmap);gmapPts=pts;drawMapMarkers();
-  if(pts.length)gmap.fitBounds(L.latLngBounds(pts.map(l=>[l.lat,l.lng])).pad(.15),{maxZoom:17});
+  if(scope==="one"&&one)gmap.setView([one.lat,one.lng],18);
+  else if(pts.length)gmap.fitBounds(L.latLngBounds(pts.map(l=>[l.lat,l.lng])).pad(.15),{maxZoom:17});
   else gmap.setView([35.146,126.923],13);
   setTimeout(()=>gmap&&gmap.invalidateSize(),250);
 }
@@ -1253,7 +1334,7 @@ function showScanResult(r){
     <div class="split">
       ${r.code&&l&&scan.ctx==="inspect"?`<button class="btn" data-apply="open">이 등 점검하기</button>`:""}
       ${r.code&&l&&scan.ctx==="admin"?`<button class="btn" data-apply="open">이 등 열기</button>`:""}
-      ${r.code&&!l&&S.canWrite&&scan.ctx!=="report"?`<button class="btn" data-apply="register">신규 등록 양식에 넣기</button>`:""}
+      ${r.code&&!l&&S.canWrite&&scan.ctx!=="report"?`<button class="btn" data-apply="register">미등록 양식에 넣기</button>${scan.pos?`<button class="btn ghost" data-apply="quick">현재 위치로 바로 저장</button>`:""}`:""}
       ${r.code&&scan.ctx==="report"?`<button class="btn sodium" data-apply="report">신고 양식에 넣기</button>`:""}
       ${r.code&&!l&&scan.ctx==="inspect"&&S.canWrite?`<button class="btn ghost" data-apply="register">신규 등록</button>`:""}
       <button class="btn ghost" id="scanStart">다시 스캔</button>
@@ -1264,9 +1345,14 @@ function applyScan(what){
   const r=scan.found;if(!r||!r.code)return;
   const p=r.code,txt=labelText(p),l=lookup(p);
   if(what==="open"){if(!l)return;stopCam(false);openLight(l.id);return}
+  if(what==="quick"){if(!scan.pos){toast("위치를 아직 못 잡았어요.");return}const id=newIdFor(p);if(byId(id)){toast("이미 저장된 번호예요.");return}
+    const rec={code:txt,dong:p.dong||(DONGS.includes(p.road)?p.road:""),kind:p.kind,num:p.num||null,road:p.road||null,main:p.main||null,sub:p.sub||null,poleNo:r.pole||null,address:"",lampType:"",status:"정상",lastInspected:null,reg:"미등록",lat:scan.pos.lat,lng:scan.pos.lng,acc:Math.round(scan.pos.acc||0),photo:r.plate||null,foundAt:Date.now(),foundBy:S.me||null,updatedAt:Date.now(),note:"표찰 스캔에서 바로 저장"};
+    if(!rec.dong){const near=S.lights.filter(x=>typeof x.lat==="number").map(x=>({x,d:distM(scan.pos,x)})).sort((a,b)=>a.d-b.d)[0];if(near)rec.dong=near.x.dong}
+    write(()=>db.doc("lights/"+id).set(rec),`${txt}을(를) 미등록으로 저장했어요. 관리 현황에서 확인하세요.`).then(ok=>{if(ok){closeSheet();S.tab="admin";render()}});return}
   stopCam(false);closeSheet();
   if(what==="report"){S.tab="report";render();$("#rNum").value=p.kind==="가로등"?txt:p.num;if(p.dong)$("#rDong").value=p.dong;else if(l)$("#rDong").value=l.dong;$("#rLoc").focus();toast(`${txt} 번호를 넣었어요.`);return}
   if(what==="register"){S.tab="admin";render();const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
+    $("#nNoPlate").checked=false;["nNum","nRoad"].forEach(x=>{const el=$("#"+x);if(el)el.disabled=false});
     $("#nKind").value=p.kind;$("#nNum").value=p.kind==="가로등"?`${p.main}-${p.sub}`:p.num;$("#nNum").placeholder=p.kind==="가로등"?"65-5":"642";$("#nRoadBox").hidden=p.kind!=="가로등";if(p.road)$("#nRoad").value=p.road;if(p.dong)d.value=p.dong;if(r.pole)$("#nPole").value=r.pole;
     $("#nAddr").scrollIntoView({behavior:"smooth",block:"center"});$("#nAddr").focus();toast(`${txt} 번호를 넣었어요. ${p.kind==="가로등"?"행정동과 ":""}위치를 적고 등록하세요.`)}
 }

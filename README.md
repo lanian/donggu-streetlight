@@ -8,7 +8,7 @@
 | 탭 | 대상 | 주요 기능 |
 |---|---|---|
 | 현장 점검 | 점검자 | 고장·점검주기 경과 순 목록, 8항목 점검표, 등주 기울기 측정, 사진·메모, 점검 이력 |
-| 관리 현황 | 담당 공무원 | 위치 분포도, 조치 필요 목록, 주민 신고 처리(접수→처리중→완료), 행정동별 현황, CSV 내보내기, 신규 등록 |
+| 관리 현황 | 담당 공무원 | 위치 분포도, 조치 필요 목록, 주민 신고 처리(접수→처리중→완료), 종류별·행정동별 현황, CSV 내보내기, 현장 등록(미등록 관리), 표찰 없는 등 관리 |
 | 주민 신고 | 주민 | 문제 유형 선택, 표찰 스캔으로 번호 자동 입력, 사진 첨부, 내 신고 처리 결과 확인 |
 
 ## 표찰 기반 식별
@@ -37,7 +37,9 @@ cols: id, lampId, label, code, kind(가로등|보안등|공원등|특이등), do
 
 ```
 lights/{id}        대장 id와 같은 키. status(정상|점검필요|고장|수리중), lastInspected, lastResult, updatedAt
-                   + 현장에서 직접 등록한 등은 전체 필드(code, dong, kind, num/road/main/sub, lat, lng …)
+                   표찰을 새로 단 경우: code, num/road/main/sub, plateFixed, plateFixedAt
+                   현장에서 발견한 미등록 등(id np-… / bd-… / gl-…): 전체 필드 + reg(미등록|대장반영|반려),
+                   noPlate, lat, lng, acc, photo, note, foundAt, foundBy, linkedId(기존 등과 연결 시)
 
 inspections/{auto}
   lightId, code, dong, date, checks{}, faults[], result, memo, tiltDeg, photo, inspector
