@@ -170,7 +170,8 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .arwrap video{width:100%;height:100%;object-fit:cover;display:block}
 .arwrap .fallback{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#C9D2E3;font-size:13px;text-align:center;padding:20px;background:linear-gradient(#1A2538,#0F1726)}
 .arwrap.nocam .fallback{display:flex}
-.arm{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;gap:2px;transition:left .15s,top .15s;cursor:pointer;border:0;background:transparent;padding:0}
+.arm{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;gap:2px;transition:left .45s cubic-bezier(.2,.7,.3,1),top .45s cubic-bezier(.2,.7,.3,1);cursor:pointer;border:0;background:transparent;padding:0}
+@media (prefers-reduced-motion:reduce){.arm{transition:none}}
 .arm .tag{background:rgba(16,24,40,.85);color:#fff;border-radius:10px;padding:5px 9px;font-size:12px;line-height:1.3;white-space:nowrap;border:2px solid var(--c);text-align:center}
 .arm .tag b{display:block;font-size:13px}
 .arm .pin{width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid var(--c)}
@@ -180,15 +181,15 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .arhud{position:absolute;left:0;right:0;top:0;padding:8px 10px;display:flex;justify-content:space-between;color:#fff;font-size:12px;background:linear-gradient(rgba(0,0,0,.55),transparent);pointer-events:none}
 .radar{position:absolute;right:10px;top:34px;width:92px;height:92px;border-radius:50%;background:rgba(16,24,40,.72);border:1px solid #fff5;pointer-events:none}
 .radar::before{content:"";position:absolute;left:50%;top:50%;width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;border-bottom:40px solid rgba(255,255,255,.12);transform:translate(-50%,-100%)}
-.radar i{position:absolute;width:7px;height:7px;border-radius:50%;background:var(--c);transform:translate(-50%,-50%)}
+.radar i{position:absolute;width:7px;height:7px;border-radius:50%;background:var(--c);transform:translate(-50%,-50%);transition:left .4s,top .4s}
 .radar .me{width:6px;height:6px;background:#fff;left:50%;top:50%}
 .arlist .row{padding:8px 12px}
 .arlist .row.sel{box-shadow:inset 0 0 0 2px var(--c)}
-.arlist .arrow{font-size:16px;color:var(--c);flex:none;width:20px;text-align:center;transition:transform .2s;display:inline-block;transform-origin:50% 50%}
+.arlist .arrow{font-size:16px;color:var(--c);flex:none;width:20px;text-align:center;transition:transform .4s ease-out;display:inline-block;transform-origin:50% 50%}
 .arm.tgt .tag{border-width:3px;box-shadow:0 0 0 3px #fff6}
 .radar i.tgt{width:11px;height:11px;box-shadow:0 0 0 2px #fff}
 .arguide{position:absolute;left:10px;right:10px;bottom:10px;background:rgba(16,24,40,.88);color:#fff;border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:center;border-left:5px solid var(--c);font-size:13px;backdrop-filter:blur(4px)}
-.arguide .garrow{font-size:30px;line-height:1;color:var(--sodium);transition:transform .15s;display:inline-block;transform-origin:50% 50%;flex:none}
+.arguide .garrow{font-size:30px;line-height:1;color:var(--sodium);transition:transform .4s ease-out;display:inline-block;transform-origin:50% 50%;flex:none}
 .arguide.here{background:rgba(44,122,87,.9)}
 .arguide .chip{background:var(--c);color:#fff}
 .arguide .split .btn{background:#fff;color:#16233D}.arguide .split .btn.ghost{background:transparent;color:#fff;border-color:#fff8}
@@ -679,6 +680,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.turn){toast(t.dataset.turn==="l"?"왼쪽으로 돌아보세요":"오른쪽으로 돌아보세요");return}
   if(t.id==="arCal"){toast("휴대폰을 8자 모양으로 몇 번 크게 돌리면 나침반이 보정돼요.");return}
   if(t.id==="arRetry"){arStart();return}
+  if(t.id==="arFreeze"){ar.frozen=!ar.frozen;t.setAttribute("aria-pressed",ar.frozen);t.textContent=ar.frozen?"고정 해제":"화면 고정";toast(ar.frozen?"방향을 고정했어요. 몸을 돌려도 화면이 움직이지 않아요.":"다시 방향을 따라가요.");return}
   if(t.id==="scanStop"){stopCam();return}
   if(t.id==="scanStart"){startCam();return}
   if(t.dataset.apply){applyScan(t.dataset.apply);return}
@@ -843,13 +845,13 @@ function openAR(){
     <div class="seg" style="margin-top:8px" id="arRange">${AR_RANGES.map(r=>`<button type="button" data-range="${r}" aria-pressed="${r===ar.range}">${r}m</button>`).join("")}<button type="button" id="arOnlyOpen" aria-pressed="${ar.onlyOpen}">조치 필요만</button></div>
     ${kindChips(ar.kind,"arKind",null)}
     <p class="muted" id="arNote" style="margin:8px 0 0">도심에서는 GPS 오차가 5~15m 있어요. 가까운 등은 표찰 스캔으로 확정하세요.</p>
-    <div class="split"><button class="btn ghost sm" id="arRetry">센서 다시 켜기</button><button class="btn ghost sm" id="arCal" hidden>나침반 보정 방법</button></div>
+    <div class="split"><button class="btn ghost sm" id="arFreeze" aria-pressed="false">화면 고정</button><button class="btn ghost sm" id="arRetry">센서 다시 켜기</button><button class="btn ghost sm" id="arCal" hidden>나침반 보정 방법</button></div>
     <h2 style="margin-top:14px">가까운 순 <span class="muted" id="arCount"></span></h2>
     <div class="list arlist" id="arList"><div class="empty">현재 위치를 기다리는 중이에요.</div></div>`);
   arStart();
 }
 async function arStart(){
-  arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;
+  arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;
   const v=$("#arCam"),wrap=$("#arwrap");if(!v)return;
   try{ar.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});v.srcObject=ar.stream;await v.play();wrap.classList.remove("nocam")}
   catch(e){wrap.classList.add("nocam")}
@@ -860,77 +862,104 @@ async function arStart(){
     else{const h=$("#arHead");if(h)h.textContent="나침반 권한 없음"}
   }
   if(!navigator.geolocation){const g=$("#arGps");if(g)g.textContent="위치 사용 불가";return}
-  ar.watch=navigator.geolocation.watchPosition(p=>{
-    ar.pos={lat:p.coords.latitude,lng:p.coords.longitude};ar.acc=p.coords.accuracy;
-    if(typeof p.coords.heading==="number"&&!isNaN(p.coords.heading)&&p.coords.speed>0.7)ar.gpsHeading=p.coords.heading;
-    const g=$("#arGps");if(g)g.textContent=`GPS ±${Math.round(ar.acc)}m${ar.acc>25?" (정확도 낮음)":""}`;
-    arList();arDraw();
-  },()=>{const g=$("#arGps");if(g)g.textContent="위치 권한이 없어요";const l=$("#arList");if(l)l.innerHTML=`<div class="empty">위치 권한을 허용하면 가까운 등을 보여드려요.</div>`},
+  ar.watch=navigator.geolocation.watchPosition(onPosition,()=>{const g=$("#arGps");if(g)g.textContent="위치 권한이 없어요";const l=$("#arList");if(l)l.innerHTML=`<div class="empty">위치 권한을 허용하면 가까운 등을 보여드려요.</div>`},
   {enableHighAccuracy:true,maximumAge:2000,timeout:15000});
 }
 function onHeading(e){
   if(!ar.on)return;
-  let h=null,absolute=false;
-  if(typeof e.webkitCompassHeading==="number"){h=e.webkitCompassHeading;absolute=true;ar.compassOk=!(e.webkitCompassAccuracy>30||e.webkitCompassAccuracy<0)}
-  else if(typeof e.alpha==="number"){if(e.type==="deviceorientationabsolute"||e.absolute){h=(360-e.alpha)%360;absolute=true;ar.compassOk=true}else if(ar.heading==null&&!("ondeviceorientationabsolute" in window)){h=(360-e.alpha)%360;ar.compassOk=false}}
+  let h=null;
+  if(typeof e.webkitCompassHeading==="number"){h=e.webkitCompassHeading;ar.compassOk=!(e.webkitCompassAccuracy>30||e.webkitCompassAccuracy<0)}
+  else if(typeof e.alpha==="number"){if(e.type==="deviceorientationabsolute"||e.absolute){h=(360-e.alpha)%360;ar.compassOk=true}else if(ar.heading==null&&!("ondeviceorientationabsolute" in window)){h=(360-e.alpha)%360;ar.compassOk=false}}
   if(h==null){if(ar.gpsHeading!=null){h=ar.gpsHeading;ar.compassOk=false}else return}
-  // screen rotation compensation
   const so=(screen.orientation&&typeof screen.orientation.angle==="number")?screen.orientation.angle:(window.orientation||0);
   h=(h+so+360)%360;
-  if(typeof e.beta==="number")ar.pitch=e.beta;
-  // exponential smoothing on the circle
-  if(ar.heading==null)ar.heading=h;else{const d=angDiff(ar.heading,h);ar.heading=(ar.heading+d*(Math.abs(d)>25?.6:.25)+360)%360}
-  const el=$("#arHead");if(el)el.textContent=`${Math.round(ar.heading)}° ${dirName(ar.heading)}${ar.compassOk===false?" · 보정 필요":""}`;
+  // pitch: slow follow with a dead band so the horizon does not bob with every step
+  if(typeof e.beta==="number"){const pb=ar.pitch==null?e.beta:ar.pitch;const dp=e.beta-pb;ar.pitch=Math.abs(dp)>4?pb+dp*.15:pb}
+  if(ar.frozen)return;
+  // heading: dead band + slow exponential follow; big turns still track quickly
+  if(ar.heading==null)ar.heading=h;
+  else{const d=angDiff(ar.heading,h);const ad=Math.abs(d);if(ad<1.5)return;ar.heading=(ar.heading+d*(ad>40?.5:ad>12?.25:.1)+360)%360}
+  const el=$("#arHead");if(el){const txt=`${Math.round(ar.heading)}° ${dirName(ar.heading)}${ar.compassOk===false?" · 보정 필요":""}`;if(el.textContent!==txt)el.textContent=txt}
   const cal=$("#arCal");if(cal)cal.hidden=ar.compassOk!==false;
-  const now=performance.now();if(now-ar.lastDraw>70){ar.lastDraw=now;arDraw()}
+  const now=performance.now();if(now-ar.lastDraw>120){ar.lastDraw=now;arDraw()}
+}
+function onPosition(p){
+  const nl={lat:p.coords.latitude,lng:p.coords.longitude};ar.acc=p.coords.accuracy;
+  if(typeof p.coords.heading==="number"&&!isNaN(p.coords.heading)&&p.coords.speed>0.7)ar.gpsHeading=p.coords.heading;
+  // position: ignore GPS jitter smaller than a few metres, otherwise ease toward the new fix
+  if(!ar.pos)ar.pos=nl;
+  else{const d=distM(ar.pos,nl);if(d<Math.max(3,ar.acc*.15))return;const k=d>25?1:.4;ar.pos={lat:ar.pos.lat+(nl.lat-ar.pos.lat)*k,lng:ar.pos.lng+(nl.lng-ar.pos.lng)*k}}
+  const g=$("#arGps");if(g)g.textContent=`GPS ±${Math.round(ar.acc)}m${ar.acc>25?" (정확도 낮음)":""}`;
+  arList();arDraw();
 }
 function arNear(){
   if(!ar.pos)return[];
   return S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number"&&(!ar.onlyOpen||l.status!=="정상")&&(ar.kind==="전체"||(l.kind||"가로등")===ar.kind)).map(l=>({l,d:distM(ar.pos,l),b:bearing(ar.pos,l)})).filter(x=>x.d<=ar.range).sort((x,y)=>x.d-y.d);
 }
-function arList(){
+/* the list below the camera: rebuilt only when the set of lights changes; arrows and distances update in place */
+function arList(force){
   const box=$("#arList"),c=$("#arCount");if(!box)return;
   const near=arNear();if(c)c.textContent=`${near.length}개 (${ar.range}m 이내${ar.onlyOpen?", 조치 필요":""})`;
-  const H=ar.heading;
-  box.innerHTML=near.length?near.slice(0,15).map(({l,d,b})=>`<button class="row st-${esc(l.status)} ${ar.target===l.id?"sel":""}" data-ar-target="${esc(l.id)}"><span class="pole"></span>
-    <span class="arrow" style="transform:rotate(${H==null?0:Math.round(angDiff(H,b))}deg)" aria-hidden="true">➤</span>
-    <span class="body">${kindBadge(l.kind)}<span class="code">${esc(l.code)}</span><span class="addr" style="display:block">${esc(l.address)}</span></span>
-    <span class="meta"><span class="chip">${esc(l.status)}</span><span class="muted" style="display:block;font-size:11px;margin-top:3px">${Math.round(d)}m · ${dirName(b)}</span></span></button>`).join("")
-  :`<div class="empty">${ar.range}m 안에 ${ar.onlyOpen?"조치가 필요한 ":""}등록된 등이 없어요.</div>`;
+  const H=ar.heading;const top=near.slice(0,15);const key=top.map(x=>x.l.id).join(",");
+  if(force||key!==ar.listKey){
+    ar.listKey=key;
+    box.innerHTML=top.length?top.map(({l,d,b})=>`<button class="row st-${esc(l.status)} ${ar.target===l.id?"sel":""}" data-ar-target="${esc(l.id)}" data-row="${esc(l.id)}"><span class="pole"></span>
+      <span class="arrow" style="transform:rotate(${H==null?0:Math.round(angDiff(H,b))}deg)" aria-hidden="true">➤</span>
+      <span class="body">${kindBadge(l.kind)}<span class="code">${esc(l.code)}</span><span class="addr" style="display:block">${esc(l.address)}</span></span>
+      <span class="meta"><span class="chip">${esc(l.status)}</span><span class="muted dist" style="display:block;font-size:11px;margin-top:3px">${Math.round(d)}m · ${dirName(b)}</span></span></button>`).join("")
+    :`<div class="empty">${ar.range}m 안에 ${ar.onlyOpen?"조치가 필요한 ":""}등록된 등이 없어요.</div>`;
+  }else{
+    top.forEach(({l,d,b})=>{const row=box.querySelector(`[data-row="${CSS.escape(l.id)}"]`);if(!row)return;row.classList.toggle("sel",ar.target===l.id);
+      const a=row.querySelector(".arrow");if(a&&H!=null)a.style.transform=`rotate(${Math.round(angDiff(H,b))}deg)`;
+      const m=row.querySelector(".dist");if(m){const t=`${Math.round(d)}m · ${dirName(b)}`;if(m.textContent!==t)m.textContent=t}});
+  }
 }
+/* markers are keyed DOM nodes moved with CSS transitions, not re-created each frame — that is what keeps the view calm */
 function arDraw(){
   const layer=$("#arLayer"),radar=$("#radar"),guide=$("#arGuide");if(!layer)return;
   const near=arNear();const H=ar.heading;
-  if(H==null){layer.innerHTML=`<div class="aredge" style="left:50%;transform:translateX(-50%)">${ar.pos?"나침반을 기다리는 중 — 휴대폰을 세워 주세요":"위치를 기다리는 중"}</div>`;return}
-  // horizon moves with pitch: upright (beta≈90) → 55%; tilting down raises it
-  const hor=Math.min(.62,Math.max(.14,.48-(ar.pitch-90)/120));
-  let left=0,right=0;const placed=[];let html="";
+  if(H==null){layer.innerHTML=`<div class="aredge" style="left:50%;transform:translateX(-50%)">${ar.pos?"나침반을 기다리는 중 — 휴대폰을 세워 주세요":"위치를 기다리는 중"}</div>`;ar.markerKeys=null;return}
+  const hor=Math.min(.62,Math.max(.14,.48-((ar.pitch==null?90:ar.pitch)-90)/120));
+  let left=0,right=0;const placed=[];const want=new Map();
   const tgt=ar.target?near.find(x=>x.l.id===ar.target):null;
-  near.forEach(({l,d,b})=>{
+  // stable stacking order: nearer first, ties broken by id so markers do not swap places
+  [...near].sort((x,y)=>(Math.round(x.d/10)-Math.round(y.d/10))||(x.l.id<y.l.id?-1:1)).forEach(({l,d,b})=>{
     const diff=angDiff(H,b);
     if(Math.abs(diff)>AR_FOV/2+6){if(diff<0)left++;else right++;return}
-    if(placed.length>=9&&ar.target!==l.id)return;
+    if(want.size>=9&&ar.target!==l.id)return;
     const x=Math.min(86,Math.max(14,50+diff/(AR_FOV/2)*50));let y=Math.min(68,(hor+(1-Math.min(d,ar.range)/ar.range)*.26)*100);
-    // declutter: stack markers that would overlap
     let bumps=0;while(placed.some(p=>Math.abs(p.x-x)<20&&Math.abs(p.y-y)<11)&&bumps<5){y-=11;bumps++}
-    placed.push({x,y});
-    html+=`<button class="arm st-${esc(l.status)} ${d>ar.range*.5?"far":""} ${ar.target===l.id?"tgt":""}" style="left:${x.toFixed(1)}%;top:${y.toFixed(1)}%" data-ar-target="${esc(l.id)}"><span class="tag" style="box-shadow:inset 0 3px 0 ${KIND_COL[l.kind]||"#fff"}"><b>${esc(l.code)}</b>${Math.round(d)}m · ${esc(l.status)}</span><span class="pin"></span></button>`;
+    placed.push({x,y});want.set(l.id,{l,d,x,y});
   });
-  if(left)html+=`<button class="aredge l" data-turn="l">◀ ${left}</button>`;if(right)html+=`<button class="aredge r" data-turn="r">${right} ▶</button>`;
-  layer.innerHTML=html;
+  // reconcile marker nodes
+  if(!ar.markerKeys){layer.innerHTML="";ar.markerKeys=new Set()}
+  for(const id of [...ar.markerKeys]){if(!want.has(id)){const n=layer.querySelector(`[data-mk="${CSS.escape(id)}"]`);n&&n.remove();ar.markerKeys.delete(id)}}
+  want.forEach(({l,d,x,y},id)=>{
+    let n=layer.querySelector(`[data-mk="${CSS.escape(id)}"]`);
+    const cls=`arm st-${esc(l.status)} ${d>ar.range*.5?"far":""} ${ar.target===id?"tgt":""}`;
+    const txt=`${Math.round(d)}m · ${esc(l.status)}`;
+    if(!n){n=document.createElement("button");n.dataset.mk=id;n.dataset.arTarget=id;n.innerHTML=`<span class="tag" style="box-shadow:inset 0 3px 0 ${KIND_COL[l.kind]||"#fff"}"><b>${esc(l.code)}</b><span class="dtxt">${txt}</span></span><span class="pin"></span>`;n.style.left=x.toFixed(1)+"%";n.style.top=y.toFixed(1)+"%";n.className=cls;layer.appendChild(n);ar.markerKeys.add(id)}
+    else{if(n.className!==cls)n.className=cls;const t=n.querySelector(".dtxt");if(t&&t.textContent!==txt)t.textContent=txt;
+      // move only when the change is visible (>0.6% of the view) to avoid micro-jitter
+      const cx=parseFloat(n.style.left),cy=parseFloat(n.style.top);if(Math.abs(cx-x)>.6)n.style.left=x.toFixed(1)+"%";if(Math.abs(cy-y)>.6)n.style.top=y.toFixed(1)+"%"}
+  });
+  let el=layer.querySelector(".aredge.l");if(left){if(!el){el=document.createElement("button");el.className="aredge l";el.dataset.turn="l";layer.appendChild(el)}const t=`◀ ${left}`;if(el.textContent!==t)el.textContent=t}else if(el)el.remove();
+  let er=layer.querySelector(".aredge.r");if(right){if(!er){er=document.createElement("button");er.className="aredge r";er.dataset.turn="r";layer.appendChild(er)}const t=`${right} ▶`;if(er.textContent!==t)er.textContent=t}else if(er)er.remove();
   if(radar)radar.innerHTML=`<i class="me"></i>`+near.map(({l,d,b})=>{const a=toRad(angDiff(H,b)-90),r=Math.min(d,ar.range)/ar.range*42;return`<i class="st-${esc(l.status)} ${ar.target===l.id?"tgt":""}" style="left:${(50+Math.cos(a)*r).toFixed(1)}%;top:${(50+Math.sin(a)*r).toFixed(1)}%"></i>`}).join("");
-  // guidance to the chosen light
   if(guide){
     if(!tgt&&ar.target){const l=byId(ar.target);const d=l&&ar.pos?distM(ar.pos,l):null;guide.hidden=false;guide.innerHTML=`<b>${esc(l?l.code:"")}</b> <span>${d!=null?Math.round(d)+"m":""} · 범위 밖이에요</span><button class="btn sm ghost" data-ar-target="">안내 끝</button>`}
     else if(tgt){const {l,d,b}=tgt;const diff=angDiff(H,b);const near8=d<=Math.max(8,(ar.acc||0)*.6);
       if(near8&&!ar.arrived){ar.arrived=true;if(navigator.vibrate)navigator.vibrate([60,40,60])}
-      guide.hidden=false;guide.className="arguide st-"+esc(l.status)+(near8?" here":"");
-      guide.innerHTML=`<span class="garrow" style="transform:rotate(${Math.round(diff)}deg)">➤</span><div><b>${esc(l.code)}</b> <span class="chip">${esc(l.status)}</span><div>${near8?"바로 근처예요 — 표찰을 확인하세요":`${Math.round(d)}m · ${Math.abs(diff)<12?"정면":diff<0?`왼쪽으로 ${Math.round(-diff)}°`:`오른쪽으로 ${Math.round(diff)}°`}`}</div></div>
-        <div class="split" style="margin:0"><button class="btn sm" data-ar-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button><button class="btn sm ghost" data-ar-target="">끝</button></div>`;
-    }else guide.hidden=true;
+      guide.hidden=false;const gc="arguide st-"+esc(l.status)+(near8?" here":"");if(guide.className!==gc)guide.className=gc;
+      const dirTxt=near8?"바로 근처예요 — 표찰을 확인하세요":`${Math.round(d)}m · ${Math.abs(diff)<12?"정면":diff<0?`왼쪽으로 ${Math.round(-diff/5)*5}°`:`오른쪽으로 ${Math.round(diff/5)*5}°`}`;
+      if(guide.dataset.for!==l.id){guide.dataset.for=l.id;guide.innerHTML=`<span class="garrow">➤</span><div><b>${esc(l.code)}</b> <span class="chip">${esc(l.status)}</span><div class="gdir"></div></div>
+        <div class="split" style="margin:0"><button class="btn sm" data-ar-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button><button class="btn sm ghost" data-ar-target="">끝</button></div>`}
+      const ga=guide.querySelector(".garrow");if(ga)ga.style.transform=`rotate(${Math.round(diff/3)*3}deg)`;
+      const gd=guide.querySelector(".gdir");if(gd&&gd.textContent!==dirTxt)gd.textContent=dirTxt;
+    }else{guide.hidden=true;guide.dataset.for=""}
   }
 }
-function arSetTarget(id){ar.target=id||null;ar.arrived=false;arList();arDraw();if(id){const w=$("#arwrap");w&&w.scrollIntoView({behavior:"smooth",block:"start"})}}
+function arSetTarget(id){ar.target=id||null;ar.arrived=false;arList(true);arDraw();if(id){const w=$("#arwrap");w&&w.scrollIntoView({behavior:"smooth",block:"start"})}}
 function arStop(reset=true){
   ar.on=false;
   if(ar.stream){ar.stream.getTracks().forEach(t=>t.stop());ar.stream=null}
