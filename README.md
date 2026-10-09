@@ -13,7 +13,12 @@
 
 ## 표찰 기반 식별
 
-동구가 등주에 부착한 파란색 고장신고 표찰(예: `산수동 642`)을 관리번호로 사용합니다.
+동구가 등주에 부착한 표찰을 관리번호로 사용합니다. 표찰은 두 종류입니다.
+
+| 종류 | 표찰 | 번호 형식 | 예 |
+|---|---|---|---|
+| 가로등 | 초록 머리띠 "가로등", 왼쪽 파란 세로 띠 "관리번호" | 도로명 + 번호-가지번호 (옛 표찰은 숫자만) | `지호로 65-5`, `140-8` |
+| 보안등 | 파란 "보안등 고장신고" | 행정동 + 번호 | `산수동 642`, `지산동 118` |
 
 - **QR 스캔** — 카메라로 표찰 QR을 비추면 해당 등의 상태·마지막 점검일·미처리 신고가 카메라 화면 위에 바로 표시됩니다.
 - **사진 인식** — QR이 없거나 훼손된 경우 표찰 사진을 올리면 AI가 동 이름·번호·한전 전주번호(예: `9792C742`)를 읽습니다.
@@ -24,8 +29,9 @@
 공유 데이터베이스의 컬렉션 세 개를 사용합니다. `seed/` 폴더에 샘플 레코드가 있습니다.
 
 ```
-lights/{dongSlug}-{num}      예: lights/ss-642
-  code, dong, num, kind(가로등|보안등), poleNo, address, lampType,
+lights/{dongSlug}-{num}            보안등  예: lights/ss-642
+lights/gl-{roadHash}-{main}-{sub}  가로등  예: lights/gl-ul9t0-65-5
+  code, dong, kind(가로등|보안등), num(보안등), road·main·sub(가로등), poleNo, address, lampType,
   installedYear, status(정상|점검필요|고장|수리중), lastInspected, lat, lng
 
 inspections/{auto}

@@ -1,1 +1,1 @@
-{"lightId": "cj-687", "code": "충장동 687", "dong": "충장동", "date": 1785593727881, "checks": {}, "faults": ["점등 상태"], "result": "고장", "memo": "샘플 점검 기록", "inspector": null, "inspectorName": "샘플 점검자"}
+{"lightId": null, "code": "충장동 687", "dong": "충장동", "date": 1785593727881, "checks": {}, "faults": ["점등 상태"], "result": "고장", "memo": "샘플 점검 기록", "inspector": null, "inspectorName": "샘플 점검자"}

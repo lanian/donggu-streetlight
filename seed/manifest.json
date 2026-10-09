@@ -1,4 +1,6 @@
-[
+{
+"version": 2,
+"docs": [
 {
 "collection": "inspections",
 "doc_id": "sample-1",
@@ -30,201 +32,6 @@
 "file": "i_6.json"
 },
 {
-"collection": "lights",
-"doc_id": "cj-367",
-"file": "l_cj-367.json"
-},
-{
-"collection": "lights",
-"doc_id": "cj-528",
-"file": "l_cj-528.json"
-},
-{
-"collection": "lights",
-"doc_id": "cj-536",
-"file": "l_cj-536.json"
-},
-{
-"collection": "lights",
-"doc_id": "cj-543",
-"file": "l_cj-543.json"
-},
-{
-"collection": "lights",
-"doc_id": "cj-687",
-"file": "l_cj-687.json"
-},
-{
-"collection": "lights",
-"doc_id": "dm-147",
-"file": "l_dm-147.json"
-},
-{
-"collection": "lights",
-"doc_id": "dm-355",
-"file": "l_dm-355.json"
-},
-{
-"collection": "lights",
-"doc_id": "dm-537",
-"file": "l_dm-537.json"
-},
-{
-"collection": "lights",
-"doc_id": "dm-642",
-"file": "l_dm-642.json"
-},
-{
-"collection": "lights",
-"doc_id": "dm-948",
-"file": "l_dm-948.json"
-},
-{
-"collection": "lights",
-"doc_id": "gr-100",
-"file": "l_gr-100.json"
-},
-{
-"collection": "lights",
-"doc_id": "gr-226",
-"file": "l_gr-226.json"
-},
-{
-"collection": "lights",
-"doc_id": "gr-30",
-"file": "l_gr-30.json"
-},
-{
-"collection": "lights",
-"doc_id": "gr-300",
-"file": "l_gr-300.json"
-},
-{
-"collection": "lights",
-"doc_id": "gr-77",
-"file": "l_gr-77.json"
-},
-{
-"collection": "lights",
-"doc_id": "hd-275",
-"file": "l_hd-275.json"
-},
-{
-"collection": "lights",
-"doc_id": "hd-276",
-"file": "l_hd-276.json"
-},
-{
-"collection": "lights",
-"doc_id": "hd-564",
-"file": "l_hd-564.json"
-},
-{
-"collection": "lights",
-"doc_id": "hd-644",
-"file": "l_hd-644.json"
-},
-{
-"collection": "lights",
-"doc_id": "hu-145",
-"file": "l_hu-145.json"
-},
-{
-"collection": "lights",
-"doc_id": "hu-476",
-"file": "l_hu-476.json"
-},
-{
-"collection": "lights",
-"doc_id": "hu-522",
-"file": "l_hu-522.json"
-},
-{
-"collection": "lights",
-"doc_id": "hu-543",
-"file": "l_hu-543.json"
-},
-{
-"collection": "lights",
-"doc_id": "js-17",
-"file": "l_js-17.json"
-},
-{
-"collection": "lights",
-"doc_id": "js-668",
-"file": "l_js-668.json"
-},
-{
-"collection": "lights",
-"doc_id": "js-828",
-"file": "l_js-828.json"
-},
-{
-"collection": "lights",
-"doc_id": "js-86",
-"file": "l_js-86.json"
-},
-{
-"collection": "lights",
-"doc_id": "jw-174",
-"file": "l_jw-174.json"
-},
-{
-"collection": "lights",
-"doc_id": "jw-554",
-"file": "l_jw-554.json"
-},
-{
-"collection": "lights",
-"doc_id": "jw-687",
-"file": "l_jw-687.json"
-},
-{
-"collection": "lights",
-"doc_id": "jw-898",
-"file": "l_jw-898.json"
-},
-{
-"collection": "lights",
-"doc_id": "sn-229",
-"file": "l_sn-229.json"
-},
-{
-"collection": "lights",
-"doc_id": "sn-667",
-"file": "l_sn-667.json"
-},
-{
-"collection": "lights",
-"doc_id": "sn-965",
-"file": "l_sn-965.json"
-},
-{
-"collection": "lights",
-"doc_id": "sn-978",
-"file": "l_sn-978.json"
-},
-{
-"collection": "lights",
-"doc_id": "ss-642",
-"file": "l_ss-642.json"
-},
-{
-"collection": "lights",
-"doc_id": "ss-651",
-"file": "l_ss-651.json"
-},
-{
-"collection": "lights",
-"doc_id": "ss-934",
-"file": "l_ss-934.json"
-},
-{
-"collection": "lights",
-"doc_id": "ss-944",
-"file": "l_ss-944.json"
-},
-{
 "collection": "reports",
 "doc_id": "sample-1",
 "file": "r_1.json"
@@ -246,33 +53,128 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-101",
-"file": "l_hs-101.json"
+"doc_id": "gl-v3etc-15-7",
+"file": "l_gl-v3etc-15-7.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-102",
-"file": "l_hs-102.json"
+"doc_id": "cj-528",
+"file": "l_cj-528.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-103",
-"file": "l_hs-103.json"
+"doc_id": "gl-v3etc-20-3",
+"file": "l_gl-v3etc-20-3.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-104",
-"file": "l_hs-104.json"
+"doc_id": "cj-543",
+"file": "l_cj-543.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-105",
-"file": "l_hs-105.json"
+"doc_id": "gl-uesqc-15-3",
+"file": "l_gl-uesqc-15-3.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-106",
-"file": "l_hs-106.json"
+"doc_id": "gl-u8c5r-15-7",
+"file": "l_gl-u8c5r-15-7.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-nex40b-15-1",
+"file": "l_gl-nex40b-15-1.json"
+},
+{
+"collection": "lights",
+"doc_id": "dm-537",
+"file": "l_dm-537.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-r92j4-15-5",
+"file": "l_gl-r92j4-15-5.json"
+},
+{
+"collection": "lights",
+"doc_id": "dm-948",
+"file": "l_dm-948.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-q7ld0-15-2",
+"file": "l_gl-q7ld0-15-2.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-q7ld0-20-1",
+"file": "l_gl-q7ld0-20-1.json"
+},
+{
+"collection": "lights",
+"doc_id": "gr-30",
+"file": "l_gr-30.json"
+},
+{
+"collection": "lights",
+"doc_id": "gr-300",
+"file": "l_gr-300.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-ronjkg-15-2",
+"file": "l_gl-ronjkg-15-2.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-u63yg-15-1",
+"file": "l_gl-u63yg-15-1.json"
+},
+{
+"collection": "lights",
+"doc_id": "hd-276",
+"file": "l_hd-276.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-u63yg-20-3",
+"file": "l_gl-u63yg-20-3.json"
+},
+{
+"collection": "lights",
+"doc_id": "hd-644",
+"file": "l_hd-644.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-q8394-15-2",
+"file": "l_gl-q8394-15-2.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-q8394-20-7",
+"file": "l_gl-q8394-20-7.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-uesqc-20-7",
+"file": "l_gl-uesqc-20-7.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-ue69r-15-1",
+"file": "l_gl-ue69r-15-1.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-az35ws-15-2",
+"file": "l_gl-az35ws-15-2.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-q8394-25-3",
+"file": "l_gl-q8394-25-3.json"
 },
 {
 "collection": "lights",
@@ -291,13 +193,13 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-110",
-"file": "l_hs-110.json"
+"doc_id": "gl-ue69r-20-5",
+"file": "l_gl-ue69r-20-5.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-111",
-"file": "l_hs-111.json"
+"doc_id": "gl-ue69r-25-1",
+"file": "l_gl-ue69r-25-1.json"
 },
 {
 "collection": "lights",
@@ -306,33 +208,33 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-113",
-"file": "l_hs-113.json"
+"doc_id": "gl-uesqc-25-2",
+"file": "l_gl-uesqc-25-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-114",
-"file": "l_hs-114.json"
+"doc_id": "gl-uesqc-30-7",
+"file": "l_gl-uesqc-30-7.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-115",
-"file": "l_hs-115.json"
+"doc_id": "gl-uesqc-35-7",
+"file": "l_gl-uesqc-35-7.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-116",
-"file": "l_hs-116.json"
+"doc_id": "gl-uesqc-40-5",
+"file": "l_gl-uesqc-40-5.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-117",
-"file": "l_hs-117.json"
+"doc_id": "gl-uesqc-45-2",
+"file": "l_gl-uesqc-45-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-118",
-"file": "l_hs-118.json"
+"doc_id": "gl-uesqc-50-2",
+"file": "l_gl-uesqc-50-2.json"
 },
 {
 "collection": "lights",
@@ -351,28 +253,28 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-122",
-"file": "l_hs-122.json"
+"doc_id": "gl-uesqc-55-1",
+"file": "l_gl-uesqc-55-1.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-123",
-"file": "l_hs-123.json"
+"doc_id": "gl-uesqc-60-1",
+"file": "l_gl-uesqc-60-1.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-124",
-"file": "l_hs-124.json"
+"doc_id": "gl-uesqc-65-2",
+"file": "l_gl-uesqc-65-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-125",
-"file": "l_hs-125.json"
+"doc_id": "gl-ue69r-30-2",
+"file": "l_gl-ue69r-30-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-126",
-"file": "l_hs-126.json"
+"doc_id": "gl-ue69r-35-2",
+"file": "l_gl-ue69r-35-2.json"
 },
 {
 "collection": "lights",
@@ -381,13 +283,13 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-128",
-"file": "l_hs-128.json"
+"doc_id": "gl-ue69r-40-2",
+"file": "l_gl-ue69r-40-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-129",
-"file": "l_hs-129.json"
+"doc_id": "gl-ue69r-45-3",
+"file": "l_gl-ue69r-45-3.json"
 },
 {
 "collection": "lights",
@@ -396,18 +298,18 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-131",
-"file": "l_hs-131.json"
+"doc_id": "gl-ue69r-50-3",
+"file": "l_gl-ue69r-50-3.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-132",
-"file": "l_hs-132.json"
+"doc_id": "gl-ue69r-55-2",
+"file": "l_gl-ue69r-55-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-133",
-"file": "l_hs-133.json"
+"doc_id": "gl-ue69r-60-7",
+"file": "l_gl-ue69r-60-7.json"
 },
 {
 "collection": "lights",
@@ -426,8 +328,8 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-137",
-"file": "l_hs-137.json"
+"doc_id": "gl-q1asss-15-2",
+"file": "l_gl-q1asss-15-2.json"
 },
 {
 "collection": "lights",
@@ -436,63 +338,63 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-139",
-"file": "l_hs-139.json"
+"doc_id": "gl-q1asss-20-2",
+"file": "l_gl-q1asss-20-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-140",
-"file": "l_hs-140.json"
+"doc_id": "gl-q1asss-25-2",
+"file": "l_gl-q1asss-25-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-141",
-"file": "l_hs-141.json"
+"doc_id": "gl-q1asss-30-5",
+"file": "l_gl-q1asss-30-5.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-142",
-"file": "l_hs-142.json"
+"doc_id": "gl-tynvz-15-3",
+"file": "l_gl-tynvz-15-3.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-143",
-"file": "l_hs-143.json"
+"doc_id": "gl-tynvz-20-1",
+"file": "l_gl-tynvz-20-1.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-144",
-"file": "l_hs-144.json"
+"doc_id": "gl-tynvz-25-3",
+"file": "l_gl-tynvz-25-3.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-145",
-"file": "l_hs-145.json"
+"doc_id": "gl-tynvz-30-5",
+"file": "l_gl-tynvz-30-5.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-146",
-"file": "l_hs-146.json"
+"doc_id": "gl-tynvz-35-2",
+"file": "l_gl-tynvz-35-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-147",
-"file": "l_hs-147.json"
+"doc_id": "gl-tynvz-40-2",
+"file": "l_gl-tynvz-40-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-148",
-"file": "l_hs-148.json"
+"doc_id": "gl-tynvz-45-3",
+"file": "l_gl-tynvz-45-3.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-149",
-"file": "l_hs-149.json"
+"doc_id": "gl-tynvz-50-1",
+"file": "l_gl-tynvz-50-1.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-150",
-"file": "l_hs-150.json"
+"doc_id": "gl-q8394-30-3",
+"file": "l_gl-q8394-30-3.json"
 },
 {
 "collection": "lights",
@@ -501,18 +403,18 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-152",
-"file": "l_hs-152.json"
+"doc_id": "gl-q8394-35-3",
+"file": "l_gl-q8394-35-3.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-153",
-"file": "l_hs-153.json"
+"doc_id": "gl-q8394-40-7",
+"file": "l_gl-q8394-40-7.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-154",
-"file": "l_hs-154.json"
+"doc_id": "gl-q8394-45-7",
+"file": "l_gl-q8394-45-7.json"
 },
 {
 "collection": "lights",
@@ -521,13 +423,13 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-156",
-"file": "l_hs-156.json"
+"doc_id": "gl-q8394-50-1",
+"file": "l_gl-q8394-50-1.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-157",
-"file": "l_hs-157.json"
+"doc_id": "gl-q8394-55-7",
+"file": "l_gl-q8394-55-7.json"
 },
 {
 "collection": "lights",
@@ -541,8 +443,8 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-160",
-"file": "l_hs-160.json"
+"doc_id": "gl-s6drs-15-3",
+"file": "l_gl-s6drs-15-3.json"
 },
 {
 "collection": "lights",
@@ -556,8 +458,8 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-163",
-"file": "l_hs-163.json"
+"doc_id": "gl-s6drs-20-1",
+"file": "l_gl-s6drs-20-1.json"
 },
 {
 "collection": "lights",
@@ -566,13 +468,13 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-165",
-"file": "l_hs-165.json"
+"doc_id": "gl-qaesc-15-3",
+"file": "l_gl-qaesc-15-3.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-166",
-"file": "l_hs-166.json"
+"doc_id": "gl-qaesc-20-3",
+"file": "l_gl-qaesc-20-3.json"
 },
 {
 "collection": "lights",
@@ -581,13 +483,13 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-168",
-"file": "l_hs-168.json"
+"doc_id": "gl-qaesc-25-3",
+"file": "l_gl-qaesc-25-3.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-169",
-"file": "l_hs-169.json"
+"doc_id": "gl-v87cj-15-5",
+"file": "l_gl-v87cj-15-5.json"
 },
 {
 "collection": "lights",
@@ -606,8 +508,8 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-173",
-"file": "l_hs-173.json"
+"doc_id": "gl-v87cj-20-3",
+"file": "l_gl-v87cj-20-3.json"
 },
 {
 "collection": "lights",
@@ -616,13 +518,13 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-175",
-"file": "l_hs-175.json"
+"doc_id": "gl-sjdmh-15-2",
+"file": "l_gl-sjdmh-15-2.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-176",
-"file": "l_hs-176.json"
+"doc_id": "gl-sjdmh-20-5",
+"file": "l_gl-sjdmh-20-5.json"
 },
 {
 "collection": "lights",
@@ -631,13 +533,13 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-178",
-"file": "l_hs-178.json"
+"doc_id": "gl-sjdmh-25-5",
+"file": "l_gl-sjdmh-25-5.json"
 },
 {
 "collection": "lights",
-"doc_id": "hs-179",
-"file": "l_hs-179.json"
+"doc_id": "gl-taqrc-15-2",
+"file": "l_gl-taqrc-15-2.json"
 },
 {
 "collection": "lights",
@@ -651,7 +553,123 @@
 },
 {
 "collection": "lights",
-"doc_id": "hs-182",
-"file": "l_hs-182.json"
+"doc_id": "gl-taqrc-20-1",
+"file": "l_gl-taqrc-20-1.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-u0b00-15-3",
+"file": "l_gl-u0b00-15-3.json"
+},
+{
+"collection": "lights",
+"doc_id": "hu-476",
+"file": "l_hu-476.json"
+},
+{
+"collection": "lights",
+"doc_id": "hu-522",
+"file": "l_hu-522.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-u0b00-20-1",
+"file": "l_gl-u0b00-20-1.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-q8xpob-15-3",
+"file": "l_gl-q8xpob-15-3.json"
+},
+{
+"collection": "lights",
+"doc_id": "js-668",
+"file": "l_js-668.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-uhlyk-15-5",
+"file": "l_gl-uhlyk-15-5.json"
+},
+{
+"collection": "lights",
+"doc_id": "js-86",
+"file": "l_js-86.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-qlob90-15-1",
+"file": "l_gl-qlob90-15-1.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-qsczw-15-7",
+"file": "l_gl-qsczw-15-7.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-ul9t0-15-5",
+"file": "l_gl-ul9t0-15-5.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-qsczw-20-3",
+"file": "l_gl-qsczw-20-3.json"
+},
+{
+"collection": "lights",
+"doc_id": "sn-229",
+"file": "l_sn-229.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-t84cb-15-5",
+"file": "l_gl-t84cb-15-5.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-qlnzv4-15-7",
+"file": "l_gl-qlnzv4-15-7.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-t84cb-20-1",
+"file": "l_gl-t84cb-20-1.json"
+},
+{
+"collection": "lights",
+"doc_id": "ss-642",
+"file": "l_ss-642.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-ronjkg-20-5",
+"file": "l_gl-ronjkg-20-5.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-q9gmg-15-1",
+"file": "l_gl-q9gmg-15-1.json"
+},
+{
+"collection": "lights",
+"doc_id": "ss-944",
+"file": "l_ss-944.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-ul9t0-65-5",
+"file": "l_gl-ul9t0-65-5.json"
+},
+{
+"collection": "lights",
+"doc_id": "gl-x-140-8",
+"file": "l_gl-x-140-8.json"
+},
+{
+"collection": "lights",
+"doc_id": "js-118",
+"file": "l_js-118.json"
 }
 ]
+}

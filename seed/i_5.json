@@ -1,1 +1,1 @@
-{"lightId": "gr-77", "code": "계림동 77", "dong": "계림동", "date": 1787148927881, "checks": {}, "faults": ["등주"], "result": "점검필요", "memo": "샘플 점검 기록", "inspector": null, "inspectorName": "샘플 점검자"}
+{"lightId": null, "code": "계림동 77", "dong": "계림동", "date": 1787148927881, "checks": {}, "faults": ["등주"], "result": "점검필요", "memo": "샘플 점검 기록", "inspector": null, "inspectorName": "샘플 점검자"}
