@@ -173,6 +173,8 @@ textarea.f-in{min-height:84px;resize:vertical}
 .bars .track span{display:block;height:100%;background:var(--c)}
 
 .split{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.lepin{background:none;border:0}.lepin-dot{width:30px;height:30px;border-radius:50%;background:rgba(232,154,12,.35);border:2px solid #E89A0C;box-sizing:border-box;position:relative;cursor:grab}.lepin-dot::after{content:"";position:absolute;left:9px;top:9px;width:8px;height:8px;border-radius:50%;background:#E89A0C;border:2px solid #fff}
 .empty{padding:22px 14px;text-align:center;color:var(--ink-2);background:var(--card);border:1px dashed var(--line);border-radius:10px;font-size:14px}
 .notice{background:var(--sodium-soft);border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0}
 
@@ -409,7 +411,7 @@ async function loadRegistry(){
 }
 function mergeLights(){
   const seen=new Set();
-  const out=BASE.map(b=>{seen.add(b.id);const o=OV[b.id];return o?{...b,...o,id:b.id}:b});
+  const out=BASE.map(b=>{seen.add(b.id);const o=OV[b.id];if(!o)return b;const m={...b,...o,id:b.id};if("pole"in o||"sw"in o||"removed"in o||"noPlate"in o)m.address=addrOf(m);return m});
   for(const [id,o] of Object.entries(OV))if(!seen.has(id)&&o.code)out.push({...o,id});
   S.lights=out;LIDX=null;LG=null;
 }
@@ -446,7 +448,7 @@ async function boot(){
 function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);s.querySelector("span").textContent=txt}
 async function resolveNames(){
   if(!user)return;
-  const ids=[...new Set(S.insp.map(i=>i.inspector).filter(Boolean))].filter(id=>!(id in S.names));
+  const ids=[...new Set([...S.insp.map(i=>i.inspector),...S.lights.flatMap(l=>[l.foundBy,...(l.edits||[]).map(e=>e.by)])].filter(Boolean))].filter(id=>!(id in S.names));
   if(!ids.length)return;
   try{const ps=await user.profiles(ids);ids.forEach(id=>S.names[id]=(ps[id]&&ps[id].name)||"점검자");render()}catch(e){}
 }
@@ -573,7 +575,7 @@ function vAdmin(){
   const rOpen=S.reports.filter(r=>r.status!=="완료");
   const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;
   const pend=pendingList().filter(l=>l.reg==="미등록").length,np=S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length;
-  const nav=[["sec-open","조치 필요",open.length],["sec-rep","신고",rOpen.length],["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]:[]);
+  const nav=[["sec-open","조치 필요",open.length],["sec-rep","신고",rOpen.length],["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-edit","정보 수정",editedList().length||null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]:[]);
   return `${tally(false)}
   <div class="chipbar quicknav">${nav.map(([id,t,n])=>`<button type="button" data-jump="${id}">${t}${n!=null?`<span class="secnum ${n?"":"zero"}">${n}</span>`:""}</button>`).join("")}</div>
   <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length.toLocaleString()}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건 · 미처리 신고 ${rOpen.length}건</span></div>${mapSVG()}<div class="split"><button class="btn sm" data-mapscope="all">지도에서 보기</button><button class="btn ghost sm" data-mapscope="open">조치 필요만 지도에서</button></div></div>
@@ -615,6 +617,8 @@ function vAdmin(){
     <label class="f" for="nNote">메모 (선택)</label><input class="f-in" id="nNote" placeholder="예: 표찰 탈락, 신설 등, 전주 이설">
     <div class="split"><button class="btn" id="addLight">미등록으로 저장</button><button class="btn ghost" data-scan="admin" type="button">표찰 스캔</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button></div>
   </div>
+  <h2 id="sec-edit">정보 수정된 등 <span class="muted">${editedList().length}</span></h2>
+  ${editedSection()}
   <h2 id="sec-pend">미등록 관리 <span class="muted">${pendingList().length}</span></h2>
   ${pendingSection()}
   <h2 id="sec-np">표찰 없는 등 (대장 기준) <span class="muted">${S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length}</span></h2>
@@ -661,7 +665,8 @@ async function openLight(id){
     <div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address)}</div><div class="muted">${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.lampId?` · 관리ID ${esc(l.lampId)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}</div></div>
     <button class="x" aria-label="닫기" data-close>×</button></div>
     ${(()=>{const li=lightInfo(l);if(!li)return"";return `<div class="muted" style="margin:2px 0 6px">💡 예상 조명 반경 ${li.reach}m${li.on===0?" · 현재 꺼짐":li.on<1?" · 점검필요로 감쇠":""}${li.n1?` · 가장 가까운 등 ${esc(li.n1.code)} ${li.n1.d}m`:""}${li.gapNow?` · <span style="color:var(--warn)">이웃 등과 간격이 넓어요</span>`:""}${li.riskIfOut?` · <span style="color:var(--bad)">꺼지면 ${li.riskIfOut}개 구간이 어두워져요</span>`:""}</div>`})()}
-    ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}</div>`:""}
+    ${l.removed?`<div class="muted" style="margin:2px 0 6px;color:var(--bad)">철거된 등으로 기록돼 있어요${l.removedAt?` (${fmtD(l.removedAt)})`:""}.</div>`:""}${l.note?`<div class="muted" style="margin:2px 0 6px">📝 ${esc(l.note)}</div>`:""}
+    ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}<button class="btn ghost sm" data-ledit="${esc(l.id)}" style="margin-left:auto">등 정보 수정</button></div>`:""}
     <h2>점검표</h2>
     <div class="panel" id="checks">${CHECKS.map(([k,t,s])=>`<div class="check"><div class="q">${t}<small>${s}</small></div><div class="pair" role="group" aria-label="${t}"><button class="g" data-ck="${k}" data-v="ok" aria-pressed="false">양호</button><button class="b" data-ck="${k}" data-v="bad" aria-pressed="false">불량</button></div></div>`).join("")}
       <div class="split"><button class="btn ghost sm" id="allOk">모두 양호</button><button class="btn ghost sm" id="tiltBtn">등주 기울기 측정</button></div>
@@ -672,7 +677,8 @@ async function openLight(id){
     <label class="f" for="iMemo">메모</label><textarea class="f-in" id="iMemo" placeholder="측정값, 조치 내용, 필요한 부품 등"></textarea>
     <label class="f">현장 사진</label><div class="photo-in"><button type="button" class="btn ghost sm" data-pick="iPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="iPhotoLib">앨범에서 선택</button><input type="file" id="iPhoto" accept="image/*" capture="environment" hidden><input type="file" id="iPhotoLib" accept="image/*" hidden><img id="iPrev" alt="" hidden></div>
     <div style="margin-top:16px"><button class="btn sodium block" id="saveInsp" ${S.canWrite?"":"disabled"}>점검 결과 저장</button></div>
-    <h2>점검 이력</h2><div id="histBox" class="muted">불러오는 중…</div>`);
+    <h2>점검 이력</h2><div id="histBox" class="muted">불러오는 중…</div>
+    ${l.edits&&l.edits.length?`<h2>정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
   if(!db){$("#histBox").textContent="기록을 불러올 수 없어요.";return}
   try{
     const snap=await db.collection("inspections").where("lightId","==",id).limit(20).get();
@@ -742,6 +748,12 @@ document.addEventListener("click",async e=>{
   if(t.dataset.reglink){regLink(t.dataset.reglink);return}
   if(t.dataset.regdel){const l=byId(t.dataset.regdel);if(!l)return;if(!confirm(`${l.code} 미등록 항목을 삭제할까요? 되돌릴 수 없어요.`))return;write(()=>db.doc("lights/"+l.id).delete(),"삭제했어요.");return}
   if(t.dataset.platefix){plateFix(t.dataset.platefix);return}
+  if(t.dataset.ledit){openLightEdit(t.dataset.ledit);return}
+  if(t.id==="leGps"){t.disabled=true;t.textContent="측정 중…";navigator.geolocation.getCurrentPosition(p=>{$("#leLat").value=p.coords.latitude.toFixed(6);$("#leLng").value=p.coords.longitude.toFixed(6);$("#leAcc").textContent=`현재 위치로 바꿈 (±${Math.round(p.coords.accuracy)}m)`;leMoveMarker();t.disabled=false;t.textContent="현재 위치로"},()=>{toast("위치를 못 잡았어요. 위치 권한을 확인하세요.");t.disabled=false;t.textContent="현재 위치로"},{enableHighAccuracy:true,timeout:15000,maximumAge:0});return}
+  if(t.id==="leReset"){const l=byId(t.dataset.id);if(!l)return;$("#leLat").value=typeof l.lat==="number"?l.lat.toFixed(6):"";$("#leLng").value=typeof l.lng==="number"?l.lng.toFixed(6):"";$("#leAcc").textContent="원래 좌표로 되돌림";leMoveMarker();return}
+  if(t.id==="leSave"){saveLightEdit(t.dataset.id,t);return}
+  if(t.id==="leUndo"){undoLightEdit(t.dataset.id);return}
+  if(t.id==="csv5"){exportEditsCSV();return}
   if(t.dataset.mapone){const l=byId(t.dataset.mapone);if(l)openMap("one",l);return}
   if(t.id==="csv3"){exportPendingCSV();return}
   if(t.id==="gps"){if(!navigator.geolocation){toast("이 기기에서는 위치를 가져올 수 없어요.");return}navigator.geolocation.getCurrentPosition(p=>{$("#nLat").value=p.coords.latitude.toFixed(5);$("#nLng").value=p.coords.longitude.toFixed(5);window.__nAcc=Math.round(p.coords.accuracy);toast(`현재 위치를 넣었어요 (±${Math.round(p.coords.accuracy)}m)`)},()=>toast("위치 권한이 없어 좌표를 직접 입력해 주세요."));return}
@@ -857,6 +869,83 @@ async function regLink(id){
   if(!t||t.reg){toast("대장에서 그 번호를 찾지 못했어요.");return}
   if(!confirm(`${t.code} (${t.dong}) 에 연결하고, 이 미등록 항목은 '대장반영'으로 바꿀까요?`))return;
   await write(async()=>{await patchLight(id,{reg:"대장반영",linkedId:t.id,updatedAt:Date.now()});if(l.status&&l.status!=="정상")await patchLight(t.id,{status:l.status,updatedAt:Date.now()})},`${t.code}에 연결했어요.`);
+}
+/* ---------- light attribute editing: registry stays read-only, changes go to lights/{id} with a per-change history ---------- */
+const EDIT_FIELDS={lampType:"광원",pole:"등주",sw:"점멸기",poleNo:"전주번호",replacedYear:"교체연도",lat:"위도",lng:"경도",removed:"철거",note:"비고"};
+const LAMP_OPTS=["LED일반형","LED소켓형","CDM","메탈","나트륨","삼파장"],POLE_OPTS=["한전주","전용주(강관)","전용주(스텐)","전용주(테파)","전용주(주물)","전용주(기타)","벽부주","통신주"],SW_OPTS=["전자식","GPS","광전식","자동식","수동식","무선식"];
+const fmtVal=(f,v)=>f==="removed"?(v?"철거":"사용 중"):(v==null||v==="")?"(없음)":typeof v==="number"&&(f==="lat"||f==="lng")?v.toFixed(6):String(v);
+function editedList(){return S.lights.filter(l=>l.edits&&l.edits.length).sort((a,b)=>(b.edits[b.edits.length-1].at||0)-(a.edits[a.edits.length-1].at||0))}
+function editHistory(l){return l.edits.slice().reverse().map(e=>`<div class="hist"><span class="muted">${fmtDT(e.at)} · ${esc(S.names[e.by]||"담당자")}</span>${e.undone?` <span class="chip">되돌림</span>`:""}<div>${e.changes.map(c=>`${esc(EDIT_FIELDS[c.f]||c.f)}: <s class="muted">${esc(fmtVal(c.f,c.from))}</s> → <b>${esc(fmtVal(c.f,c.to))}</b>`).join(" · ")}</div></div>`).join("")}
+function editedSection(){
+  const ls=editedList();
+  if(!ls.length)return `<div class="empty">아직 정보를 고친 등이 없어요. 등 상세 화면의 "등 정보 수정"에서 광원·등주·점멸기·좌표·철거 여부를 바꿀 수 있어요.</div>`;
+  return `<div class="list">${ls.slice(0,30).map(l=>{const e=l.edits[l.edits.length-1];return `<div class="panel">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${kindBadge(l.kind)}<b>${esc(l.code)}</b><span class="muted">${esc(l.dong)}</span>${l.removed?`<span class="reg np">철거</span>`:""}<span class="muted" style="margin-left:auto">${fmtDT(e.at)}</span></div>
+    <div class="muted">${e.changes.map(c=>`${esc(EDIT_FIELDS[c.f]||c.f)} → ${esc(fmtVal(c.f,c.to))}`).join(" · ")} · ${esc(S.names[e.by]||"담당자")}${l.edits.length>1?` · 총 ${l.edits.length}회`:""}</div>
+    <div class="split"><button class="btn ghost sm" data-light="${esc(l.id)}">열기</button><button class="btn ghost sm" data-ledit="${esc(l.id)}">수정</button>${typeof l.lat==="number"?`<button class="btn ghost sm" data-mapone="${esc(l.id)}">지도</button>`:""}</div></div>`}).join("")}${ls.length>30?`<div class="muted">외 ${ls.length-30}개</div>`:""}</div>
+  <p class="muted" style="margin:8px 0 0">여기 바뀐 값은 이 앱에만 저장돼요. CSV로 내려받아 도로조명 관리시스템 대장에도 반영해 주세요.</p>
+  ${dl?`<div class="split"><button class="btn ghost sm" id="csv5">수정 내역 CSV 내려받기</button></div>`:""}`;
+}
+let leMap=null,leMarker=null;
+function leMoveMarker(){const la=+$("#leLat").value,ln=+$("#leLng").value;if(!leMap||!leMarker||!la||!ln)return;leMarker.setLatLng([la,ln]);leMap.panTo([la,ln])}
+function openLightEdit(id){
+  const l=byId(id);if(!l)return;
+  const sel=(id,opts,cur)=>`<select class="f-in" id="${id}">${[...opts,...(cur&&!opts.includes(cur)?[cur]:[]),""].map(o=>`<option value="${esc(o)}" ${o===(cur||"")?"selected":""}>${o||"(없음)"}</option>`).join("")}</select>`;
+  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">등 정보 수정 <span class="muted">${esc(l.code)}</span></h3><div class="muted">대장 원본은 그대로 두고 바뀐 값만 기록해요. 누가 언제 무엇을 바꿨는지 이력이 남아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+    <div class="grid2"><div><label class="f" for="leLamp">광원</label>${sel("leLamp",LAMP_OPTS,l.lampType)}</div><div><label class="f" for="lePole">등주</label>${sel("lePole",POLE_OPTS,l.pole)}</div></div>
+    <div class="grid2"><div><label class="f" for="leSw">점멸기</label>${sel("leSw",SW_OPTS,l.sw)}</div><div><label class="f" for="lePoleNo">전주번호</label><input class="f-in" id="lePoleNo" value="${esc(l.poleNo||"")}" placeholder="예: 9792C742"></div></div>
+    <div class="grid2"><div><label class="f" for="leYear">교체 연도</label><input class="f-in" id="leYear" type="number" inputmode="numeric" min="1990" max="2100" value="${esc(l.replacedYear||"")}" placeholder="예: 2025"></div><div><label class="f">철거</label><label style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="checkbox" id="leRemoved" ${l.removed?"checked":""}> 철거된 등</label></div></div>
+    <label class="f">위치</label>
+    <div class="grid2"><input class="f-in" id="leLat" inputmode="decimal" value="${typeof l.lat==="number"?l.lat.toFixed(6):""}" placeholder="위도"><input class="f-in" id="leLng" inputmode="decimal" value="${typeof l.lng==="number"?l.lng.toFixed(6):""}" placeholder="경도"></div>
+    <div class="split" style="margin-top:6px"><button type="button" class="btn ghost sm" id="leGps">현재 위치로</button><button type="button" class="btn ghost sm" id="leReset" data-id="${esc(l.id)}">원래 좌표로</button><span class="muted" id="leAcc" style="align-self:center">지도의 핀을 끌어서 옮길 수도 있어요.</span></div>
+    <div class="gmap" id="leMapBox" style="height:220px;margin-top:8px"></div>
+    <label class="f" for="leNote">비고</label><textarea class="f-in" id="leNote" placeholder="예: 2025.9 LED 교체, 전주 이설로 위치 변경">${esc(l.note||"")}</textarea>
+    <div style="margin-top:16px"><button class="btn sodium block" id="leSave" data-id="${esc(l.id)}">변경 내용 저장</button></div>
+    ${l.edits&&l.edits.length?`<div class="split" style="margin-top:8px"><button class="btn ghost sm" id="leUndo" data-id="${esc(l.id)}">마지막 변경 되돌리기</button></div><h2>정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
+  if(leMap){try{leMap.remove()}catch(e){}leMap=null;leMarker=null}
+  if(!window.L){$("#leMapBox").innerHTML=`<div class="empty">지도 라이브러리를 불러오지 못했어요. 좌표를 직접 입력하세요.</div>`;return}
+  const ll=typeof l.lat==="number"?[l.lat,l.lng]:(S.pos?[S.pos.lat,S.pos.lng]:[35.146,126.923]);
+  leMap=L.map("leMapBox",{zoomControl:false,attributionControl:true,tap:true}).setView(ll,18);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(leMap);
+  for(const o of S.lights)if(o!==l&&typeof o.lat==="number"&&distM(l.lat?l:{lat:ll[0],lng:ll[1]},o)<120)L.circleMarker([o.lat,o.lng],{radius:5,color:"#fff",weight:1.5,fillColor:KIND_COL[o.kind]||"#888",fillOpacity:.9}).bindTooltip(o.code).addTo(leMap);
+  leMarker=L.marker(ll,{draggable:true,autoPan:true,icon:L.divIcon({className:"lepin",html:'<div class="lepin-dot"></div>',iconSize:[30,30],iconAnchor:[15,15]})}).addTo(leMap);
+  leMarker.on("dragend",()=>{const q=leMarker.getLatLng();$("#leLat").value=q.lat.toFixed(6);$("#leLng").value=q.lng.toFixed(6);$("#leAcc").textContent="지도에서 옮김"});
+  setTimeout(()=>leMap&&leMap.invalidateSize(),250);
+}
+async function saveLightEdit(id,btn){
+  const l=byId(id);if(!l)return;
+  const v={lampType:$("#leLamp").value,pole:$("#lePole").value,sw:$("#leSw").value,poleNo:$("#lePoleNo").value.trim(),replacedYear:$("#leYear").value?+$("#leYear").value:"",removed:$("#leRemoved").checked,note:$("#leNote").value.trim()};
+  const la=parseFloat($("#leLat").value),ln=parseFloat($("#leLng").value);
+  if($("#leLat").value||$("#leLng").value){if(!(la>33&&la<39&&ln>124&&ln<132)){toast("좌표가 한국 범위를 벗어났어요. 위도·경도를 확인하세요.");return}v.lat=+la.toFixed(6);v.lng=+ln.toFixed(6)}
+  const changes=[];const patch={};
+  for(const f of Object.keys(v)){
+    const cur=f==="removed"?!!l.removed:(l[f]??"");const nv=v[f];
+    const same=f==="lat"||f==="lng"?(typeof cur==="number"&&Math.abs(cur-nv)<0.0000015):String(cur)===String(nv);
+    if(same)continue;changes.push({f,from:f==="removed"?cur:(cur===""?null:cur),to:f==="removed"?nv:(nv===""?null:nv)});patch[f]=f==="removed"?nv:(nv===""?null:nv);
+  }
+  if(!changes.length){toast("바뀐 내용이 없어요.");return}
+  if(patch.removed===true)patch.removedAt=Date.now();
+  const entry={at:Date.now(),by:S.me||null,changes};
+  patch.edits=[...(l.edits||[]).slice(-29),entry];patch.updatedAt=entry.at;
+  btn.disabled=true;btn.textContent="저장 중…";
+  const ok=await write(()=>patchLight(id,patch),`${l.code} 정보를 고쳤어요 (${changes.map(c=>EDIT_FIELDS[c.f]).join(", ")}).`);
+  if(ok)openLight(id);else{btn.disabled=false;btn.textContent="변경 내용 저장"}
+}
+async function undoLightEdit(id){
+  const l=byId(id);if(!l||!l.edits||!l.edits.length)return;
+  const e=l.edits[l.edits.length-1];if(e.undone){toast("이미 되돌린 변경이에요.");return}
+  if(!confirm(`${fmtDT(e.at)}의 변경(${e.changes.map(c=>EDIT_FIELDS[c.f]).join(", ")})을 되돌릴까요?`))return;
+  const patch={};for(const c of e.changes)patch[c.f]=c.from;
+  const back={at:Date.now(),by:S.me||null,changes:e.changes.map(c=>({f:c.f,from:c.to,to:c.from})),undone:true};
+  patch.edits=[...l.edits.slice(-29),back];patch.updatedAt=back.at;
+  if(await write(()=>patchLight(id,patch),"되돌렸어요."))openLight(id)
+}
+async function exportEditsCSV(){
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+  const rows=[["표찰번호","관리ID","종류","동","항목","이전값","변경값","수정자","시각","구분"]];
+  for(const l of editedList())for(const e of l.edits)for(const c of e.changes)rows.push([l.code,l.lampId,l.kind,l.dong,EDIT_FIELDS[c.f]||c.f,fmtVal(c.f,c.from),fmtVal(c.f,c.to),S.names[e.by]||"",fmtDT(e.at),e.undone?"되돌림":"변경"]);
+  const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
+  try{await dl.save({filename:`동구가로등_정보수정_${fmtD(Date.now()).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
 }
 async function plateFix(id){
   const l=byId(id);if(!l)return;
