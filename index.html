@@ -192,6 +192,10 @@ textarea.f-in{min-height:84px;resize:vertical}
 .lepin{background:none;border:0}.lepin-dot{width:30px;height:30px;border-radius:50%;background:rgba(232,154,12,.35);border:2px solid #E89A0C;box-sizing:border-box;position:relative;cursor:grab}.lepin-dot::after{content:"";position:absolute;left:9px;top:9px;width:8px;height:8px;border-radius:50%;background:#E89A0C;border:2px solid #fff}
 .empty{padding:22px 14px;text-align:center;color:var(--ink-2);background:var(--card);border:1px dashed var(--line);border-radius:10px;font-size:14px}
 .notice{background:var(--sodium-soft);border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0}
+.rolechip{font-size:12px;color:var(--ink-2);display:flex;gap:4px;align-items:center}.rolechip select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:2px 6px;background:var(--card);color:var(--ink)}
+.rolechip b{color:var(--ink)}
+.roles .row{display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap}.roles .row:first-child{border-top:0}.roles select{font:inherit;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--card);color:var(--ink)}
+nav.tabs button[hidden]{display:none}
 
 nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
 nav.tabs .in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr)}
@@ -271,7 +275,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
       <h1>광주 동구 가로등 점검</h1>
       <p>현장 점검, 고장 관리, 주민 신고를 한곳에서</p>
     </div>
-    <div class="sync" id="sync"><i></i><span>연결 중</span></div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div class="sync" id="sync"><i></i><span>연결 중</span></div><div class="rolechip" id="roleChip"></div></div>
   </header>
   <main id="view"></main>
 </div>
@@ -369,7 +373,7 @@ const CHECKS=[
 ];
 const DUE_DAYS=90;
 
-const S={lights:[],insp:[],reports:[],patrols:[],tab:"inspect",q:"",dong:"전체",stat:null,kind:"전체",limit:60,near:false,pos:null,posWatch:null,me:null,canWrite:true,live:false,names:{}};
+const S={lights:[],insp:[],reports:[],patrols:[],roles:[],demoRole:null,tab:"inspect",q:"",dong:"전체",stat:null,kind:"전체",limit:60,near:false,pos:null,posWatch:null,me:null,canWrite:true,live:false,names:{}};
 let db=null,user=null,dl=null;
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -384,7 +388,7 @@ function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");cl
 /* Local fallback store (GitHub Pages / plain hosting): same API surface as the shared db,
    backed by this browser's localStorage, seeded from seed/manifest.json. Not shared between devices. */
 function localDb(){
-  const KEY="donggu-streetlight-local";let data={lights:{},inspections:{},reports:{}};const subs=[];
+  const KEY="donggu-streetlight-local";let data={lights:{},inspections:{},reports:{},patrols:{},roles:{}};const subs=[];
   try{const s=localStorage.getItem(KEY);if(s)data=JSON.parse(s)}catch(e){}
   const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}subs.forEach(f=>f())};
   const snapOf=(col,q)=>{let rows=Object.entries(data[col]||{}).map(([id,d])=>({id,data:()=>d}));
@@ -444,6 +448,8 @@ async function boot(){
     sub(db.collection("inspections").orderBy("date","desc").limit(40),"insp");
     sub(db.collection("reports").orderBy("createdAt","desc").limit(100),"reports");
     sub(db.collection("patrols").orderBy("start","desc").limit(30),"patrols",ptIndex);
+    sub(db.collection("roles"),"roles");
+    try{S.demoRole=localStorage.getItem("dg-role")||null}catch(e){}
     dl={save:async({filename,data})=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([data],{type:"text/csv"}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)}};
     return;
   }
@@ -461,13 +467,41 @@ async function boot(){
   sub(db.collection("inspections").orderBy("date","desc").limit(40),"insp");
   sub(db.collection("reports").orderBy("createdAt","desc").limit(100),"reports");
   sub(db.collection("patrols").orderBy("start","desc").limit(30),"patrols",ptIndex);
+  sub(db.collection("roles"),"roles");
 }
 function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);s.querySelector("span").textContent=txt}
 async function resolveNames(){
   if(!user)return;
-  const ids=[...new Set([...S.insp.map(i=>i.inspector),...S.lights.flatMap(l=>[l.foundBy,...(l.edits||[]).map(e=>e.by)]),...S.patrols.map(p=>p.by)].filter(Boolean))].filter(id=>!(id in S.names));
+  const ids=[...new Set([...S.insp.map(i=>i.inspector),...S.lights.flatMap(l=>[l.foundBy,...(l.edits||[]).map(e=>e.by)]),...S.patrols.map(p=>p.by),...S.roles.map(r=>r.id),...S.reports.map(r=>r.reporterId)].filter(Boolean))].filter(id=>!(id in S.names));
   if(!ids.length)return;
   try{const ps=await user.profiles(ids);ids.forEach(id=>S.names[id]=(ps[id]&&ps[id].name)||"점검자");render()}catch(e){}
+}
+/* ---------- roles: admin / inspector / resident. Enforced in the UI; the shared DB itself only knows "can write".
+   Until someone claims the admin role, every participant keeps full access (as before). ---------- */
+const ROLE_LABEL={admin:"관리자",inspector:"점검자",resident:"주민"};
+function rolesReady(){return S.roles.some(r=>r.role==="admin")}
+function myRole(){if(S.me==="local")return S.demoRole||"admin";if(!rolesReady())return "admin";const r=S.roles.find(r=>r.id===S.me);return r?r.role:"resident"}
+function can(p){const r=myRole();if(p==="admin")return r==="admin";if(p==="inspect")return r==="admin"||r==="inspector";return true}
+function need(p){if(can(p))return true;toast(p==="admin"?"관리자만 할 수 있어요.":"점검자 이상만 할 수 있어요.");return false}
+function roleSection(){
+  const me=S.me;const rows=S.roles.slice().sort((a,b)=>(a.role==="admin"?0:a.role==="inspector"?1:2)-(b.role==="admin"?0:b.role==="inspector"?1:2));
+  const known=new Set(rows.map(r=>r.id));
+  const seen=new Map();const touch=(id,what)=>{if(id&&!known.has(id)&&!seen.has(id))seen.set(id,what)};
+  S.insp.forEach(i=>touch(i.inspector,"점검 기록"));S.patrols.forEach(p=>touch(p.by,"순찰"));S.lights.forEach(l=>{touch(l.foundBy,"현장 등록");(l.edits||[]).forEach(e=>touch(e.by,"정보 수정"))});S.reports.forEach(r=>touch(r.reporterId,"신고"));
+  const nm=id=>esc(S.names[id]||(rows.find(r=>r.id===id)||{}).name||id.slice(0,10)+"…");
+  const sel=(id,cur)=>`<select data-rolesel="${esc(id)}" aria-label="역할">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${cur===k?"selected":""}>${v}</option>`).join("")}</select>`;
+  const admins=rows.filter(r=>r.role==="admin").length;
+  return `<div class="panel roles">${rows.map(r=>`<div class="row"><b>${nm(r.id)}</b>${r.id===me?`<span class="muted">(나)</span>`:""}<span style="margin-left:auto"></span>${sel(r.id,r.role)}<button class="btn ghost sm" data-roledel="${esc(r.id)}" ${r.role==="admin"&&admins<=1?"disabled title=\"마지막 관리자는 뺄 수 없어요\"":""}>빼기</button></div>`).join("")}</div>
+  ${seen.size?`<h3 style="margin-top:14px">최근 활동했지만 역할이 없는 사용자 <span class="muted">${seen.size}</span></h3><p class="muted" style="margin:-4px 0 8px">역할이 없으면 주민으로 취급돼 신고만 할 수 있어요. 점검자로 올리면 현장 점검·순찰·현장 등록을 할 수 있어요.</p><div class="panel roles">${[...seen].map(([id,what])=>`<div class="row"><b>${nm(id)}</b><span class="muted">${what}</span><span style="margin-left:auto"></span>${sel(id,"resident")}</div>`).join("")}</div>`:""}
+  <p class="muted" style="margin:10px 0 0">내 사용자 ID: <code>${esc(me||"")}</code> · 새 사용자는 이 링크를 열고 한 번이라도 신고·점검을 하면 위 목록에 떠요. 공유 설정에서 "참여자"로 초대해야 저장이 돼요.</p>
+  <div class="split"><input class="f-in" id="roleAddId" placeholder="사용자 ID 직접 입력" style="flex:1;min-width:160px"><select class="f-in" id="roleAddRole" style="flex:0 0 auto">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select><button class="btn ghost sm" id="roleAdd">추가</button></div>
+  <p class="muted" style="margin:8px 0 0">역할은 화면에서만 구분돼요. 공유 데이터베이스 자체는 "참여자는 쓰기 가능"만 알기 때문에, 기술적으로는 참여자가 화면을 우회해 기록을 바꿀 수 있어요. 신뢰하는 사람만 참여자로 초대하세요.</p>`;
+}
+async function setRole(id,role){
+  const cur=S.roles.find(r=>r.id===id);
+  if(cur&&cur.role==="admin"&&role!=="admin"&&S.roles.filter(r=>r.role==="admin").length<=1){toast("마지막 관리자는 바꿀 수 없어요. 다른 관리자를 먼저 지정하세요.");return}
+  let name=S.names[id]||(cur&&cur.name)||"";if(!name&&user){try{const ps=await user.profiles([id]);name=(ps[id]&&ps[id].name)||""}catch(e){}}
+  await write(()=>db.doc("roles/"+id).set({role,name,at:Date.now(),by:S.me||null}),`${name||id.slice(0,8)} → ${ROLE_LABEL[role]}`);
 }
 async function write(fn,okMsg){
   if(!db){toast("이 화면에서는 저장할 수 없어요.");return false}
@@ -497,7 +531,10 @@ async function compress(file){return (await compressBlob(file)).url}
 
 /* ---------- render ---------- */
 function render(){
-  document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===S.tab));
+  const allowed={inspect:can("inspect"),admin:can("inspect"),report:true};
+  if(!allowed[S.tab])S.tab="report";
+  document.querySelectorAll("nav.tabs button").forEach(b=>{b.hidden=!allowed[b.dataset.tab];b.setAttribute("aria-selected",b.dataset.tab===S.tab)});
+  const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<span>체험 역할</span><select id="demoRole" aria-label="체험 역할">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v}</option>`).join("")}</select>`:S.me?`<span>내 역할</span><b>${ROLE_LABEL[myRole()]}${rolesReady()?"":" (설정 전)"}</b>`:"";
   const v=$("#view");
   v.innerHTML=S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():vReport();
 }
@@ -593,14 +630,15 @@ function vAdmin(){
   const rOpen=S.reports.filter(r=>r.status!=="완료");
   const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;
   const pend=pendingList().filter(l=>l.reg==="미등록").length,np=S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length;
-  const nav=[["sec-open","조치 필요",open.length],["sec-rep","신고",rOpen.length],["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-patrol","순찰",S.patrols.length||null],["sec-edit","정보 수정",editedList().length||null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]:[]);
-  return `${tally(false)}
+  const nav=[["sec-open","조치 필요",open.length],["sec-rep","신고",rOpen.length],["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-patrol","순찰",S.patrols.length||null]].concat(can("admin")?[["sec-roles","권한",S.roles.length||null]]:[]).concat([["sec-edit","정보 수정",editedList().length||null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]):[]);
+  const setupNotice=S.me&&S.me!=="local"&&!rolesReady()?`<div class="notice"><b>권한 설정 전이에요.</b> 지금은 참여자 모두가 신고 처리·미등록 처리·등 정보 수정까지 할 수 있어요. 관리자를 지정하면 그때부터 관리자만 그 일을 하고, 나머지는 점검자·주민으로 나뉘어요.${S.canWrite?` <button class="btn sm" id="claimAdmin" style="margin-left:6px">내가 관리자 되기</button>`:""}</div>`:"";
+  return `${setupNotice}${tally(false)}
   <div class="chipbar quicknav">${nav.map(([id,t,n])=>`<button type="button" data-jump="${id}">${t}${n!=null?`<span class="secnum ${n?"":"zero"}">${n}</span>`:""}</button>`).join("")}</div>
   <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length.toLocaleString()}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건 · 미처리 신고 ${rOpen.length}건</span></div>${mapSVG()}<div class="split"><button class="btn sm" data-mapscope="all">지도에서 보기</button><button class="btn ghost sm" data-mapscope="open">조치 필요만 지도에서</button></div></div>
   <h2 id="sec-open">조치가 필요한 등 <span class="muted">${open.length}</span></h2>
   <div class="list">${open.length?open.slice(0,50).map(lightRow).join("")+(open.length>50?`<div class="muted">외 ${open.length-50}개 · 현장 점검 탭에서 상태로 걸러 보세요</div>`:""):`<div class="empty">모든 가로등이 정상이에요.</div>`}</div>
   <h2 id="sec-rep">주민 신고 <span class="muted">미처리 ${rOpen.length}</span></h2>
-  <div class="list">${S.reports.length?S.reports.slice(0,20).map(r=>reportCard(r,true)).join(""):`<div class="empty">접수된 신고가 없어요.</div>`}</div>
+  <div class="list">${S.reports.length?S.reports.slice(0,20).map(r=>reportCard(r,can("admin"))).join(""):`<div class="empty">접수된 신고가 없어요.</div>`}</div>
   <h2 id="sec-kind">종류별 현황</h2>
   <div class="panel"><div class="kindtab"><span class="h">종류</span><span class="h">전체</span><span class="h">점검필요</span><span class="h">고장</span><span class="h">수리중</span>
     ${KINDS.map(k=>{const ls=S.lights.filter(l=>(l.kind||"가로등")===k);if(!ls.length)return"";const n=s=>ls.filter(l=>l.status===s).length;return `<span>${kindBadge(k)}</span><b>${ls.length.toLocaleString()}</b><b class="st-점검필요" style="color:${n("점검필요")?"var(--warn)":"var(--ink-2)"}">${n("점검필요")}</b><b style="color:${n("고장")?"var(--bad)":"var(--ink-2)"}">${n("고장")}</b><b style="color:${n("수리중")?"var(--fix)":"var(--ink-2)"}">${n("수리중")}</b>`}).join("")}</div>
@@ -635,6 +673,7 @@ function vAdmin(){
     <label class="f" for="nNote">메모 (선택)</label><input class="f-in" id="nNote" placeholder="예: 표찰 탈락, 신설 등, 전주 이설">
     <div class="split"><button class="btn" id="addLight">미등록으로 저장</button><button class="btn ghost" data-scan="admin" type="button">표찰 스캔</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button></div>
   </div>
+  ${can("admin")?`<h2 id="sec-roles">사용자·권한 <span class="muted">${S.roles.length}</span></h2>${roleSection()}`:""}
   <h2 id="sec-patrol">야간 순찰 기록 <span class="muted">${S.patrols.length}</span></h2>
   ${patrolSection()}
   <h2 id="sec-edit">정보 수정된 등 <span class="muted">${editedList().length}</span></h2>
@@ -686,7 +725,7 @@ async function openLight(id){
     <button class="x" aria-label="닫기" data-close>×</button></div>
     ${(()=>{const li=lightInfo(l);if(!li)return"";return `<div class="muted" style="margin:2px 0 6px">💡 예상 조명 반경 ${li.reach}m${li.on===0?" · 현재 꺼짐":li.on<1?" · 점검필요로 감쇠":""}${li.n1?` · 가장 가까운 등 ${esc(li.n1.code)} ${li.n1.d}m`:""}${li.gapNow?` · <span style="color:var(--warn)">이웃 등과 간격이 넓어요</span>`:""}${li.riskIfOut?` · <span style="color:var(--bad)">꺼지면 ${li.riskIfOut}개 구간이 어두워져요</span>`:""}</div>`})()}
     ${l.removed?`<div class="muted" style="margin:2px 0 6px;color:var(--bad)">철거된 등으로 기록돼 있어요${l.removedAt?` (${fmtD(l.removedAt)})`:""}.</div>`:""}${l.note?`<div class="muted" style="margin:2px 0 6px">📝 ${esc(l.note)}</div>`:""}
-    ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}<button class="btn ghost sm" data-ledit="${esc(l.id)}" style="margin-left:auto">등 정보 수정</button></div>`:""}
+    ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}${can("admin")?`<button class="btn ghost sm" data-ledit="${esc(l.id)}" style="margin-left:auto">등 정보 수정</button>`:""}</div>`:""}
     <h2>점검표</h2>
     <div class="panel" id="checks">${CHECKS.map(([k,t,s])=>`<div class="check"><div class="q">${t}<small>${s}</small></div><div class="pair" role="group" aria-label="${t}"><button class="g" data-ck="${k}" data-v="ok" aria-pressed="false">양호</button><button class="b" data-ck="${k}" data-v="bad" aria-pressed="false">불량</button></div></div>`).join("")}
       <div class="split"><button class="btn ghost sm" id="allOk">모두 양호</button><button class="btn ghost sm" id="tiltBtn">등주 기울기 측정</button></div>
@@ -741,7 +780,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="nearSort"){nearToggle();return}
   if(t.id==="rvRun"){const dong=$("#rvDong").value,kind=$("#rvKind").value;const mode=S.rvMode||(ROADS?"roads":"pairs");t.disabled=true;t.textContent="계산 중…";setTimeout(()=>{const cands=mode==="roads"&&ROADS?roadReview(dong,kind):lightReview(dong,kind);S.review={mode:mode==="roads"&&ROADS?"roads":"pairs",dong,kind,cands,show:20,n:S.lights.filter(l=>(dong==="전체"||l.dong===dong)&&(kind==="전체"||l.kind===kind)).length};render();const el=document.getElementById("sec-light");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64})},30);return}
   if(t.dataset.rvmode){S.rvMode=t.dataset.rvmode;render();return}
-  if(t.id==="rvRoads"){t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");if(t.dataset.refetch){ROADS=null;idbSet("roads",null)}roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
+  if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");if(t.dataset.refetch){ROADS=null;idbSet("roads",null)}roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
   if(t.id==="rvMore"){S.review.show+=30;render();return}
   if(t.dataset.rvmap){openReviewMap(t.dataset.rvmap);return}
   if(t.dataset.rvreg){reviewToForm(t.dataset.rvreg);return}
@@ -754,25 +793,28 @@ document.addEventListener("click",async e=>{
   if(t.dataset.ck&&draft){draft.checks[t.dataset.ck]=t.dataset.v;t.parentElement.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b===t));suggestResult();return}
   if(t.id==="allOk"&&draft){CHECKS.forEach(([k])=>draft.checks[k]="ok");document.querySelectorAll("#checks .pair button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v==="ok"));draft.manual=false;suggestResult();return}
   if(t.dataset.res&&draft){draft.result=t.dataset.res;draft.manual=true;document.querySelectorAll("#resSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
-  if(t.id==="saveInsp"){saveInspection();return}
+  if(t.id==="saveInsp"){if(need("inspect"))saveInspection();return}
+  if(t.id==="claimAdmin"){if(rolesReady()){toast("이미 관리자가 있어요.");render();return}setRole(S.me,"admin");return}
+  if(t.dataset.roledel){if(!need("admin"))return;const r=S.roles.find(x=>x.id===t.dataset.roledel);if(r&&r.role==="admin"&&S.roles.filter(x=>x.role==="admin").length<=1){toast("마지막 관리자는 뺄 수 없어요.");return}if(!confirm("이 사용자의 역할을 빼면 주민으로 취급돼요. 계속할까요?"))return;write(()=>db.doc("roles/"+t.dataset.roledel).delete(),"역할을 뺐어요.");return}
+  if(t.id==="roleAdd"){if(!need("admin"))return;const id=$("#roleAddId").value.trim();if(!id){toast("사용자 ID를 넣어 주세요.");return}setRole(id,$("#roleAddRole").value);return}
   if(t.id==="tiltBtn"){startTilt();return}
   if(t.id==="tiltKeep"){keepTilt();return}
   if(t.id==="tiltStop"){stopTilt();return}
-  if(t.dataset.lstat&&draft){const id=draft.lightId,to=t.dataset.lstat;if(await write(()=>patchLight(id,{status:to,updatedAt:Date.now()}),`${to}(으)로 변경했어요.`))closeSheet();return}
+  if(t.dataset.lstat&&draft){if(!need("inspect"))return;const id=draft.lightId,to=t.dataset.lstat;if(await write(()=>patchLight(id,{status:to,updatedAt:Date.now()}),`${to}(으)로 변경했어요.`))closeSheet();return}
   if(t.dataset.issue){document.querySelectorAll("#issueSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
   if(t.id==="sendReport"){sendReport(t);return}
-  if(t.dataset.rstat){const to=t.dataset.to;write(()=>db.doc("reports/"+t.dataset.rstat).update({status:to,updatedAt:Date.now()}),`신고를 ${to}(으)로 변경했어요.`);return}
+  if(t.dataset.rstat){if(!need("admin"))return;const to=t.dataset.to;write(()=>db.doc("reports/"+t.dataset.rstat).update({status:to,updatedAt:Date.now()}),`신고를 ${to}(으)로 변경했어요.`);return}
   if(t.dataset.tofault){const r=S.reports.find(x=>x.id===t.dataset.tofault);if(!r)return;write(async()=>{await patchLight(r.lightId,{status:"고장",updatedAt:Date.now()});if(r.status==="접수")await db.doc("reports/"+r.id).update({status:"처리중",updatedAt:Date.now()})},"가로등을 고장으로 등록했어요.");return}
-  if(t.id==="addLight"){addLight();return}
-  if(t.dataset.regset){const to=t.dataset.to;write(()=>patchLight(t.dataset.regset,{reg:to,regAt:Date.now(),updatedAt:Date.now()}),`'${to}'(으)로 바꿨어요.`);return}
-  if(t.dataset.reglink){regLink(t.dataset.reglink);return}
-  if(t.dataset.regdel){const l=byId(t.dataset.regdel);if(!l)return;if(!confirm(`${l.code} 미등록 항목을 삭제할까요? 되돌릴 수 없어요.`))return;write(()=>db.doc("lights/"+l.id).delete(),"삭제했어요.");return}
-  if(t.dataset.platefix){plateFix(t.dataset.platefix);return}
-  if(t.dataset.ledit){openLightEdit(t.dataset.ledit);return}
+  if(t.id==="addLight"){if(need("inspect"))addLight();return}
+  if(t.dataset.regset){if(!need("admin"))return;const to=t.dataset.to;write(()=>patchLight(t.dataset.regset,{reg:to,regAt:Date.now(),updatedAt:Date.now()}),`'${to}'(으)로 바꿨어요.`);return}
+  if(t.dataset.reglink){if(need("admin"))regLink(t.dataset.reglink);return}
+  if(t.dataset.regdel){if(!need("admin"))return;const l=byId(t.dataset.regdel);if(!l)return;if(!confirm(`${l.code} 미등록 항목을 삭제할까요? 되돌릴 수 없어요.`))return;write(()=>db.doc("lights/"+l.id).delete(),"삭제했어요.");return}
+  if(t.dataset.platefix){if(need("inspect"))plateFix(t.dataset.platefix);return}
+  if(t.dataset.ledit){if(need("admin"))openLightEdit(t.dataset.ledit);return}
   if(t.id==="leGps"){t.disabled=true;t.textContent="측정 중…";navigator.geolocation.getCurrentPosition(p=>{$("#leLat").value=p.coords.latitude.toFixed(6);$("#leLng").value=p.coords.longitude.toFixed(6);$("#leAcc").textContent=`현재 위치로 바꿈 (±${Math.round(p.coords.accuracy)}m)`;leMoveMarker();t.disabled=false;t.textContent="현재 위치로"},()=>{toast("위치를 못 잡았어요. 위치 권한을 확인하세요.");t.disabled=false;t.textContent="현재 위치로"},{enableHighAccuracy:true,timeout:15000,maximumAge:0});return}
   if(t.id==="leReset"){const l=byId(t.dataset.id);if(!l)return;$("#leLat").value=typeof l.lat==="number"?l.lat.toFixed(6):"";$("#leLng").value=typeof l.lng==="number"?l.lng.toFixed(6):"";$("#leAcc").textContent="원래 좌표로 되돌림";leMoveMarker();return}
-  if(t.id==="leSave"){saveLightEdit(t.dataset.id,t);return}
-  if(t.id==="leUndo"){undoLightEdit(t.dataset.id);return}
+  if(t.id==="leSave"){if(need("admin"))saveLightEdit(t.dataset.id,t);return}
+  if(t.id==="leUndo"){if(need("admin"))undoLightEdit(t.dataset.id);return}
   if(t.id==="csv5"){exportEditsCSV();return}
   if(t.dataset.mapone){const l=byId(t.dataset.mapone);if(l)openMap("one",l);return}
   if(t.id==="csv3"){exportPendingCSV();return}
@@ -781,7 +823,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.pick){const inp=document.getElementById(t.dataset.pick);if(inp){inp.value="";inp.click()}return}
   if(t.dataset.scan){openScanner(t.dataset.scan);return}
   if(t.id==="arBtn"){openAR();return}
-  if(t.id==="ptBtn"){openPatrol();return}
+  if(t.id==="ptBtn"){if(need("inspect"))openPatrol();return}
   if(t.dataset.ptmark){ptMark(t.dataset.ptmark);return}
   if(t.dataset.ptsel){pt.sel=pt.sel===t.dataset.ptsel?null:t.dataset.ptsel;ptDraw(true);return}
   if(t.dataset.ptdrop){pt.marks=pt.marks.filter(m=>m.id!==t.dataset.ptdrop);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
@@ -789,7 +831,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="ptVoice"){pt.voice=!pt.voice;t.setAttribute("aria-pressed",pt.voice);if(pt.voice)ptSay("음성 안내를 켰어요.");return}
   if(t.id==="ptPause"){pt.paused=!pt.paused;t.textContent=pt.paused?"순찰 재개":"일시정지";t.setAttribute("aria-pressed",pt.paused);return}
   if(t.id==="ptEnd"){ptFinish();return}
-  if(t.id==="ptSave"){ptSave(t);return}
+  if(t.id==="ptSave"){if(need("inspect"))ptSave(t);return}
   if(t.id==="ptDiscard"){if(pt.marks.length&&!confirm("표시한 내용을 저장하지 않고 끝낼까요?"))return;ptReset();closeSheet();return}
   if(t.dataset.ptmap){openPatrolMap(t.dataset.ptmap);return}
   if(t.dataset.mapscope){openMap(t.dataset.mapscope);return}
@@ -821,6 +863,8 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classLi
 document.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;S.limit=60;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
 document.addEventListener("change",async e=>{
   if(e.target.id==="rvNoLight"){S.rvNoLight=e.target.checked;render();return}
+  if(e.target.id==="demoRole"){S.demoRole=e.target.value;try{localStorage.setItem("dg-role",S.demoRole)}catch(x){}toast(`체험: ${ROLE_LABEL[S.demoRole]} 화면으로 바꿨어요.`);render();return}
+  if(e.target.dataset.rolesel){if(!need("admin")){render();return}setRole(e.target.dataset.rolesel,e.target.value);return}
   if(e.target.id==="dong"){S.dong=e.target.value;S.limit=60;render();return}
   if(e.target.id==="pkKind"){const g=e.target.value==="가로등";$("#pkDongBox").hidden=g;$("#pkRoadBox").hidden=!g;$("#pkNum").placeholder=g?"65-5":"642";return}
   if(e.target.id==="nNoPlate"){const on=e.target.checked;["nNum","nRoad"].forEach(id=>{const x=$("#"+id);if(x)x.disabled=on});return}
@@ -878,9 +922,9 @@ function pendingSection(){
     ${l.linkedId?`<div class="muted">대장 ${esc((byId(l.linkedId)||{}).code||l.linkedId)}에 연결됨</div>`:""}
     <div class="split">
       <button class="btn ghost sm" data-light="${esc(l.id)}">열기</button>
-      ${l.reg==="미등록"?`<button class="btn sm" data-regset="${esc(l.id)}" data-to="대장반영">대장 반영 완료</button><button class="btn ghost sm" data-reglink="${esc(l.id)}">기존 등과 연결</button><button class="btn ghost sm" data-regset="${esc(l.id)}" data-to="반려">반려</button>`:`<button class="btn ghost sm" data-regset="${esc(l.id)}" data-to="미등록">미등록으로 되돌리기</button>`}
+      ${l.reg==="미등록"&&can("admin")?`<button class="btn sm" data-regset="${esc(l.id)}" data-to="대장반영">대장 반영 완료</button><button class="btn ghost sm" data-reglink="${esc(l.id)}">기존 등과 연결</button><button class="btn ghost sm" data-regset="${esc(l.id)}" data-to="반려">반려</button>`:`<button class="btn ghost sm" data-regset="${esc(l.id)}" data-to="미등록">미등록으로 되돌리기</button>`}
       ${typeof l.lat==="number"?`<button class="btn ghost sm" data-mapone="${esc(l.id)}">지도</button>`:""}
-      <button class="btn ghost sm" data-regdel="${esc(l.id)}" style="color:var(--bad)">삭제</button>
+      ${can("admin")?`<button class="btn ghost sm" data-regdel="${esc(l.id)}" style="color:var(--bad)">삭제</button>`:""}
     </div></div>`).join("")}</div>
   ${dl?`<div class="split"><button class="btn ghost sm" id="csv3">미등록 목록 CSV 내려받기</button></div>`:""}`;
 }
@@ -913,7 +957,7 @@ function editedSection(){
   return `<div class="list">${ls.slice(0,30).map(l=>{const e=l.edits[l.edits.length-1];return `<div class="panel">
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${kindBadge(l.kind)}<b>${esc(l.code)}</b><span class="muted">${esc(l.dong)}</span>${l.removed?`<span class="reg np">철거</span>`:""}<span class="muted" style="margin-left:auto">${fmtDT(e.at)}</span></div>
     <div class="muted">${e.changes.map(c=>`${esc(EDIT_FIELDS[c.f]||c.f)} → ${esc(fmtVal(c.f,c.to))}`).join(" · ")} · ${esc(S.names[e.by]||"담당자")}${l.edits.length>1?` · 총 ${l.edits.length}회`:""}</div>
-    <div class="split"><button class="btn ghost sm" data-light="${esc(l.id)}">열기</button><button class="btn ghost sm" data-ledit="${esc(l.id)}">수정</button>${typeof l.lat==="number"?`<button class="btn ghost sm" data-mapone="${esc(l.id)}">지도</button>`:""}</div></div>`}).join("")}${ls.length>30?`<div class="muted">외 ${ls.length-30}개</div>`:""}</div>
+    <div class="split"><button class="btn ghost sm" data-light="${esc(l.id)}">열기</button>${can("admin")?`<button class="btn ghost sm" data-ledit="${esc(l.id)}">수정</button>`:""}${typeof l.lat==="number"?`<button class="btn ghost sm" data-mapone="${esc(l.id)}">지도</button>`:""}</div></div>`}).join("")}${ls.length>30?`<div class="muted">외 ${ls.length-30}개</div>`:""}</div>
   <p class="muted" style="margin:8px 0 0">여기 바뀐 값은 이 앱에만 저장돼요. CSV로 내려받아 도로조명 관리시스템 대장에도 반영해 주세요.</p>
   ${dl?`<div class="split"><button class="btn ghost sm" id="csv5">수정 내역 CSV 내려받기</button></div>`:""}`;
 }
@@ -1203,7 +1247,7 @@ function rvList(rv){return rv?(rv.mode==="roads"&&!S.rvNoLight?rv.cands.filter(c
 function reviewSection(){
   const rv=S.review;
   const mode=S.rvMode||(ROADS?"roads":"pairs");
-  const roadLine=ROADS?`<span class="muted">도로 ${ROADS.ways.length.toLocaleString()}개${ROADS.areas&&ROADS.areas.length?` · 단지·산 ${ROADS.areas.length.toLocaleString()}곳`:""} (OpenStreetMap${ROADS.src==="db"?" · 공유 저장소":""})</span><button class="btn ghost sm" id="rvRoads" data-refetch="1">도로망 다시 받기</button><span class="muted" id="rvRoadsStat">${S.rvRoadsStat||""}</span>`:`<button class="btn ghost sm" id="rvRoads">도로망 불러오기</button><span class="muted" id="rvRoadsStat">${S.rvRoadsStat||"도로망을 받으면 도로를 따라 어두운 구간을 찾아요."}</span>`;
+  const roadLine=ROADS?`<span class="muted">도로 ${ROADS.ways.length.toLocaleString()}개${ROADS.areas&&ROADS.areas.length?` · 단지·산 ${ROADS.areas.length.toLocaleString()}곳`:""} (OpenStreetMap${ROADS.src==="db"?" · 공유 저장소":""})</span>${can("admin")?`<button class="btn ghost sm" id="rvRoads" data-refetch="1">도로망 다시 받기</button>`:""}<span class="muted" id="rvRoadsStat">${S.rvRoadsStat||""}</span>`:`<button class="btn ghost sm" id="rvRoads">도로망 불러오기</button><span class="muted" id="rvRoadsStat">${S.rvRoadsStat||"도로망을 받으면 도로를 따라 어두운 구간을 찾아요."}</span>`;
   const modeSeg=`<div class="seg" style="margin:0 0 8px"><button type="button" data-rvmode="roads" aria-pressed="${mode==="roads"}" ${ROADS?"":"disabled"}>도로 따라 검토</button><button type="button" data-rvmode="pairs" aria-pressed="${mode==="pairs"}">등 간격으로 검토</button></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px">${roadLine}</div>`;
   const dongSel=`<select class="f-in" id="rvDong" style="flex:1">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===(rv?rv.dong:"전체")?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select>`;
