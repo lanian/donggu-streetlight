@@ -13,7 +13,7 @@
 
 ## 표찰 기반 식별
 
-동구가 등주에 부착한 표찰을 관리번호로 사용합니다. 표찰은 두 종류입니다.
+동구가 등주에 부착한 표찰을 관리번호로 사용합니다. 표찰은 두 종류이며, 보안등 표찰의 동 이름은 법정동(산수동, 지산동, 충장로5가, 금남로2가 …)입니다.
 
 | 종류 | 표찰 | 번호 형식 | 예 |
 |---|---|---|---|
@@ -26,13 +26,18 @@
 
 ## 데이터 구조
 
-공유 데이터베이스의 컬렉션 세 개를 사용합니다. `seed/` 폴더에 샘플 레코드가 있습니다.
+**대장(`data/lights.json`)** — 도로조명 관리시스템(getPoint.json)에서 변환한 동구 전체 등 5,553개. 컬럼형 JSON(`cols` + `rows`)으로 페이지와 함께 배포되며, 앱은 시작 시 이 파일을 읽습니다.
 
 ```
-lights/{dongSlug}-{num}            보안등  예: lights/ss-642
-lights/gl-{roadHash}-{main}-{sub}  가로등  예: lights/gl-ul9t0-65-5
-  code, dong, kind(가로등|보안등), num(보안등), road·main·sub(가로등), poleNo, address, lampType,
-  installedYear, status(정상|점검필요|고장|수리중), lastInspected, lat, lng
+cols: id, lampId, label, code, kind(가로등|보안등|공원등|특이등), dong(법정동), num, road, main, sub,
+      lat, lng, lampType, pole(등주), sw(점멸기), removed(철거), noPlate(표찰없음), dongGuess(동 추정)
+```
+
+**현장 기록(공유 데이터베이스)** — 대장은 그대로 두고 바뀌는 값만 저장합니다. 체험 모드에서는 같은 구조를 브라우저 localStorage에 둡니다.
+
+```
+lights/{id}        대장 id와 같은 키. status(정상|점검필요|고장|수리중), lastInspected, lastResult, updatedAt
+                   + 현장에서 직접 등록한 등은 전체 필드(code, dong, kind, num/road/main/sub, lat, lng …)
 
 inspections/{auto}
   lightId, code, dong, date, checks{}, faults[], result, memo, tiltDeg, photo, inspector
@@ -41,8 +46,6 @@ reports/{auto}
   issue, location, dong, code, lightId, desc, photo, status(접수|처리중|완료),
   createdAt, updatedAt, reporterId
 ```
-
-행정동 약어: 충장동 `cj` · 동명동 `dm` · 계림동 `gr` · 산수동 `ss` · 지산동 `js` · 서남동 `sn` · 학동 `hd` · 학운동 `hu` · 지원동 `jw`
 
 ## 실행 환경에 대한 안내
 
