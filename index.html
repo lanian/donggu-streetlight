@@ -49,10 +49,13 @@ button{cursor:pointer}
 .wrap{max-width:760px;margin:0 auto;padding:0 16px 110px}
 
 /* header: the lamp head is the one bold element */
-header.top{padding:22px 0 14px;display:flex;align-items:flex-end;gap:14px}
+header.top{padding:22px 0 14px;display:flex;align-items:flex-end;gap:12px}
+header.top>div:first-of-type{flex:1;min-width:0}header.top>div:last-child{flex:none}
+header p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lamp{width:46px;height:58px;flex:none}
 .lamp .glow{fill:var(--sodium)}
-header h1{font-size:22px;line-height:1.25;margin:0;font-weight:700;letter-spacing:-.01em}
+header h1{font-size:22px;line-height:1.25;margin:0;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+@media(max-width:420px){header h1{font-size:19px}header p{font-size:12px}}
 header p{margin:2px 0 0;color:var(--ink-2);font-size:13px}
 .sync{margin-left:auto;font-size:12px;color:var(--ink-2);white-space:nowrap}
 .sync i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--line);margin-right:5px;vertical-align:1px}
@@ -128,7 +131,8 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ptcard.st-고장,.ptcard.st-수리중{box-shadow:inset 4px 0 0 var(--bad)}.ptcard.st-점검필요{box-shadow:inset 4px 0 0 var(--warn)}
 .ptbtns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 .ptbtns button{min-height:76px;border-radius:14px;border:0;font-size:19px;font-weight:800;color:#fff}
-.ptbtns .bad{background:#C2372B}.ptbtns .warn{background:#B8740A}.ptbtns .undo{background:#2F3B52;grid-column:1/-1;min-height:48px;font-size:15px;font-weight:600}
+.ptbtns .bad{background:#C2372B}.ptbtns .warn{background:#B8740A}.ptbtns .ok{background:#2E8B57}.ptbtns .spot{background:#5B4B9E}.ptbtns button[hidden]{display:none}
+.ptprog{display:flex;gap:8px;align-items:center;margin:0 0 8px;font-size:12px;color:#A9B6CC}.ptprog select{font:inherit;font-size:13px;background:#1A2538;color:#fff;border:1px solid #3A4A66;border-radius:8px;padding:4px 6px}.ptprog .bar{flex:1;height:8px;background:#1A2538;border-radius:4px;overflow:hidden}.ptprog .bar i{display:block;height:100%;background:#2E8B57;transition:width .3s}.ptbtns .undo{background:#2F3B52;grid-column:1/-1;min-height:48px;font-size:15px;font-weight:600}
 .ptbtns button small{display:block;font-size:12px;font-weight:500;opacity:.85;margin-top:2px}
 .ptlog{margin-top:10px;font-size:13px;color:#C9D2E3}.ptlog div{display:flex;gap:8px;align-items:center;padding:4px 0;border-top:1px solid #243049}
 .ptlog button{margin-left:auto;background:none;border:1px solid #3A4A66;color:#C9D2E3;border-radius:8px;padding:2px 8px}
@@ -192,7 +196,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 .lepin{background:none;border:0}.lepin-dot{width:30px;height:30px;border-radius:50%;background:rgba(232,154,12,.35);border:2px solid #E89A0C;box-sizing:border-box;position:relative;cursor:grab}.lepin-dot::after{content:"";position:absolute;left:9px;top:9px;width:8px;height:8px;border-radius:50%;background:#E89A0C;border:2px solid #fff}
 .empty{padding:22px 14px;text-align:center;color:var(--ink-2);background:var(--card);border:1px dashed var(--line);border-radius:10px;font-size:14px}
 .notice{background:var(--sodium-soft);border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0}
-.rolechip{font-size:12px;color:var(--ink-2);display:flex;gap:4px;align-items:center}.rolechip select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:2px 6px;background:var(--card);color:var(--ink)}
+.rolechip{font-size:11px;color:var(--ink-2);display:flex;gap:4px;align-items:center;white-space:nowrap}.rolechip select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:2px 6px;background:var(--card);color:var(--ink)}
 .rolechip b{color:var(--ink)}
 .roles .row{display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap}.roles .row:first-child{border-top:0}.roles select{font:inherit;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--card);color:var(--ink)}
 nav.tabs button[hidden]{display:none}
@@ -273,7 +277,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
     </svg>
     <div>
       <h1>광주 동구 가로등 점검</h1>
-      <p>현장 점검, 고장 관리, 주민 신고를 한곳에서</p>
+      <p>현장 점검과 고장 관리를 한곳에서</p>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div class="sync" id="sync"><i></i><span>연결 중</span></div><div class="rolechip" id="roleChip"></div></div>
   </header>
@@ -372,6 +376,7 @@ const CHECKS=[
   ["tree","주변 간섭","수목, 간판, 시야 가림"]
 ];
 const DUE_DAYS=90;
+const FEATURES={reports:false}; // 주민 신고: 유지관리 부담으로 보류 (true로 바꾸면 탭·관리 섹션이 다시 켜짐)
 
 const S={lights:[],insp:[],reports:[],patrols:[],roles:[],demoRole:null,tab:"inspect",q:"",dong:"전체",stat:null,kind:"전체",limit:60,near:false,pos:null,posWatch:null,me:null,canWrite:true,live:false,names:{}};
 let db=null,user=null,dl=null;
@@ -478,7 +483,7 @@ async function resolveNames(){
 }
 /* ---------- roles: admin / inspector / resident. Enforced in the UI; the shared DB itself only knows "can write".
    Until someone claims the admin role, every participant keeps full access (as before). ---------- */
-const ROLE_LABEL={admin:"관리자",inspector:"점검자",resident:"주민"};
+const ROLE_LABEL={admin:"관리자",inspector:"점검자",resident:"주민(열람 불가)"};
 function rolesReady(){return S.roles.some(r=>r.role==="admin")}
 function myRole(){if(S.me==="local")return S.demoRole||"admin";if(!rolesReady())return "admin";const r=S.roles.find(r=>r.id===S.me);return r?r.role:"resident"}
 function can(p){const r=myRole();if(p==="admin")return r==="admin";if(p==="inspect")return r==="admin"||r==="inspector";return true}
@@ -531,12 +536,17 @@ async function compress(file){return (await compressBlob(file)).url}
 
 /* ---------- render ---------- */
 function render(){
-  const allowed={inspect:can("inspect"),admin:can("inspect"),report:true};
-  if(!allowed[S.tab])S.tab="report";
+  const allowed={inspect:can("inspect"),admin:can("inspect"),report:FEATURES.reports};
+  if(!allowed[S.tab])S.tab=allowed.inspect?"inspect":allowed.report?"report":"none";
   document.querySelectorAll("nav.tabs button").forEach(b=>{b.hidden=!allowed[b.dataset.tab];b.setAttribute("aria-selected",b.dataset.tab===S.tab)});
+  document.querySelector("nav.tabs").hidden=Object.values(allowed).filter(Boolean).length<2;
   const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<span>체험 역할</span><select id="demoRole" aria-label="체험 역할">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v}</option>`).join("")}</select>`:S.me?`<span>내 역할</span><b>${ROLE_LABEL[myRole()]}${rolesReady()?"":" (설정 전)"}</b>`:"";
   const v=$("#view");
-  v.innerHTML=S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():vReport();
+  v.innerHTML=S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():S.tab==="report"?vReport():vNoAccess();
+}
+function vNoAccess(){
+  return `<div class="panel" style="margin-top:12px"><h3>점검자·관리자용 화면이에요</h3><p class="muted">이 계정에는 아직 역할이 없어요. 관리자에게 아래 사용자 ID를 알려 주고 점검자로 등록해 달라고 하세요. 등록되면 화면을 새로 고치면 돼요.</p>
+    <p>내 사용자 ID: <code>${esc(S.me||"")}</code></p>${!S.canWrite?`<p class="muted">공유 설정에서 "참여자" 권한도 필요해요.</p>`:""}</div>`;
 }
 function tally(clickable){
   const n=s=>S.lights.filter(l=>l.status===s).length;
@@ -630,15 +640,15 @@ function vAdmin(){
   const rOpen=S.reports.filter(r=>r.status!=="완료");
   const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;
   const pend=pendingList().filter(l=>l.reg==="미등록").length,np=S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length;
-  const nav=[["sec-open","조치 필요",open.length],["sec-rep","신고",rOpen.length],["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-patrol","순찰",S.patrols.length||null]].concat(can("admin")?[["sec-roles","권한",S.roles.length||null]]:[]).concat([["sec-edit","정보 수정",editedList().length||null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]):[]);
-  const setupNotice=S.me&&S.me!=="local"&&!rolesReady()?`<div class="notice"><b>권한 설정 전이에요.</b> 지금은 참여자 모두가 신고 처리·미등록 처리·등 정보 수정까지 할 수 있어요. 관리자를 지정하면 그때부터 관리자만 그 일을 하고, 나머지는 점검자·주민으로 나뉘어요.${S.canWrite?` <button class="btn sm" id="claimAdmin" style="margin-left:6px">내가 관리자 되기</button>`:""}</div>`:"";
+  const nav=[["sec-open","조치 필요",open.length],...(FEATURES.reports?[["sec-rep","신고",rOpen.length]]:[]),["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-patrol","순찰",S.patrols.length||null]].concat(can("admin")?[["sec-roles","권한",S.roles.length||null]]:[]).concat([["sec-edit","정보 수정",editedList().length||null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]):[]);
+  const setupNotice=S.me&&S.me!=="local"&&!rolesReady()?`<div class="notice"><b>권한 설정 전이에요.</b> 지금은 참여자 모두가 미등록 처리·등 정보 수정까지 할 수 있어요. 관리자를 지정하면 그때부터 관리자만 그 일을 하고, 나머지는 점검자·주민으로 나뉘어요.${S.canWrite?` <button class="btn sm" id="claimAdmin" style="margin-left:6px">내가 관리자 되기</button>`:""}</div>`:"";
   return `${setupNotice}${tally(false)}
   <div class="chipbar quicknav">${nav.map(([id,t,n])=>`<button type="button" data-jump="${id}">${t}${n!=null?`<span class="secnum ${n?"":"zero"}">${n}</span>`:""}</button>`).join("")}</div>
-  <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length.toLocaleString()}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건 · 미처리 신고 ${rOpen.length}건</span></div>${mapSVG()}<div class="split"><button class="btn sm" data-mapscope="all">지도에서 보기</button><button class="btn ghost sm" data-mapscope="open">조치 필요만 지도에서</button></div></div>
+  <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length.toLocaleString()}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건${FEATURES.reports?` · 미처리 신고 ${rOpen.length}건`:""}</span></div>${mapSVG()}<div class="split"><button class="btn sm" data-mapscope="all">지도에서 보기</button><button class="btn ghost sm" data-mapscope="open">조치 필요만 지도에서</button></div></div>
   <h2 id="sec-open">조치가 필요한 등 <span class="muted">${open.length}</span></h2>
   <div class="list">${open.length?open.slice(0,50).map(lightRow).join("")+(open.length>50?`<div class="muted">외 ${open.length-50}개 · 현장 점검 탭에서 상태로 걸러 보세요</div>`:""):`<div class="empty">모든 가로등이 정상이에요.</div>`}</div>
-  <h2 id="sec-rep">주민 신고 <span class="muted">미처리 ${rOpen.length}</span></h2>
-  <div class="list">${S.reports.length?S.reports.slice(0,20).map(r=>reportCard(r,can("admin"))).join(""):`<div class="empty">접수된 신고가 없어요.</div>`}</div>
+  ${FEATURES.reports?`<h2 id="sec-rep">주민 신고 <span class="muted">미처리 ${rOpen.length}</span></h2>
+  <div class="list">${S.reports.length?S.reports.slice(0,20).map(r=>reportCard(r,can("admin"))).join(""):`<div class="empty">접수된 신고가 없어요.</div>`}</div>`:""}
   <h2 id="sec-kind">종류별 현황</h2>
   <div class="panel"><div class="kindtab"><span class="h">종류</span><span class="h">전체</span><span class="h">점검필요</span><span class="h">고장</span><span class="h">수리중</span>
     ${KINDS.map(k=>{const ls=S.lights.filter(l=>(l.kind||"가로등")===k);if(!ls.length)return"";const n=s=>ls.filter(l=>l.status===s).length;return `<span>${kindBadge(k)}</span><b>${ls.length.toLocaleString()}</b><b class="st-점검필요" style="color:${n("점검필요")?"var(--warn)":"var(--ink-2)"}">${n("점검필요")}</b><b style="color:${n("고장")?"var(--bad)":"var(--ink-2)"}">${n("고장")}</b><b style="color:${n("수리중")?"var(--fix)":"var(--ink-2)"}">${n("수리중")}</b>`}).join("")}</div>
@@ -834,6 +844,14 @@ document.addEventListener("click",async e=>{
   if(t.id==="ptSave"){if(need("inspect"))ptSave(t);return}
   if(t.id==="ptDiscard"){if(pt.marks.length&&!confirm("표시한 내용을 저장하지 않고 끝낼까요?"))return;ptReset();closeSheet();return}
   if(t.dataset.ptmap){openPatrolMap(t.dataset.ptmap);return}
+  if(t.dataset.ptspot){ptSpot();return}
+  if(t.dataset.ptspotdel){pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
+  if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;closeSheet();S.tab="admin";render();const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
+  if(t.id==="ptListen"){ptListen(!pt.listen);return}
+  if(t.id==="ptShare"){const p={start:pt.start,end:pt.end,dist:pt.dist,dong:pt.dong,passed:[...pt.passed.keys()],marks:pt.marks,spots:pt.spots};navigator.share({title:"야간 순찰 일지",text:ptReportText(p)}).catch(()=>{});return}
+  if(t.dataset.ptgo){if(need("inspect"))openPatrol(t.dataset.ptgo);return}
+  if(t.dataset.ptunmap){const cut=Date.now()-PT_DAYS*86400000;const pts=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&!(PT_LAST[l.id]&&PT_LAST[l.id].at>cut));openMap("custom",{pts,title:`최근 ${PT_DAYS}일 순찰 안 된 등`});return}
+  if(t.id==="csv6"){exportPatrolCSV();return}
   if(t.dataset.mapscope){openMap(t.dataset.mapscope);return}
   if(t.id==="mapLoc"){mapLocate();return}
   if(t.dataset.mapOpen){closeSheet();openLight(t.dataset.mapOpen);return}
@@ -863,6 +881,7 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classLi
 document.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;S.limit=60;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
 document.addEventListener("change",async e=>{
   if(e.target.id==="rvNoLight"){S.rvNoLight=e.target.checked;render();return}
+  if(e.target.id==="ptDong"){pt.dong=e.target.value;pt.total=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&(pt.dong==="전체"||l.dong===pt.dong)).length;ptDraw(true);return}
   if(e.target.id==="demoRole"){S.demoRole=e.target.value;try{localStorage.setItem("dg-role",S.demoRole)}catch(x){}toast(`체험: ${ROLE_LABEL[S.demoRole]} 화면으로 바꿨어요.`);render();return}
   if(e.target.dataset.rolesel){if(!need("admin")){render();return}setRole(e.target.dataset.rolesel,e.target.value);return}
   if(e.target.id==="dong"){S.dong=e.target.value;S.limit=60;render();return}
@@ -1349,8 +1368,8 @@ function drawMapMarkers(){
 }
 const STAT_COL={"정상":"#2C7A57","점검필요":"#B86E00","고장":"#C2372B","수리중":"#2F5DA8"};
 function openMap(scope,one){
-  const pts=(scope==="one"?S.lights.filter(l=>l===one||(typeof l.lat==="number"&&distM(one,l)<=150)):scope==="filtered"?filtered():scope==="open"?S.lights.filter(l=>l.status!=="정상"):S.lights).filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
-  const title=scope==="one"?`지도 · ${one.code}`:scope==="filtered"?"지도 · 현재 목록":scope==="open"?"지도 · 조치 필요":"지도 · 전체";
+  const pts=(scope==="one"?S.lights.filter(l=>l===one||(typeof l.lat==="number"&&distM(one,l)<=150)):scope==="filtered"?filtered():scope==="open"?S.lights.filter(l=>l.status!=="정상"):scope==="custom"?one.pts:S.lights).filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
+  const title=scope==="one"?`지도 · ${one.code}`:scope==="filtered"?"지도 · 현재 목록":scope==="open"?"지도 · 조치 필요":scope==="custom"?one.title:"지도 · 전체";
   gmapKind="전체";
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted" id="mapCount">${pts.length.toLocaleString()}개</span></h3><div class="muted">마커 속은 상태, 테두리는 종류예요. 고장·수리중은 위에 그려져요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     ${kindChips("전체","mapKind",kindCounts(pts))}
@@ -1391,27 +1410,55 @@ const dirName=b=>DIR8[Math.round(b/45)%8];
    everything passed without a tap is logged as "seen lit". Only the passenger operates the phone. ---------- */
 let PT_LAST={};
 function ptIndex(){PT_LAST={};for(const p of S.patrols.slice().reverse()){for(const id of p.passed||[])PT_LAST[id]={at:p.end||p.start};for(const m of p.marks||[])PT_LAST[m.id]={at:p.end||p.start,mark:m.result}}}
-const pt={on:false,watch:null,track:[],passed:new Map(),marks:[],start:0,dist:0,pos:null,heading:null,speed:0,last:null,voice:false,wake:null,sel:null,ahead:[],paused:false,spoken:new Set(),key:""};
-function ptReset(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}pt.track=[];pt.passed=new Map();pt.marks=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key=""}
+const pt={on:false,watch:null,track:[],passed:new Map(),marks:[],spots:[],start:0,dist:0,pos:null,heading:null,speed:0,last:null,voice:false,wake:null,sel:null,ahead:[],paused:false,spoken:new Set(),key:"",dong:"전체",total:0,rec:null,listen:false,acc:null};
+const PT_DAYS=30; // a light counts as "patrolled" if a car passed it within this many days
+function ptReset(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;ptListen(false);if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}pt.track=[];pt.passed=new Map();pt.marks=[];pt.spots=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key="";pt.total=0;pt.acc=null}
+function ptWatch(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=navigator.geolocation.watchPosition(ptPos,()=>{const a=$("#ptAhead");if(a)a.innerHTML=`<div class="empty">위치 권한이 없어요. 설정에서 허용해 주세요.</div>`},{enableHighAccuracy:true,maximumAge:0,timeout:20000})}
+document.addEventListener("visibilitychange",()=>{if(pt.on&&document.visibilityState==="visible"){ptWatch();if(navigator.wakeLock&&!pt.wake)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});if(pt.listen)ptListen(true)}});
+/* voice commands (Chrome/Android; Safari partial): 꺼짐·고장 / 깜빡·어두 / 켜져·정상 / 취소 / 여기 */
+function ptListen(on){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(pt.rec){try{pt.rec.onend=null;pt.rec.stop()}catch(e){}pt.rec=null}
+  pt.listen=!!on&&!!SR;const b=$("#ptListen");if(b)b.setAttribute("aria-pressed",pt.listen);
+  if(!on)return;if(!SR){toast("이 브라우저는 음성 명령을 지원하지 않아요. (안드로이드 Chrome에서 돼요)");return}
+  const r=new SR();r.lang="ko-KR";r.continuous=true;r.interimResults=false;r.maxAlternatives=1;
+  r.onresult=ev=>{const t=(ev.results[ev.results.length-1][0].transcript||"").replace(/\s/g,"");if(!t)return;
+    if(/취소|아니/.test(t)){const m=pt.marks.pop();if(m)toast(`${m.code} 표시 취소`);ptDraw(true)}
+    else if(/여기|지점|없/.test(t))ptSpot();
+    else if(/깜빡|어두|흐리|약/.test(t))ptMark("점검필요");
+    else if(/꺼|고장|안켜|불이없/.test(t))ptMark("고장");
+    else if(/켜져|정상|켜짐|들어/.test(t))ptMark("정상");
+    else{const l=$("#ptHeard");if(l)l.textContent=`"${t}" — 못 알아들었어요`}};
+  r.onerror=e=>{if(e.error==="not-allowed"){toast("마이크 권한이 없어요.");ptListen(false)}};
+  r.onend=()=>{if(pt.listen&&pt.on)try{r.start()}catch(e){}};
+  try{r.start();pt.rec=r;toast("음성 명령: 꺼짐 · 깜빡임 · 켜져있음 · 취소 · 여기")}catch(e){pt.listen=false}
+}
+function ptCoverage(dong){
+  const cut=Date.now()-PT_DAYS*86400000;const ls=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&(dong==="전체"||l.dong===dong));
+  const cov=ls.filter(l=>PT_LAST[l.id]&&PT_LAST[l.id].at>cut).length;return{n:ls.length,cov,pct:ls.length?Math.round(cov/ls.length*100):0};
+}
 function ptSay(t){if(!pt.voice||!window.speechSynthesis)return;try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang="ko-KR";u.rate=1.05;speechSynthesis.speak(u)}catch(e){}}
-function openPatrol(){
-  ptReset();pt.on=true;pt.start=Date.now();
+function openPatrol(dong){
+  ptReset();pt.on=true;pt.start=Date.now();pt.dong=dong||S.dong||"전체";pt.total=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&(pt.dong==="전체"||l.dong===pt.dong)).length;
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">야간 순찰 <span class="muted">차량</span></h3><div class="muted">운전자는 조작하지 마세요. 동승자가 보면서, 지나가는 등이 꺼져 있으면 큰 버튼을 누르세요. 누르지 않고 지나간 등은 "점등 확인"으로 남아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="ptwrap">
-      <div class="pthud"><span><b id="ptSpd">–</b> km/h</span><span id="ptRoad"></span><span>지나간 등 <b id="ptN">0</b></span><span>표시 <b id="ptM">0</b></span></div>
+      <div class="pthud"><span><b id="ptSpd">–</b> km/h</span><span id="ptRoad"></span><span id="ptAcc"></span><span>지나간 등 <b id="ptN">0</b></span><span>표시 <b id="ptM">0</b></span></div>
+      <div class="ptprog"><select id="ptDong" aria-label="순찰 대상 동">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===pt.dong?"selected":""}>${d==="전체"?"동구 전체":d}</option>`).join("")}</select><div class="bar"><i id="ptBar" style="width:0%"></i></div><span id="ptPct">0%</span></div>
       <div class="ptahead" id="ptAhead"><div class="muted" style="color:#A9B6CC">GPS를 기다리는 중… 차가 움직이면 진행 방향 앞의 등이 여기에 떠요.</div></div>
-      <div class="ptbtns"><button class="bad" data-ptmark="고장">꺼짐<small>고장으로 표시</small></button><button class="warn" data-ptmark="점검필요">어둡거나 깜빡임<small>점검필요로 표시</small></button><button class="undo" id="ptUndo">마지막 표시 취소</button></div>
+      <div class="ptbtns"><button class="bad" data-ptmark="고장">꺼짐<small>고장으로 표시</small></button><button class="warn" data-ptmark="점검필요">어둡거나 깜빡임<small>점검필요로 표시</small></button><button class="ok" data-ptmark="정상" id="ptOkBtn" hidden>켜져 있음<small>수리 확인 · 정상으로</small></button><button class="spot" data-ptspot="1">여기 어두움<small>등 없는 지점 찍기</small></button><button class="undo" id="ptUndo">마지막 표시 취소</button></div>
+      <div class="muted" id="ptHeard" style="color:#8A98B3;font-size:12px;min-height:16px"></div>
       <div class="ptlog" id="ptLog"></div>
     </div>
     <p class="muted" id="ptNote" style="margin:8px 0 0">시속 40km면 2초에 등 하나를 지나요. 버튼은 맨 위(가장 가까운) 등에 적용되고, 다른 등을 먼저 누르면 그 등에 적용돼요. 끝낸 뒤 목록을 확인하고 저장합니다.</p>
-    <div class="split"><button class="btn ghost sm" id="ptVoice" aria-pressed="false">음성 안내</button><button class="btn ghost sm" id="ptPause" aria-pressed="false">일시정지</button><button class="btn sm" id="ptEnd" style="margin-left:auto">순찰 끝내기</button></div>`);
+    <div class="split"><button class="btn ghost sm" id="ptVoice" aria-pressed="false">음성 안내</button><button class="btn ghost sm" id="ptListen" aria-pressed="false">음성 명령</button><button class="btn ghost sm" id="ptPause" aria-pressed="false">일시정지</button><button class="btn sm" id="ptEnd" style="margin-left:auto">순찰 끝내기</button></div>`);
   if(!navigator.geolocation){$("#ptAhead").innerHTML=`<div class="empty">이 기기는 위치를 쓸 수 없어요.</div>`;return}
-  pt.watch=navigator.geolocation.watchPosition(ptPos,()=>{$("#ptAhead").innerHTML=`<div class="empty">위치 권한이 없어요. 설정에서 허용해 주세요.</div>`},{enableHighAccuracy:true,maximumAge:0,timeout:20000});
+  ptWatch();
   if(navigator.wakeLock)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});
 }
 function ptPos(p){
   if(!pt.on)return;
   const np={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy,at:Date.now()};
+  pt.acc=np.acc;const ac=$("#ptAcc");if(ac){ac.textContent=`GPS ±${Math.round(np.acc)}m`;ac.style.color=np.acc>25?"#FFB347":"#A9B6CC"}
   if(np.acc>60)return;
   if(pt.last){const d=distM(pt.last,np);const dt=(np.at-pt.last.at)/1000;
     if(d<4&&dt<3)return;
@@ -1434,13 +1481,16 @@ function ptPos(p){
 }
 function ptDraw(force){
   if(!$("#ptAhead"))return;
-  $("#ptSpd").textContent=Math.round(pt.speed*3.6);$("#ptN").textContent=pt.passed.size;$("#ptM").textContent=pt.marks.length;
+  $("#ptSpd").textContent=Math.round(pt.speed*3.6);$("#ptN").textContent=pt.passed.size;$("#ptM").textContent=pt.marks.length+pt.spots.length;
+  if(pt.total){const inD=pt.dong==="전체"?pt.passed.size:[...pt.passed.keys()].filter(id=>{const l=byId(id);return l&&l.dong===pt.dong}).length;const pct=Math.min(100,Math.round(inD/pt.total*100));$("#ptBar").style.width=pct+"%";$("#ptPct").textContent=`${pct}% (${inD}/${pt.total})`}
+  const okb=$("#ptOkBtn");if(okb){const f=pt.sel?byId(pt.sel):(pt.ahead[0]&&pt.ahead[0].l);okb.hidden=!(f&&f.status!=="정상")}
   if(ROADS&&pt.pos&&(!pt.roadAt||Date.now()-pt.roadAt>4000)){pt.roadAt=Date.now();$("#ptRoad").textContent=nearestRoadName(pt.pos)||""}
-  const key=pt.ahead.map(a=>a.l.id+":"+a.d+":"+a.side).join("|")+"#"+pt.sel+"#"+pt.marks.length;
+  const key=pt.ahead.map(a=>a.l.id+":"+a.d+":"+a.side).join("|")+"#"+pt.sel+"#"+pt.marks.length+"#"+pt.spots.length;
   if(!force&&key===pt.key)return;pt.key=key;
   const marked=new Map(pt.marks.map(m=>[m.id,m.result]));
   $("#ptAhead").innerHTML=pt.ahead.length?pt.ahead.map((a,i)=>`<button class="ptcard st-${esc(a.l.status)} ${(pt.sel?pt.sel===a.l.id:i===0)?"first":""}" data-ptsel="${esc(a.l.id)}">${kindBadge(a.l.kind)}<span><b>${esc(a.l.code)}</b><br><span class="side">${a.side}${a.l.status!=="정상"?` · ${esc(a.l.status)}`:""}${marked.has(a.l.id)?` · <b style="color:#FFB347">${esc(marked.get(a.l.id))} 표시됨</b>`:""}</span></span><span class="d">${a.fwd<0?"지남":a.d+"m"}</span></button>`).join(""):`<div class="muted" style="color:#A9B6CC">${pt.pos?"앞쪽 140m 안에 등록된 등이 없어요.":"GPS를 기다리는 중…"}</div>`;
-  $("#ptLog").innerHTML=pt.marks.slice(-5).reverse().map(m=>`<div><b>${esc(m.code)}</b> ${esc(m.result)} <span style="color:#8A98B3">${fmtT(m.at)}</span><button data-ptdrop="${esc(m.id)}">삭제</button></div>`).join("");
+  const items=[...pt.marks.map(m=>({at:m.at,html:`<b>${esc(m.code)}</b> ${esc(m.result)} <span style="color:#8A98B3">${fmtT(m.at)}</span><button data-ptdrop="${esc(m.id)}">삭제</button>`})),...pt.spots.map((sp,i)=>({at:sp.at,html:`<b>어두운 지점</b> ${sp.near?esc(sp.near)+" 근처":""} <span style="color:#8A98B3">${fmtT(sp.at)}</span><button data-ptspotdel="${i}">삭제</button>`}))].sort((a,b)=>b.at-a.at).slice(0,5);
+  $("#ptLog").innerHTML=items.map(i=>`<div>${i.html}</div>`).join("");
 }
 function nearestRoadName(pos){
   const G=lightGrid();const me=G.toXY(pos);let best=35,name="";
@@ -1453,8 +1503,15 @@ function ptMark(result){
   let tgt=pt.sel?byId(pt.sel):(pt.ahead[0]&&pt.ahead[0].l);
   if(!tgt){let b=null,bd=60;for(const [id,v] of pt.passed)if(Date.now()-v.at<8000&&v.d<bd){bd=v.d;b=id}tgt=b&&byId(b)}
   if(!tgt){toast("표시할 등이 없어요. 등이 앞에 뜰 때 눌러 주세요.");return}
+  if(result==="정상"&&tgt.status==="정상"){toast(`${tgt.code}은(는) 이미 정상이에요.`);return}
   pt.marks=pt.marks.filter(m=>m.id!==tgt.id);pt.marks.push({id:tgt.id,code:tgt.code,result,at:Date.now(),pos:pt.pos?[pt.pos.lat,pt.pos.lng]:null});
   pt.sel=null;if(navigator.vibrate)navigator.vibrate(result==="고장"?[60,40,60]:60);ptSay(`${tgt.code} ${result}`);toast(`${tgt.code} → ${result}`);ptDraw(true);
+}
+function ptSpot(){
+  if(!pt.on||!pt.pos){toast("아직 위치를 못 잡았어요.");return}
+  const G=lightGrid();const me=G.toXY(pt.pos);const nb=G.near(me.x,me.y,80).filter(o=>!o.it.l.removed).sort((a,b)=>a.d-b.d)[0];
+  pt.spots.push({lat:+pt.pos.lat.toFixed(6),lng:+pt.pos.lng.toFixed(6),acc:Math.round(pt.acc||0),at:Date.now(),near:nb?nb.it.l.code:"",nearD:nb?Math.round(nb.d):null});
+  if(navigator.vibrate)navigator.vibrate(40);ptSay("어두운 지점 기록");toast(`어두운 지점을 찍었어요${nb?` (${nb.it.l.code}에서 ${Math.round(nb.d)}m)`:" (근처 80m에 등록된 등 없음)"}.`);ptDraw(true);
 }
 const fmtT=t=>{const d=new Date(t);return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`};
 function ptFinish(){
@@ -1469,33 +1526,51 @@ function ptSummary(){
   box.innerHTML=`<div class="tally"><button tabindex=-1 style="--c:var(--ink-2)"><b>${(pt.dist/1000).toFixed(1)}</b><span>km</span></button><button tabindex=-1 style="--c:var(--ink-2)"><b>${mins}</b><span>분</span></button><button tabindex=-1 style="--c:var(--ok)"><b>${pt.passed.size}</b><span>지나간 등</span></button><button tabindex=-1 style="--c:var(--bad)"><b>${pt.marks.length}</b><span>표시</span></button></div>
     <h2>표시한 등 <span class="muted">${pt.marks.length}</span></h2>
     ${pt.marks.length?`<div class="list">${pt.marks.slice().reverse().map(m=>{const l=byId(m.id)||{};return `<div class="panel" style="border-left:5px solid ${m.result==="고장"?"var(--bad)":"var(--warn)"}"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${kindBadge(l.kind)}<b>${esc(m.code)}</b><span class="chip st-${esc(m.result)}">${esc(m.result)}</span><span class="muted" style="margin-left:auto">${fmtT(m.at)}</span></div><div class="muted">${esc(l.dong||"")} · ${esc(l.address||"")}${l.status&&l.status!=="정상"?` · 현재 ${esc(l.status)}`:""}</div><div class="split"><button class="btn ghost sm" data-light="${esc(m.id)}">열기</button><button class="btn ghost sm" data-ptdrop="${esc(m.id)}" style="color:var(--bad)">빼기</button></div></div>`}).join("")}</div>`:`<div class="empty">꺼진 등으로 표시한 것이 없어요.</div>`}
+    ${pt.spots.length?`<h2>어두운 지점 <span class="muted">${pt.spots.length}</span></h2><div class="list">${pt.spots.map((sp,i)=>`<div class="panel" style="border-left:5px solid #5B4B9E"><div><b>${sp.lat.toFixed(5)}, ${sp.lng.toFixed(5)}</b> <span class="muted">±${sp.acc}m · ${fmtT(sp.at)}</span></div><div class="muted">${sp.near?`가장 가까운 등 ${esc(sp.near)} ${sp.nearD}m`:"80m 안에 등록된 등 없음 — 미등록 등이거나 조명 공백"}</div><div class="split">${S.canWrite&&can("inspect")?`<button class="btn ghost sm" data-ptspotform="${i}">미등록 양식에</button>`:""}<button class="btn ghost sm" data-ptspotdel="${i}" style="color:var(--bad)">빼기</button></div></div>`).join("")}</div>`:""}
     <h2>점등 확인 <span class="muted">${passedOnly.length}</span></h2><div class="muted">${passedOnly.slice(0,40).map(id=>(byId(id)||{}).code).filter(Boolean).map(esc).join(", ")}${passedOnly.length>40?` 외 ${passedOnly.length-40}개`:""}${passedOnly.length?"":"지나간 등이 없어요."}</div>
     ${pt.track.length>1&&window.L?`<div class="split"><button class="btn ghost sm" data-ptmap="live">경로 지도</button></div>`:""}
     <div style="margin-top:16px"><button class="btn sodium block" id="ptSave" ${S.canWrite&&(pt.passed.size||pt.marks.length)?"":"disabled"}>순찰 결과 저장</button></div>
-    <div class="split"><button class="btn ghost sm" id="ptDiscard">저장하지 않고 닫기</button></div>`;
+    <div class="split"><button class="btn ghost sm" id="ptDiscard">저장하지 않고 닫기</button>${navigator.share?`<button class="btn ghost sm" id="ptShare">일지 공유</button>`:""}</div>`;
+}
+function ptReportText(p){
+  const marks=p.marks||[],spots=p.spots||[];const mins=Math.max(1,Math.round(((p.end||Date.now())-p.start)/60000));
+  return `[야간 순찰 일지] ${fmtDT(p.start)}\n대상: ${p.dong||"동구 전체"} · ${((p.dist||0)/1000).toFixed(1)}km · ${mins}분\n지나간 등 ${(p.passed||[]).length}개 (점등 확인 ${(p.passed||[]).length-marks.length})\n표시 ${marks.length}건${marks.length?"\n"+marks.map(m=>` - ${m.code}: ${m.result}`).join("\n"):""}${spots.length?`\n어두운 지점 ${spots.length}곳\n`+spots.map(sp=>` - ${sp.lat.toFixed(5)}, ${sp.lng.toFixed(5)}${sp.near?" ("+sp.near+" 근처)":""}`).join("\n"):""}`;
 }
 async function ptSave(btn){
   btn.disabled=true;btn.textContent="저장 중…";
   const now=Date.now();const marks=pt.marks.map(m=>({id:m.id,code:m.code,result:m.result,at:m.at}));
   const keep=Math.max(1,Math.floor(pt.track.length/1500));const track=pt.track.filter((p,i)=>i%keep===0||i===pt.track.length-1);
-  const rec={start:pt.start,end:pt.end||now,dist:Math.round(pt.dist),by:S.me||null,passed:[...pt.passed.keys()],marks,track};
+  const rec={start:pt.start,end:pt.end||now,dist:Math.round(pt.dist),by:S.me||null,dong:pt.dong,passed:[...pt.passed.keys()],marks,spots:pt.spots.slice(),track};
   const ok=await write(async()=>{
     for(const m of marks){const l=byId(m.id);if(!l)continue;
-      await db.collection("inspections").add({lightId:l.id,code:l.code,dong:l.dong,date:m.at,checks:{},faults:[m.result==="고장"?"점등 상태":"깜빡임·조도"],result:m.result,memo:"야간 차량 순찰 중 확인",patrol:true,inspector:S.me||null});
+      await db.collection("inspections").add({lightId:l.id,code:l.code,dong:l.dong,date:m.at,checks:{},faults:m.result==="정상"?[]:[m.result==="고장"?"점등 상태":"깜빡임·조도"],result:m.result,memo:m.result==="정상"?"야간 차량 순찰 중 점등 확인 (수리 완료)":"야간 차량 순찰 중 확인",patrol:true,inspector:S.me||null});
       await patchLight(l.id,{status:m.result,lastInspected:m.at,lastResult:m.result,updatedAt:now})}
-    await db.collection("patrols").add(rec)},`순찰 결과를 저장했어요. 표시 ${marks.length}건, 점등 확인 ${rec.passed.length-marks.length}개.`);
+    await db.collection("patrols").add(rec)},`순찰 결과를 저장했어요. 표시 ${marks.length}건, 어두운 지점 ${rec.spots.length}곳, 점등 확인 ${rec.passed.length-marks.length}개.`);
   if(ok){ptReset();closeSheet()}else{btn.disabled=false;btn.textContent="순찰 결과 저장"}
+}
+async function exportPatrolCSV(){
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+  const rows=[["순찰일시","종료","순찰자","대상동","거리m","지나간등","점등확인","표시건수","표시내역","어두운지점"]];
+  for(const p of S.patrols)rows.push([fmtDT(p.start),fmtDT(p.end||p.start),S.names[p.by]||"",p.dong||"전체",p.dist||0,(p.passed||[]).length,(p.passed||[]).length-(p.marks||[]).length,(p.marks||[]).length,(p.marks||[]).map(m=>`${m.code}:${m.result}`).join(" / "),(p.spots||[]).map(sp=>`${sp.lat},${sp.lng}${sp.near?"("+sp.near+")":""}`).join(" / ")]);
+  const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
+  try{await dl.save({filename:`동구가로등_순찰일지_${fmtD(Date.now()).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
 }
 function patrolSection(){
   if(!S.patrols.length)return `<div class="empty">아직 순찰 기록이 없어요. 현장 점검 탭의 "야간 순찰"로 차량 이동 중 꺼진 등을 빠르게 기록할 수 있어요.</div>`;
-  return `<div class="list">${S.patrols.slice(0,10).map(p=>`<div class="panel"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${fmtDT(p.start)}</b><span class="muted">${esc(S.names[p.by]||"점검자")}</span><span class="chip ${p.marks&&p.marks.length?"st-고장":"st-정상"}" style="margin-left:auto">표시 ${(p.marks||[]).length}</span></div>
-    <div class="muted">${((p.dist||0)/1000).toFixed(1)}km · ${Math.max(1,Math.round(((p.end||p.start)-p.start)/60000))}분 · 지나간 등 ${(p.passed||[]).length}개${p.marks&&p.marks.length?` · ${p.marks.map(m=>esc(m.code)+"("+esc(m.result)+")").join(", ")}`:""}</div>
+  const rows=DONGS.map(d=>({d,...ptCoverage(d)})).filter(r=>r.n).sort((a,b)=>a.pct-b.pct||b.n-a.n);const all=ptCoverage("전체");
+  const cov=`<div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>최근 ${PT_DAYS}일 순찰 범위</h3><span class="muted">전체 ${all.pct}% (${all.cov.toLocaleString()}/${all.n.toLocaleString()})</span></div>
+    <div class="bars">${rows.slice(0,12).map(r=>`<div class="b"><span>${r.d}</span><span class="track" style="width:${Math.max(2,r.pct)}%"><span class="st-정상" style="width:100%"></span></span><span class="muted">${r.pct}%</span></div>`).join("")}</div>
+    ${rows.length>12?`<div class="muted">낮은 순 12개 동만 표시</div>`:""}
+    <div class="split"><button class="btn ghost sm" data-ptunmap="전체">순찰 안 된 등 지도</button>${can("inspect")?`<button class="btn sm" data-ptgo="${esc(rows[0]?rows[0].d:"전체")}">${esc(rows[0]?rows[0].d:"전체")}부터 순찰 시작</button>`:""}${dl?`<button class="btn ghost sm" id="csv6">순찰 일지 CSV</button>`:""}</div></div>
+  `;
+  return cov+`<div class="list">${S.patrols.slice(0,10).map(p=>`<div class="panel"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${fmtDT(p.start)}</b><span class="muted">${esc(S.names[p.by]||"점검자")}</span><span class="chip ${p.marks&&p.marks.length?"st-고장":"st-정상"}" style="margin-left:auto">표시 ${(p.marks||[]).length}</span></div>
+    <div class="muted">${p.dong&&p.dong!=="전체"?esc(p.dong)+" · ":""}${((p.dist||0)/1000).toFixed(1)}km · ${Math.max(1,Math.round(((p.end||p.start)-p.start)/60000))}분 · 지나간 등 ${(p.passed||[]).length}개${p.spots&&p.spots.length?` · 어두운 지점 ${p.spots.length}`:""}${p.marks&&p.marks.length?` · ${p.marks.map(m=>esc(m.code)+"("+esc(m.result)+")").join(", ")}`:""}</div>
     ${p.track&&p.track.length>1&&window.L?`<div class="split"><button class="btn ghost sm" data-ptmap="${esc(p.id)}">경로 지도</button></div>`:""}</div>`).join("")}</div>`;
 }
 function openPatrolMap(id){
-  const p=id==="live"?{track:pt.track,marks:pt.marks,passed:[...pt.passed.keys()],start:pt.start}:S.patrols.find(x=>x.id===id);if(!p||!p.track||p.track.length<2)return;
+  const p=id==="live"?{track:pt.track,marks:pt.marks,spots:pt.spots,passed:[...pt.passed.keys()],start:pt.start}:S.patrols.find(x=>x.id===id);if(!p||!p.track||p.track.length<2)return;
   const marks=p.marks||[];const passed=new Set(p.passed||[]);
-  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">순찰 경로 <span class="muted">${fmtDT(p.start)}</span></h3><div class="muted">파란 선이 이동 경로, 초록 점은 점등 확인, 빨강·주황은 표시한 등이에요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">순찰 경로 <span class="muted">${fmtDT(p.start)}</span></h3><div class="muted">파란 선이 이동 경로, 작은 초록 점은 점등 확인, 빨강·주황·큰 초록은 표시한 등, 보라는 어두운 지점이에요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="gmap" id="gmap"></div>`);
   if(!window.L)return;
   if(gmap){gmap.remove();gmap=null}
@@ -1504,7 +1579,8 @@ function openPatrolMap(id){
   gmapLayer=L.layerGroup().addTo(gmap);gmapPts=[];
   const line=L.polyline(p.track,{color:"#2F5DA8",weight:5,opacity:.8}).addTo(gmapLayer);
   for(const id of passed){const l=byId(id);if(l&&typeof l.lat==="number"&&!marks.some(m=>m.id===id))L.circleMarker([l.lat,l.lng],{radius:4,color:"#fff",weight:1,fillColor:"#2E8B57",fillOpacity:.9}).bindTooltip(l.code).addTo(gmapLayer)}
-  for(const m of marks){const l=byId(m.id);if(l&&typeof l.lat==="number")L.circleMarker([l.lat,l.lng],{radius:8,color:"#fff",weight:2,fillColor:m.result==="고장"?"#C2372B":"#E89A0C",fillOpacity:1}).bindPopup(`<b>${esc(l.code)}</b> ${esc(m.result)}<br><button class="btn sm" style="margin-top:6px" data-light="${esc(l.id)}">열기</button>`).addTo(gmapLayer)}
+  for(const sp of (p.spots||[]))L.circleMarker([sp.lat,sp.lng],{radius:8,color:"#fff",weight:2,fillColor:"#5B4B9E",fillOpacity:1}).bindPopup(`<b>어두운 지점</b><br>${sp.lat.toFixed(5)}, ${sp.lng.toFixed(5)}${sp.near?"<br>"+esc(sp.near)+" 근처":""}`).addTo(gmapLayer);
+  for(const m of marks){const l=byId(m.id);if(l&&typeof l.lat==="number")L.circleMarker([l.lat,l.lng],{radius:8,color:"#fff",weight:2,fillColor:m.result==="고장"?"#C2372B":m.result==="정상"?"#2E8B57":"#E89A0C",fillOpacity:1}).bindPopup(`<b>${esc(l.code)}</b> ${esc(m.result)}<br><button class="btn sm" style="margin-top:6px" data-light="${esc(l.id)}">열기</button>`).addTo(gmapLayer)}
   gmap.fitBounds(line.getBounds().pad(.1));
 }
 function openAR(){
