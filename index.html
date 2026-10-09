@@ -678,7 +678,11 @@ document.addEventListener("click",async e=>{
   if(t.dataset.range){ar.range=+t.dataset.range;document.querySelectorAll("#arRange [data-range]").forEach(b=>b.setAttribute("aria-pressed",b===t));arList();arDraw();return}
   if(t.id==="arOnlyOpen"){ar.onlyOpen=!ar.onlyOpen;t.setAttribute("aria-pressed",ar.onlyOpen);arList();arDraw();return}
   if(t.dataset.turn){toast(t.dataset.turn==="l"?"왼쪽으로 돌아보세요":"오른쪽으로 돌아보세요");return}
-  if(t.id==="arCal"){toast("휴대폰을 8자 모양으로 몇 번 크게 돌리면 나침반이 보정돼요.");return}
+  if(t.id==="arCal"){arCalCheck(true);$("#arCalBox").scrollIntoView({behavior:"smooth",block:"center"});return}
+  if(t.id==="arCalHide"){const b=$("#arCalBox");b.hidden=true;b.innerHTML="";ar.courseDiff=null;return}
+  if(t.id==="arUseCourse"){if(ar.gpsHeading==null){toast("몇 걸음 걸어야 GPS 진행 방향이 잡혀요.");return}arCalibrateTo(ar.gpsHeading,"걷는 방향");return}
+  if(t.id==="arFront"){const l=ar.target&&byId(ar.target);if(!l||!ar.pos){toast("먼저 목록에서 정면에 보이는 등을 고르세요.");return}arCalibrateTo(bearing(ar.pos,l),l.code);return}
+  if(t.id==="arResetCal"){ar.offset=0;ar.courseDiff=null;toast("보정을 해제했어요.");arCalCheck();arDraw();return}
   if(t.id==="arRetry"){arStart();return}
   if(t.id==="arFreeze"){ar.frozen=!ar.frozen;t.setAttribute("aria-pressed",ar.frozen);t.textContent=ar.frozen?"고정 해제":"화면 고정";toast(ar.frozen?"방향을 고정했어요. 몸을 돌려도 화면이 움직이지 않아요.":"다시 방향을 따라가요.");return}
   if(t.id==="scanStop"){stopCam();return}
@@ -687,6 +691,8 @@ document.addEventListener("click",async e=>{
   if(t.id==="cropManual"){openManualCrop();return}
   if(t.id==="camBack"){backToCam();return}
   if(t.id==="pkGo"){confirmPick();return}
+  if(t.dataset.cand){const c=byId(t.dataset.cand);if(!c)return;const prev=scan.found||{};const code=c.kind==="가로등"?{kind:"가로등",road:c.road||"",main:c.main,sub:c.sub}:{kind:c.kind,dong:c.dong,num:c.num};
+    showScanResult({...prev,code,kind:c.kind,raw:"",pick:prev.pick?{...prev.pick,kind:c.kind,dong:c.dong||"",road:c.road||"",num:c.kind==="가로등"?`${c.main}${c.sub?"-"+c.sub:""}`:c.num}:null});return}
 });
 $("#sheetBg").addEventListener("click",()=>closeSheet());
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classList.contains("open"))closeSheet()});
@@ -827,7 +833,7 @@ function mapLocate(){
 
 /* ---------- AR finder: lights around you, over the camera view ---------- */
 const AR_FOV=62,AR_RANGES=[50,100,200,500];
-let ar={on:false,stream:null,pos:null,acc:null,heading:null,pitch:90,watch:null,lastDraw:0,range:200,onlyOpen:false,kind:"전체",target:null,compassOk:null,gpsHeading:null,arrived:false};
+let ar={on:false,stream:null,pos:null,acc:null,heading:null,raw:null,offset:0,pitch:90,watch:null,lastDraw:0,range:200,onlyOpen:false,kind:"전체",courseDiff:null,lastEvt:0,target:null,compassOk:null,gpsHeading:null,arrived:false};
 const toRad=d=>d*Math.PI/180;
 function distM(a,b){const R=6371000,dLat=toRad(b.lat-a.lat),dLng=toRad(b.lng-a.lng),s=Math.sin(dLat/2)**2+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.sqrt(s))}
 function bearing(a,b){const y=Math.sin(toRad(b.lng-a.lng))*Math.cos(toRad(b.lat)),x=Math.cos(toRad(a.lat))*Math.sin(toRad(b.lat))-Math.sin(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.cos(toRad(b.lng-a.lng));return (Math.atan2(y,x)*180/Math.PI+360)%360}
@@ -844,14 +850,16 @@ function openAR(){
       <div class="radar" id="radar"><i class="me"></i></div></div>
     <div class="seg" style="margin-top:8px" id="arRange">${AR_RANGES.map(r=>`<button type="button" data-range="${r}" aria-pressed="${r===ar.range}">${r}m</button>`).join("")}<button type="button" id="arOnlyOpen" aria-pressed="${ar.onlyOpen}">조치 필요만</button></div>
     ${kindChips(ar.kind,"arKind",null)}
+    <div class="notice" id="arCalBox" hidden></div>
     <p class="muted" id="arNote" style="margin:8px 0 0">도심에서는 GPS 오차가 5~15m 있어요. 가까운 등은 표찰 스캔으로 확정하세요.</p>
-    <div class="split"><button class="btn ghost sm" id="arFreeze" aria-pressed="false">화면 고정</button><button class="btn ghost sm" id="arRetry">센서 다시 켜기</button><button class="btn ghost sm" id="arCal" hidden>나침반 보정 방법</button></div>
+    <div class="split"><button class="btn ghost sm" id="arFreeze" aria-pressed="false">화면 고정</button><button class="btn ghost sm" id="arRetry">센서 다시 켜기</button><button class="btn ghost sm" id="arCal">방향이 이상해요</button></div>
     <h2 style="margin-top:14px">가까운 순 <span class="muted" id="arCount"></span></h2>
     <div class="list arlist" id="arList"><div class="empty">현재 위치를 기다리는 중이에요.</div></div>`);
   arStart();
 }
 async function arStart(){
-  arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;
+  arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;ar.offset=0;ar.raw=null;ar.courseDiff=null;ar.lastEvt=0;
+  clearInterval(ar.staleTimer);ar.staleTimer=setInterval(()=>{if(ar.on)arCalCheck()},2500);
   const v=$("#arCam"),wrap=$("#arwrap");if(!v)return;
   try{ar.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});v.srcObject=ar.stream;await v.play();wrap.classList.remove("nocam")}
   catch(e){wrap.classList.add("nocam")}
@@ -872,20 +880,23 @@ function onHeading(e){
   else if(typeof e.alpha==="number"){if(e.type==="deviceorientationabsolute"||e.absolute){h=(360-e.alpha)%360;ar.compassOk=true}else if(ar.heading==null&&!("ondeviceorientationabsolute" in window)){h=(360-e.alpha)%360;ar.compassOk=false}}
   if(h==null){if(ar.gpsHeading!=null){h=ar.gpsHeading;ar.compassOk=false}else return}
   const so=(screen.orientation&&typeof screen.orientation.angle==="number")?screen.orientation.angle:(window.orientation||0);
-  h=(h+so+360)%360;
+  ar.raw=(h+so+360)%360;ar.lastEvt=performance.now();
+  h=(ar.raw+ar.offset+360)%360;
   // pitch: slow follow with a dead band so the horizon does not bob with every step
   if(typeof e.beta==="number"){const pb=ar.pitch==null?e.beta:ar.pitch;const dp=e.beta-pb;ar.pitch=Math.abs(dp)>4?pb+dp*.15:pb}
   if(ar.frozen)return;
   // heading: dead band + slow exponential follow; big turns still track quickly
   if(ar.heading==null)ar.heading=h;
   else{const d=angDiff(ar.heading,h);const ad=Math.abs(d);if(ad<1.5)return;ar.heading=(ar.heading+d*(ad>40?.5:ad>12?.25:.1)+360)%360}
-  const el=$("#arHead");if(el){const txt=`${Math.round(ar.heading)}° ${dirName(ar.heading)}${ar.compassOk===false?" · 보정 필요":""}`;if(el.textContent!==txt)el.textContent=txt}
-  const cal=$("#arCal");if(cal)cal.hidden=ar.compassOk!==false;
+  const el=$("#arHead");if(el){const txt=`${Math.round(ar.heading)}° ${dirName(ar.heading)}${ar.offset?" · 보정됨":ar.compassOk===false?" · 보정 필요":""}`;if(el.textContent!==txt)el.textContent=txt}
+  arCalCheck();
   const now=performance.now();if(now-ar.lastDraw>120){ar.lastDraw=now;arDraw()}
 }
 function onPosition(p){
   const nl={lat:p.coords.latitude,lng:p.coords.longitude};ar.acc=p.coords.accuracy;
-  if(typeof p.coords.heading==="number"&&!isNaN(p.coords.heading)&&p.coords.speed>0.7)ar.gpsHeading=p.coords.heading;
+  if(typeof p.coords.heading==="number"&&!isNaN(p.coords.heading)&&p.coords.speed>0.7){ar.gpsHeading=p.coords.heading;
+    // while walking, the GPS course is a second opinion on the compass: a steady disagreement means the compass is off
+    if(ar.heading!=null&&!ar.frozen){const d=Math.abs(angDiff(ar.heading,p.coords.heading));ar.courseDiff=ar.courseDiff==null?d:ar.courseDiff*.6+d*.4;arCalCheck()}}
   // position: ignore GPS jitter smaller than a few metres, otherwise ease toward the new fix
   if(!ar.pos)ar.pos=nl;
   else{const d=distM(ar.pos,nl);if(d<Math.max(3,ar.acc*.15))return;const k=d>25?1:.4;ar.pos={lat:ar.pos.lat+(nl.lat-ar.pos.lat)*k,lng:ar.pos.lng+(nl.lng-ar.pos.lng)*k}}
@@ -953,15 +964,33 @@ function arDraw(){
       guide.hidden=false;const gc="arguide st-"+esc(l.status)+(near8?" here":"");if(guide.className!==gc)guide.className=gc;
       const dirTxt=near8?"바로 근처예요 — 표찰을 확인하세요":`${Math.round(d)}m · ${Math.abs(diff)<12?"정면":diff<0?`왼쪽으로 ${Math.round(-diff/5)*5}°`:`오른쪽으로 ${Math.round(diff/5)*5}°`}`;
       if(guide.dataset.for!==l.id){guide.dataset.for=l.id;guide.innerHTML=`<span class="garrow">➤</span><div><b>${esc(l.code)}</b> <span class="chip">${esc(l.status)}</span><div class="gdir"></div></div>
-        <div class="split" style="margin:0"><button class="btn sm" data-ar-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button><button class="btn sm ghost" data-ar-target="">끝</button></div>`}
+        <div class="split" style="margin:0"><button class="btn sm" data-ar-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button><button class="btn sm ghost" id="arFront" title="이 등을 정면에 두고 누르면 나침반을 맞춰요">정면 보정</button><button class="btn sm ghost" data-ar-target="">끝</button></div>`}
       const ga=guide.querySelector(".garrow");if(ga)ga.style.transform=`rotate(${Math.round(diff/3)*3}deg)`;
       const gd=guide.querySelector(".gdir");if(gd&&gd.textContent!==dirTxt)gd.textContent=dirTxt;
     }else{guide.hidden=true;guide.dataset.for=""}
   }
 }
+/* compass trouble: say what is wrong and offer three ways out — shake to recalibrate, trust the walking direction, or line up on a light you can see */
+function arCalCheck(force){
+  const box=$("#arCalBox");if(!box)return;
+  const stale=ar.lastEvt&&performance.now()-ar.lastEvt>4000;
+  const off=ar.courseDiff!=null&&ar.courseDiff>45;
+  const bad=force||stale||off||ar.compassOk===false;
+  if(!bad){if(!box.hidden){box.hidden=true;box.innerHTML=""}return}
+  const why=stale?"나침반 신호가 끊겼어요.":off?`걷는 방향과 나침반이 ${Math.round(ar.courseDiff)}° 어긋나요.`:ar.compassOk===false?"나침반 정확도가 낮아요.":"방향이 실제와 다르게 보이면 아래 중 하나로 맞추세요.";
+  const html=`<b>${why}</b><div style="margin-top:4px">① 휴대폰을 8자 모양으로 몇 번 크게 돌려 보정 ② 몇 걸음 걸은 뒤 <b>걷는 방향으로 맞추기</b> ③ 보이는 등을 정면에 두고 목록에서 그 등을 고른 뒤 <b>이 등이 정면</b></div>
+    <div class="split"><button class="btn sm" id="arUseCourse" ${ar.gpsHeading==null?"disabled":""}>걷는 방향으로 맞추기</button><button class="btn sm ghost" id="arFront" ${ar.target?"":"disabled"}>이 등이 정면</button>${ar.offset?`<button class="btn sm ghost" id="arResetCal">보정 해제</button>`:""}<button class="btn sm ghost" id="arCalHide">닫기</button></div>`;
+  if(box.innerHTML!==html)box.innerHTML=html;box.hidden=false;
+}
+function arCalibrateTo(trueHeading,label){
+  if(ar.raw==null){toast("나침반 값이 아직 없어요. 휴대폰을 세워 주세요.");return}
+  ar.offset=angDiff(ar.raw,trueHeading);ar.heading=trueHeading;ar.courseDiff=null;ar.compassOk=true;
+  const el=$("#arHead");if(el)el.textContent=`${Math.round(ar.heading)}° ${dirName(ar.heading)} · 보정됨`;
+  toast(`${label} 기준으로 방향을 맞췄어요 (${Math.round(ar.offset)}° 보정).`);arCalCheck();arList(true);arDraw();
+}
 function arSetTarget(id){ar.target=id||null;ar.arrived=false;arList(true);arDraw();if(id){const w=$("#arwrap");w&&w.scrollIntoView({behavior:"smooth",block:"start"})}}
 function arStop(reset=true){
-  ar.on=false;
+  ar.on=false;clearInterval(ar.staleTimer);
   if(ar.stream){ar.stream.getTracks().forEach(t=>t.stop());ar.stream=null}
   if(ar.watch!=null){navigator.geolocation.clearWatch(ar.watch);ar.watch=null}
   window.removeEventListener("deviceorientation",onHeading);window.removeEventListener("deviceorientationabsolute",onHeading);
@@ -1038,8 +1067,15 @@ async function ocrLabel(pic,file,manualBox){
     const gray=grayContrast(plate);
     // 2) digits pass: biggest digit token wins
     await w.setParameters({tessedit_pageseg_mode:"11",tessedit_char_whitelist:"0123456789-"});
+    const clean=x=>({t:x.text.replace(/[^\d-]/g,"").replace(/^-+|-+$/g,"").replace(/--+/g,"-"),h:x.bbox.y1-x.bbox.y0,c:x.confidence});
+    const okTok=x=>/^\d{1,4}(-\d{1,3})?$/.test(x.t)&&!/^\d{3}-\d{4}$/.test(x.t)&&!/^\d{4}-\d{4}$/.test(x.t);
     let r1=await w.recognize(gray);
-    let toks=(r1.data.words||[]).map(x=>({t:x.text.trim(),h:x.bbox.y1-x.bbox.y0,c:x.confidence})).filter(x=>/^\d{1,4}(-\d{1,3})?$/.test(x.t)&&!/^\d{3}-\d{4}$/.test(x.t)).sort((a,b)=>b.h-a.h);
+    let toks=(r1.data.words||[]).map(clean).filter(okTok).sort((a,b)=>b.h-a.h);
+    if(!toks.length||toks[0].h<plate.height*.06){ // very large or very small print: a second look at a different scale
+      const r1b=await w.recognize(grayContrast(cropTo(src,box,600)));
+      const t2=(r1b.data.words||[]).map(clean).filter(okTok).map(x=>({...x,h:x.h*1000/600})).sort((a,b)=>b.h-a.h);
+      if(t2.length&&(!toks.length||t2[0].h>toks[0].h))toks=t2;
+    }
     const kindGuess=plateColor(plate);
     if(kindGuess==="가로등"||toks.some(x=>x.t.includes("-"))){
       // the 가로등 number sits in the middle band; single-line passes at a few scales read the bold hyphenated number better
@@ -1068,7 +1104,7 @@ async function ocrLabel(pic,file,manualBox){
     if(kind==="가로등"&&hy){const [a,b]=numTok.split("-");code={kind,road:road||"",main:a,sub:b}}
     else if(kind==="보안등"&&numTok&&dong)code={kind,dong,num:numTok.replace(/\D/g,"")};
     const n=$("#scanNote");if(n)n.textContent="체험 모드에서는 휴대폰 안에서 글자를 읽어요(기기 OCR). 번호를 꼭 확인하세요.";
-    stageStatus(code?"읽었어요. 아래에서 확인하세요.":"번호를 읽지 못했어요. 아래에서 직접 적거나 영역을 지정하세요.",false);
+    stageStatus(code?"읽었어요. 아래에서 확인하세요.":numTok?`번호 ${numTok}은(는) 읽었어요. 동 이름을 골라 주세요.`:"번호를 읽지 못했어요. 아래에서 직접 적거나 영역을 지정하세요.",false);
     showScanResult({code,kind,how:"photo",plate:plate.toDataURL("image/jpeg",.7),pick:{kind:kind||"보안등",num:numTok,dong:dong||"",road:road||"",auto},raw:""});
     if(code)toast("기기 OCR로 읽은 번호예요. 표찰과 맞는지 확인해 주세요.");
   }catch(e){
@@ -1102,7 +1138,8 @@ function confirmPick(){
 }
 
 /* ---------- label scanner ---------- */
-let scan={ctx:null,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null};
+let scan={ctx:null,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null,pos:null};
+function scanLocate(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(p=>{scan.pos={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy};if(scan.found&&!lookup(scan.found.code))showScanResult(scan.found)},()=>{},{enableHighAccuracy:true,maximumAge:15000,timeout:8000})}
 let sampleNs=null;
 async function openScanner(ctx){
   scan={ctx,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null};
@@ -1118,7 +1155,7 @@ async function openScanner(ctx){
     <p class="muted" id="scanNote">${window.claude&&window.claude.use?"사진 인식은 AI가 표찰 글자를 읽어요. 처음 한 번 동의가 필요하고, 읽은 결과는 저장 전에 확인할 수 있어요.":"체험 모드에서는 휴대폰 안에서 글자를 읽어요(기기 OCR). 처음 한 번 한글 인식 데이터를 내려받고, 정확도가 낮을 수 있으니 번호를 확인하세요."}</p>
     <div id="scanResult"></div>`);
   if(!sampleNs&&window.claude&&window.claude.use){claude.use("sample").then(async s=>{sampleNs=s;try{const lim=s&&await s.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}const n=$("#scanNote");if(n&&!scan.sampleImg)n.textContent="이 화면에서는 사진 인식을 쓸 수 없어요. QR 스캔이나 직접 입력을 이용하세요."})}
-  startCam();
+  scanLocate();startCam();
 }
 async function startCam(){
   stopCam(false);scan.liveKey=null;const o=$("#camOv");if(o)o.className="ov";
@@ -1172,13 +1209,35 @@ function onDecoded(text,how){
   const p=parseCode(text),pole=parsePole(text);
   showScanResult({code:p,pole,raw:text,how});
 }
+// every registered light that carries this number, whatever the dong or road — for the chooser
+function numCands(tok){
+  const t=String(tok||"").trim();if(!t)return[];
+  const g=t.match(/^(\d{1,4})-(\d{1,3})$/);
+  if(g)return S.lights.filter(l=>l.kind==="가로등"&&nrm(l.main)===nrm(g[1])&&nrm(l.sub)===nrm(g[2])&&!l.removed);
+  const n=nrm(t.replace(/\D/g,""));if(!n)return[];
+  return S.lights.filter(l=>!l.removed&&((isPlateDong(l.kind)&&nrm(l.num)===n)||(l.kind==="가로등"&&nrm(l.main)===n&&!l.sub)));
+}
 function showScanResult(r){
   scan.found=r;const box=$("#scanResult");if(!box)return;
   const l=lookup(r.code);
+  let cands=!l&&r.pick&&r.pick.num?numCands(r.pick.num):[];
+  // with a GPS fix, rank by distance and add nearby lights whose number resembles what was read (close-up shots often lose a digit)
+  const tok=r.pick&&r.pick.num?String(r.pick.num).replace(/\s/g,""):"";let nearby=[];
+  if(scan.pos&&!l){
+    const dist=x=>distM(scan.pos,x);cands=cands.map(c=>({c,d:dist(c)})).sort((a,b)=>a.d-b.d).map(x=>x.c);
+    if(tok){const digits=tok.replace(/\D/g,"");const kindWant=r.kind||r.pick.kind;
+      nearby=S.lights.filter(x=>!x.removed&&typeof x.lat==="number"&&!cands.includes(x)&&(!kindWant||x.kind===kindWant||!KINDS.includes(kindWant))).map(x=>({x,d:dist(x)})).filter(o=>o.d<=120)
+        .map(o=>{const cd=(x=>x.kind==="가로등"?`${x.main||""}${x.sub?"-"+x.sub:""}`:String(x.num||""))(o.x);const cdd=cd.replace(/\D/g,"");
+          const sim=cd===tok?3:(digits&&(cdd.endsWith(digits)||cdd.startsWith(digits)||(digits.length>=2&&cdd.includes(digits))))?2:(o.x.kind==="가로등"&&/-/.test(tok)&&cd.split("-")[1]===tok.split("-")[1])?1:0;return{...o,sim}})
+        .filter(o=>o.sim>0).sort((a,b)=>b.sim-a.sim||a.d-b.d).slice(0,6);}
+  }
   const isCodeless=!r.code;
   box.innerHTML=`<div class="panel" style="margin-top:12px;border-left:5px solid ${isCodeless?"var(--warn)":l?"var(--ok)":"var(--fix)"}">
     <h3>${r.how==="qr"?"QR에서 읽음":"사진에서 읽음"}</h3>
-    ${r.code?`<div style="font-size:22px;font-weight:700">${esc(labelText(r.code))} <span class="muted" style="font-size:14px">${esc(r.code.kind)}${r.code.kind==="가로등"&&!r.code.road?" · 도로명 없음":""}</span></div>`:`<div>표찰 번호를 찾지 못했어요.</div>`}
+    ${r.code?`<div style="font-size:22px;font-weight:700">${esc(labelText(r.code))} <span class="muted" style="font-size:14px">${esc(r.code.kind)}${r.code.kind==="가로등"&&!r.code.road?" · 도로명 없음":""}</span></div>`:cands.length?`<div style="font-size:22px;font-weight:700">${esc(r.pick.num)} <span class="muted" style="font-size:14px">동 이름은 못 읽었어요</span></div>`:`<div>표찰 번호를 찾지 못했어요.</div>`}
+    ${!r.code&&cands.length?`<div class="muted">번호 ${esc(r.pick.num)}이(가) ${cands.length}곳에 있어요. ${scan.pos?"가까운 순이에요. ":""}표찰의 동 이름과 맞는 것을 고르세요.</div><div class="list" style="margin-top:6px">${cands.slice(0,8).map(c=>`<button class="row st-${esc(c.status)}" data-cand="${esc(c.id)}"><span class="pole"></span><span class="body">${kindBadge(c.kind)}<span class="code">${esc(c.code)}</span><span class="addr" style="display:block">${esc(c.address)}</span></span><span class="meta"><span class="chip">${esc(c.status)}</span>${scan.pos?`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${Math.round(distM(scan.pos,c))}m</span>`:""}</span></button>`).join("")}${cands.length>8?`<div class="muted">외 ${cands.length-8}곳 — 아래에서 동을 골라 확인하세요</div>`:""}</div>`:""}
+    ${!l&&nearby.length?`<div class="muted" style="margin-top:8px">현재 위치 근처에서 번호가 비슷한 등이에요${tok?` (읽은 값 ${esc(tok)})`:""}. 표찰과 맞으면 고르세요.</div><div class="list" style="margin-top:6px">${nearby.map(({x,d})=>`<button class="row st-${esc(x.status)}" data-cand="${esc(x.id)}"><span class="pole"></span><span class="body">${kindBadge(x.kind)}<span class="code">${esc(x.code)}</span><span class="addr" style="display:block">${esc(x.address)}</span></span><span class="meta"><span class="chip">${esc(x.status)}</span><span class="muted" style="display:block;font-size:11px;margin-top:3px">${Math.round(d)}m</span></span></button>`).join("")}</div>`:""}
+    ${!l&&!cands.length&&!nearby.length&&r.pick&&r.pick.num&&!scan.pos?`<div class="muted" style="margin-top:6px">위치 권한을 허용하면 근처 등 중에서 고를 수 있어요.</div>`:""}
     ${r.pole?`<div class="muted">한전 전주번호 ${esc(r.pole)}</div>`:""}
     ${r.code?(l?`<div class="muted">${kindBadge(l.kind)}대장에 있는 등이에요 · ${esc(l.dong)} · ${esc(l.address)} · <span class="chip st-${esc(l.status)}">${esc(l.status)}</span></div>`:`<div class="muted">대장에 없는 번호예요. 신규 등록으로 이어갈 수 있어요.</div>`):""}
     ${r.raw&&!r.code?`<div class="muted" style="word-break:break-all;margin-top:4px">읽은 내용: ${esc(String(r.raw).slice(0,160))}</div>`:""}
