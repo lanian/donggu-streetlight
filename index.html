@@ -573,7 +573,7 @@ function vAdmin(){
   const rOpen=S.reports.filter(r=>r.status!=="완료");
   const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;
   const pend=pendingList().filter(l=>l.reg==="미등록").length,np=S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length;
-  const nav=[["sec-open","조치 필요",open.length],["sec-rep","신고",rOpen.length],["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?S.review.cands.length:null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]:[]);
+  const nav=[["sec-open","조치 필요",open.length],["sec-rep","신고",rOpen.length],["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","점검 이력",null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]:[]);
   return `${tally(false)}
   <div class="chipbar quicknav">${nav.map(([id,t,n])=>`<button type="button" data-jump="${id}">${t}${n!=null?`<span class="secnum ${n?"":"zero"}">${n}</span>`:""}</button>`).join("")}</div>
   <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length.toLocaleString()}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건 · 미처리 신고 ${rOpen.length}건</span></div>${mapSVG()}<div class="split"><button class="btn sm" data-mapscope="all">지도에서 보기</button><button class="btn ghost sm" data-mapscope="open">조치 필요만 지도에서</button></div></div>
@@ -587,7 +587,7 @@ function vAdmin(){
     <p class="muted" style="margin:10px 0 0">표찰 색과 같아요. 초록은 가로등(도로명+번호), 파랑은 보안등(동 이름+번호).</p></div>
   <h2 id="sec-dong">법정동별 현황</h2>
   <div class="panel">${S.lights.length?dongBars():`<span class="muted">데이터 없음</span>`}</div>
-  <h2 id="sec-light">밝기 예측·보완 검토 ${S.review?`<span class="muted">${S.review.cands.length}</span>`:""}</h2>
+  <h2 id="sec-light">밝기 예측·보완 검토 ${S.review?`<span class="muted">${S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length}</span>`:""}</h2>
   ${reviewSection()}
   <h2 id="sec-hist">최근 점검 이력</h2>
   <div class="panel">${S.insp.length?S.insp.slice(0,12).map(i=>`<div class="hist st-${esc(i.result)}"><b>${esc(i.code)}</b> <span class="chip">${esc(i.result)}</span> <span class="muted">${fmtDT(i.date)} · ${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${i.faults&&i.faults.length?`<div class="muted">불량: ${i.faults.map(esc).join(", ")}</div>`:""}</div>`).join(""):`<span class="muted">아직 점검 기록이 없어요.</span>`}
@@ -715,7 +715,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="nearSort"){nearToggle();return}
   if(t.id==="rvRun"){const dong=$("#rvDong").value,kind=$("#rvKind").value;const mode=S.rvMode||(ROADS?"roads":"pairs");t.disabled=true;t.textContent="계산 중…";setTimeout(()=>{const cands=mode==="roads"&&ROADS?roadReview(dong,kind):lightReview(dong,kind);S.review={mode:mode==="roads"&&ROADS?"roads":"pairs",dong,kind,cands,show:20,n:S.lights.filter(l=>(dong==="전체"||l.dong===dong)&&(kind==="전체"||l.kind===kind)).length};render();const el=document.getElementById("sec-light");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64})},30);return}
   if(t.dataset.rvmode){S.rvMode=t.dataset.rvmode;render();return}
-  if(t.id==="rvRoads"){t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
+  if(t.id==="rvRoads"){t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");if(t.dataset.refetch){ROADS=null;idbSet("roads",null)}roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
   if(t.id==="rvMore"){S.review.show+=30;render();return}
   if(t.dataset.rvmap){openReviewMap(t.dataset.rvmap);return}
   if(t.dataset.rvreg){reviewToForm(t.dataset.rvreg);return}
@@ -777,6 +777,7 @@ $("#sheetBg").addEventListener("click",()=>closeSheet());
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classList.contains("open"))closeSheet()});
 document.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;S.limit=60;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
 document.addEventListener("change",async e=>{
+  if(e.target.id==="rvNoLight"){S.rvNoLight=e.target.checked;render();return}
   if(e.target.id==="dong"){S.dong=e.target.value;S.limit=60;render();return}
   if(e.target.id==="pkKind"){const g=e.target.value==="가로등";$("#pkDongBox").hidden=g;$("#pkRoadBox").hidden=!g;$("#pkNum").placeholder=g?"65-5":"642";return}
   if(e.target.id==="nNoPlate"){const on=e.target.checked;["nNum","nRoad"].forEach(id=>{const x=$("#"+id);if(x)x.disabled=on});return}
@@ -993,6 +994,9 @@ function lightInfo(l){
 const ROAD_BBOX=[35.095,126.895,35.175,126.975];
 const ROAD_TYPES="primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street|service|pedestrian";
 const ROAD_LABEL={primary:"주간선도로",secondary:"보조간선도로",tertiary:"집산도로",residential:"주택가 도로",unclassified:"소로",living_street:"생활도로",service:"진입로·골목",pedestrian:"보행자 도로",primary_link:"연결로",secondary_link:"연결로",tertiary_link:"연결로"};
+const ROADS_VER=2; // bump when the query or the stored shape changes; stale caches are refetched
+const ROAD_SKIP_SERVICE=/^(parking_aisle|driveway|emergency_access|drive-through)$/;
+const AREA_LABEL={apt:"아파트·학교 단지",forest:"숲·산"};
 let ROADS=null;
 function idbOpen(){return new Promise((res,rej)=>{try{const r=indexedDB.open("dg-cache",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}})}
 async function idbGet(k){try{const d=await idbOpen();return await new Promise(res=>{const g=d.transaction("kv","readonly").objectStore("kv").get(k);g.onsuccess=()=>res(g.result);g.onerror=()=>res(null)})}catch(e){return null}}
@@ -1000,27 +1004,50 @@ async function idbSet(k,v){try{const d=await idbOpen();await new Promise(res=>{c
 async function roadsLoad(onStatus){
   if(ROADS)return ROADS;
   const say=t=>onStatus&&onStatus(t);
-  const cached=await idbGet("roads");if(cached&&cached.ways&&cached.ways.length){ROADS=cached;return ROADS}
-  if(db&&S.me!=="local"){say("공유 저장소에서 도로망을 읽는 중…");try{const snap=await db.collection("roads").get();const parts=snap.docs.filter(d=>d.id.startsWith("part-")).sort((a,b)=>+a.id.slice(5)-+b.id.slice(5));const ways=[].concat(...parts.map(d=>d.data().ways||[]));if(ways.length){const meta=snap.docs.find(d=>d.id==="meta");ROADS={ways,at:meta?meta.data().at:0,src:"db"};idbSet("roads",ROADS);return ROADS}}catch(e){}}
-  say("OpenStreetMap에서 동구 도로망을 받는 중… (휴대폰 데이터 약 3MB, 수 초에서 1분)");
-  const q=`[out:json][timeout:90];way["highway"~"^(${ROAD_TYPES})$"](${ROAD_BBOX.join(",")});out geom;`;
+  const cached=await idbGet("roads");if(cached&&cached.ver===ROADS_VER&&cached.ways&&cached.ways.length){ROADS=cached;return ROADS}
+  if(db&&S.me!=="local"){say("공유 저장소에서 도로망을 읽는 중…");try{const snap=await db.collection("roads").get();const meta=snap.docs.find(d=>d.id==="meta");const md=meta?meta.data():null;
+    if(md&&md.ver===ROADS_VER){const parts=snap.docs.filter(d=>d.id.startsWith("part-")&&+d.id.slice(5)<(md.parts||0)).sort((a,b)=>+a.id.slice(5)-+b.id.slice(5));const ways=[],areas=[];for(const d of parts){const x=d.data();ways.push(...(x.ways||[]));areas.push(...(x.areas||[]))}
+      if(ways.length){ROADS={ver:ROADS_VER,ways,areas,at:md.at||0,src:"db"};idbSet("roads",ROADS);return ROADS}}}catch(e){}}
+  say("OpenStreetMap에서 동구 도로망을 받는 중… (휴대폰 데이터 약 4MB, 수 초에서 1분)");
+  const bb=ROAD_BBOX.join(",");
+  const q=`[out:json][timeout:120];(way["highway"~"^(${ROAD_TYPES})$"](${bb});
+    way["landuse"="residential"]["residential"="apartments"](${bb});way["landuse"="residential"]["name"~"아파트"](${bb});relation["landuse"="residential"]["residential"="apartments"](${bb});
+    way["amenity"~"^(school|university|college|hospital)$"](${bb});relation["amenity"~"^(school|university|college|hospital)$"](${bb});
+    way["natural"~"^(wood|scrub)$"](${bb});way["landuse"~"^(forest|cemetery)$"](${bb});relation["natural"="wood"](${bb});relation["landuse"="forest"](${bb});relation["boundary"="national_park"](${bb}););out geom;`;
   let data=null,err=null;
   for(const ep of ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"]){
     try{const r=await fetch(ep,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"}});if(r.ok){data=await r.json();break}err=new Error("HTTP "+r.status)}catch(e){err=e}
   }
   if(!data)throw err||new Error("overpass");
-  const ways=(data.elements||[]).filter(w=>w.type==="way"&&w.geometry&&w.geometry.length>1).map(w=>({id:w.id,name:(w.tags&&(w.tags["name:ko"]||w.tags.name))||"",type:w.tags?w.tags.highway:"",pts:w.geometry.map(g=>[+g.lat.toFixed(6),+g.lon.toFixed(6)])}));
+  const ways=[],areas=[];
+  const simp=g=>{const k=Math.max(1,Math.ceil(g.length/300));return g.filter((x,i)=>i%k===0||i===g.length-1).map(x=>[+x.lat.toFixed(6),+x.lon.toFixed(6)])};
+  const areaKind=t=>!t?"":(t.natural||t.landuse==="forest"||t.landuse==="cemetery"||t.boundary==="national_park")?"forest":(t.landuse==="residential"||t.amenity)?"apt":"";
+  for(const el of (data.elements||[])){const t=el.tags||{};
+    if(el.type==="way"&&el.geometry&&el.geometry.length>1){
+      if(t.highway){const w={id:el.id,name:t["name:ko"]||t.name||"",type:t.highway,pts:el.geometry.map(g=>[+g.lat.toFixed(6),+g.lon.toFixed(6)])};if(t.service)w.sv=t.service;if(t.access==="private")w.priv=1;ways.push(w)}
+      else{const k=areaKind(t);if(k&&el.geometry.length>3)areas.push({t:k,name:t.name||"",pts:simp(el.geometry)})}
+    }else if(el.type==="relation"&&el.members){const k=areaKind(t);if(!k)continue;for(const m of el.members)if(m.type==="way"&&m.role!=="inner"&&m.geometry&&m.geometry.length>3)areas.push({t:k,name:t.name||"",pts:simp(m.geometry)})}
+  }
   if(!ways.length)throw new Error("empty");
-  ROADS={ways,at:Date.now(),src:"osm"};idbSet("roads",ROADS);
-  if(db&&S.canWrite&&S.me!=="local"){say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");try{const chunks=[];let cur=[],size=0;for(const w of ways){const s=JSON.stringify(w).length+1;if(size+s>190000){chunks.push(cur);cur=[];size=0}cur.push(w);size+=s}if(cur.length)chunks.push(cur);
-    for(let i=0;i<chunks.length;i++)await db.doc("roads/part-"+i).set({ways:chunks[i]});await db.doc("roads/meta").set({at:ROADS.at,parts:chunks.length,count:ways.length,attribution:"© OpenStreetMap contributors (ODbL)"})}catch(e){}}
+  ROADS={ver:ROADS_VER,ways,areas,at:Date.now(),src:"osm"};idbSet("roads",ROADS);
+  if(db&&S.canWrite&&S.me!=="local"){say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");try{const chunks=[];let cur={ways:[],areas:[]},size=0;const push=(key,x)=>{const s=JSON.stringify(x).length+1;if(size+s>190000){chunks.push(cur);cur={ways:[],areas:[]};size=0}cur[key].push(x);size+=s};
+    for(const w of ways)push("ways",w);for(const a of areas)push("areas",a);if(cur.ways.length||cur.areas.length)chunks.push(cur);
+    for(let i=0;i<chunks.length;i++)await db.doc("roads/part-"+i).set(chunks[i]);await db.doc("roads/meta").set({ver:ROADS_VER,at:ROADS.at,parts:chunks.length,count:ways.length,areas:areas.length,attribution:"© OpenStreetMap contributors (ODbL)"})}catch(e){}}
   return ROADS;
 }
 /* walk every road in 8 m steps; consecutive weak samples form a dark stretch */
+function pointInPoly(x,y,poly){let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];if((yi>y)!==(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi)inside=!inside}return inside}
+/* apartment complexes, school grounds and woodland are lit (or not) by someone else: samples inside them are skipped */
+function roadAreas(G){
+  return (ROADS.areas||[]).map(a=>{const poly=a.pts.map(([lat,lng])=>{const p=G.toXY({lat,lng});return[p.x,p.y]});let x0=1e12,y0=1e12,x1=-1e12,y1=-1e12;for(const [x,y] of poly){if(x<x0)x0=x;if(y<y0)y0=y;if(x>x1)x1=x;if(y>y1)y1=y}return{t:a.t,name:a.name,poly,x0,y0,x1,y1}});
+}
 function roadReview(dong,kind){
   const G=lightGrid();if(!ROADS)return[];
   const step=8,weak=LIGHT_MODEL.weak,out=[];
+  const areas=roadAreas(G);const inArea=(x,y)=>{for(const a of areas)if(x>=a.x0&&x<=a.x1&&y>=a.y0&&y<=a.y1&&pointInPoly(x,y,a.poly))return a.t;return""};
+  const skip={ways:0,apt:0,forest:0};
   for(const w of ROADS.ways){
+    if((w.sv&&ROAD_SKIP_SERVICE.test(w.sv))||w.priv||/아파트|APT|주차장/i.test(w.name||"")){skip.ways++;continue}
     let acc=[];
     const flush=()=>{
       if(acc.length>=3){
@@ -1042,26 +1069,32 @@ function roadReview(dong,kind){
     let prev=null;
     for(const [lat,lng] of w.pts){const p=G.toXY({lat,lng});
       if(prev){const d=Math.hypot(p.x-prev.x,p.y-prev.y);const n=Math.max(1,Math.round(d/step));
-        for(let i=0;i<n;i++){const t=i/n,x=prev.x+(p.x-prev.x)*t,y=prev.y+(p.y-prev.y)*t;const E=G.lightAt(x,y);if(E<weak)acc.push({x,y,E});else flush()}}
+        for(let i=0;i<n;i++){const t=i/n,x=prev.x+(p.x-prev.x)*t,y=prev.y+(p.y-prev.y)*t;const E=G.lightAt(x,y);if(E>=weak){flush();continue}const a=areas.length?inArea(x,y):"";if(a){skip[a]+=step;flush();continue}acc.push({x,y,E})}}
       prev=p}
     flush();
   }
   out.sort((a,b)=>b.score-a.score);
+  out.skip=skip;
   return out;
 }
+/* what the review list shows: stretches with no registered light within 90 m are hidden unless asked for */
+function rvList(rv){return rv?(rv.mode==="roads"&&!S.rvNoLight?rv.cands.filter(c=>!c.nolight):rv.cands):[]}
 
 function reviewSection(){
   const rv=S.review;
   const mode=S.rvMode||(ROADS?"roads":"pairs");
-  const roadLine=ROADS?`<span class="muted">도로 ${ROADS.ways.length.toLocaleString()}개 (OpenStreetMap${ROADS.src==="db"?" · 공유 저장소":""})</span>`:`<button class="btn ghost sm" id="rvRoads">도로망 불러오기</button><span class="muted" id="rvRoadsStat">${S.rvRoadsStat||"도로망을 받으면 도로를 따라 어두운 구간을 찾아요."}</span>`;
+  const roadLine=ROADS?`<span class="muted">도로 ${ROADS.ways.length.toLocaleString()}개${ROADS.areas&&ROADS.areas.length?` · 단지·산 ${ROADS.areas.length.toLocaleString()}곳`:""} (OpenStreetMap${ROADS.src==="db"?" · 공유 저장소":""})</span><button class="btn ghost sm" id="rvRoads" data-refetch="1">도로망 다시 받기</button><span class="muted" id="rvRoadsStat">${S.rvRoadsStat||""}</span>`:`<button class="btn ghost sm" id="rvRoads">도로망 불러오기</button><span class="muted" id="rvRoadsStat">${S.rvRoadsStat||"도로망을 받으면 도로를 따라 어두운 구간을 찾아요."}</span>`;
   const modeSeg=`<div class="seg" style="margin:0 0 8px"><button type="button" data-rvmode="roads" aria-pressed="${mode==="roads"}" ${ROADS?"":"disabled"}>도로 따라 검토</button><button type="button" data-rvmode="pairs" aria-pressed="${mode==="pairs"}">등 간격으로 검토</button></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px">${roadLine}</div>`;
   const dongSel=`<select class="f-in" id="rvDong" style="flex:1">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===(rv?rv.dong:"전체")?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select>`;
   const kindSel=`<select class="f-in" id="rvKind" style="flex:0 0 auto">${["전체",...KINDS.slice(0,2)].map(k=>`<option value="${k}" ${k===(rv?rv.kind:"전체")?"selected":""}>${k==="전체"?"모든 종류":k}</option>`).join("")}</select>`;
   let body="";
   if(rv&&rv.mode==="roads"){
-    const cs=rv.cands;const dark=cs.filter(c=>c.dark).length,nol=cs.filter(c=>c.nolight).length;const totalLen=cs.reduce((s,c)=>s+c.len,0);
-    body=`<div class="muted" style="margin:10px 0 6px">${rv.dong==="전체"?"동구 전체":rv.dong} · 어두운 구간 <b>${cs.length}</b>곳, 총 ${(totalLen/1000).toFixed(1)}km${dark?` · 고장·수리중 등 영향 ${dark}`:""}${nol?` · 근처에 등이 없는 구간 ${nol}`:""}</div>
+    const cs=rvList(rv);const dark=cs.filter(c=>c.dark).length,nol=rv.cands.filter(c=>c.nolight).length;const totalLen=cs.reduce((s,c)=>s+c.len,0);const sk=rv.cands.skip||{};
+    const skipLine=[sk.apt?`${AREA_LABEL.apt} 안 ${(sk.apt/1000).toFixed(1)}km`:"",sk.forest?`${AREA_LABEL.forest} ${(sk.forest/1000).toFixed(1)}km`:"",sk.ways?`주차장 통로·사유지 진입로 ${sk.ways}개`:""].filter(Boolean).join(", ");
+    body=`<div class="muted" style="margin:10px 0 6px">${rv.dong==="전체"?"동구 전체":rv.dong} · 어두운 구간 <b>${cs.length}</b>곳, 총 ${(totalLen/1000).toFixed(1)}km${dark?` · 고장·수리중 등 영향 ${dark}`:""}</div>
+    ${skipLine?`<div class="muted" style="margin:0 0 6px">제외: ${skipLine}</div>`:(ROADS.areas&&ROADS.areas.length)?"":`<div class="muted" style="margin:0 0 6px">이 도로망에는 단지·산 정보가 없어요. "도로망 다시 받기"를 누르면 아파트·학교·숲 안쪽 길을 뺀 결과를 얻어요.</div>`}
+    <label class="muted" style="display:flex;gap:8px;align-items:center;margin:0 0 8px"><input type="checkbox" id="rvNoLight" ${S.rvNoLight?"checked":""}> 90m 안에 등록된 등이 없는 구간도 보기 <span>(${nol}곳 · 아파트 관리등·산길·농로일 가능성)</span></label>
     ${cs.length?`<div class="list">${cs.slice(0,rv.show).map((c,i)=>`<div class="panel" style="border-left:5px solid ${c.dark?"var(--bad)":c.nolight?"var(--ink-2)":"var(--sodium)"}">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>#${i+1}</b> <b>${esc(c.name)}</b><span class="muted">${esc(c.typeLabel)}</span><span class="chip ${c.dark?"st-고장":c.nolight?"":"st-점검필요"}" style="margin-left:auto">${c.dark?"고장으로 암부":c.nolight?"조명 없음":"어두운 구간"}</span></div>
       <div class="muted">${esc(c.dong||"")} · 길이 ${c.len}m · 평균 예상 밝기 ${Math.round(c.E*100)}%${c.near.length?` · 근처 등 ${c.near.map(l=>esc(l.code)+(onOf(l)===0?"("+esc(l.status)+")":"")).join(", ")}`:" · 90m 안에 등록된 등이 없어요"}</div>
@@ -1086,14 +1119,14 @@ function reviewSection(){
 }
 async function exportReviewCSV(){
   const rv=S.review;if(!rv)return;const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
-  const rows=rv.mode==="roads"?[["순위","구분","동","도로명","도로유형","구간길이m","평균예상밝기%","근처등","중간위도","중간경도"],...rv.cands.map((c,i)=>[i+1,c.dark?"고장으로 암부":c.nolight?"조명 없음":"어두운 구간",c.dong,c.name,c.typeLabel,c.len,Math.round(c.E*100),c.near.map(l=>l.code).join(" / "),c.mid.lat.toFixed(6),c.mid.lng.toFixed(6)])]
+  const rows=rv.mode==="roads"?[["순위","구분","동","도로명","도로유형","구간길이m","평균예상밝기%","근처등","중간위도","중간경도"],...rvList(rv).map((c,i)=>[i+1,c.dark?"고장으로 암부":c.nolight?"조명 없음":"어두운 구간",c.dong,c.name,c.typeLabel,c.len,Math.round(c.E*100),c.near.map(l=>l.code).join(" / "),c.mid.lat.toFixed(6),c.mid.lng.toFixed(6)])]
   :[["순위","구분","동","등A","등A상태","등B","등B상태","거리m","적정m","중간예상밝기%","중간위도","중간경도"],...rv.cands.map((c,i)=>[i+1,c.dark?"고장으로 암부":"간격 과다",c.a.dong,c.a.code,c.a.status,c.b.code,c.b.status,c.d,c.need,Math.round(c.E*100),c.mid.lat.toFixed(6),c.mid.lng.toFixed(6)])];
   const csv="﻿"+rows.map(r=>r.map(q).join(",")).join("\r\n");
   try{await dl.save({filename:`동구가로등_밝기검토_${fmtD(Date.now()).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
 }
 function openReviewMap(idx){
   const rv=S.review;if(!rv)return;
-  const cs=idx==="all"?rv.cands.slice(0,200):[rv.cands[+idx]];
+  const all=rv.mode==="roads"?rvList(rv):rv.cands;const cs=idx==="all"?all.slice(0,200):[all[+idx]];if(!cs[0])return;
   const center=idx==="all"?null:cs[0].mid;const roads=rv.mode==="roads";
   const pts=S.lights.filter(l=>typeof l.lat==="number"&&(idx==="all"?(rv.dong==="전체"||l.dong===rv.dong):distM(center,l)<=Math.max(160,(cs[0].len||0))));
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">밝기 검토 지도 <span class="muted">${cs.length}곳</span></h3><div class="muted">노란 원은 예상 조명 범위, ⚠ 는 중간이 어두운 구간이에요. 원을 누르면 등 정보가 떠요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
@@ -1124,7 +1157,7 @@ function openReviewMap(idx){
   setTimeout(()=>gmap&&gmap.invalidateSize(),250);
 }
 function reviewToForm(idx){
-  const c=S.review&&S.review.cands[+idx];if(!c)return;
+  const rv0=S.review;const c=rv0&&(rv0.mode==="roads"?rvList(rv0):rv0.cands)[+idx];if(!c)return;
   closeSheet();S.tab="admin";render();const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
   $("#nNoPlate").checked=true;["nNum","nRoad"].forEach(x=>{const el=$("#"+x);if(el)el.disabled=true});
   if(S.review.mode==="roads"){const k=c.near[0]?c.near[0].kind:(/primary|secondary|tertiary/.test(c.type)?"가로등":"보안등");$("#nKind").value=k;if(DONGS.includes(c.dong))d.value=c.dong;
@@ -1698,7 +1731,7 @@ const _close=closeSheet;closeSheet=function(fromHistory){stopCam(false);stopTilt
 
 render();
 try{if(localStorage.getItem("dg-near")==="1"){S.near=false;nearToggle()}}catch(e){}
-boot().then(()=>{idbGet("roads").then(r=>{if(r&&r.ways&&r.ways.length){ROADS=r;if(S.tab==="admin")render()}})});
+boot().then(()=>{idbGet("roads").then(r=>{if(r&&r.ver===ROADS_VER&&r.ways&&r.ways.length){ROADS=r;if(S.tab==="admin")render()}})});
 </script>
 </body>
 </html>

@@ -29,11 +29,13 @@
 실측 조도가 없으므로 모델로 추정합니다. 대장에서 종류별 이웃 간격 분포를 구해(중앙값 약 20m) 상위 10% 간격을 검토 기준으로 삼고, 광원 종류(LED·CDM·나트륨·삼파장)와 상태(고장·수리중은 꺼짐)로 각 등의 유효 반경을 보정합니다. 기준값은 `LIGHT_MODEL`에 있습니다. 검토 방식은 두 가지입니다.
 
 - **도로 따라 검토** — OpenStreetMap 도로 중심선(간선·주택가·생활도로·진입로·보행로)을 8m 간격으로 걸으며 합산 밝기가 약한 구간을 찾습니다. 고장·수리중 등의 영향을 받는 구간, 근처에 등이 전혀 없는 구간, 길이, 도로 등급 순으로 정렬하고 지도에 굵은 선으로 표시합니다. 공원·건물 너머의 등은 계산에 들어가지 않습니다.
+  - 제외 대상: 아파트 단지·학교·대학·병원 부지 안(`landuse=residential`+`residential=apartments`, `amenity=school|university|college|hospital`), 숲·산·묘지·국립공원(`natural=wood|scrub`, `landuse=forest|cemetery`, `boundary=national_park`), 주차장 통로·사유지 진입로(`service=parking_aisle|driveway`, `access=private`). 이런 곳은 관리 주체가 다르거나 조명 대상이 아니므로 후보에서 뺍니다.
+  - 90m 안에 등록된 등이 하나도 없는 구간(아파트 관리등·산길·농로일 가능성)은 기본으로 숨기고, 체크박스로 볼 수 있습니다.
 - **등 간격으로 검토** — 도로망이 없을 때의 대체 방식. 이웃한 두 등의 간격이 기준을 넘거나 중간 지점이 약한 쌍을 후보로 뽑습니다. 도로 형상을 모르므로 공원·건물 너머의 쌍도 섞입니다.
 
 두 방식 모두 보완 지점 좌표를 현장 등록 양식으로 넘기거나 CSV로 내보낼 수 있습니다. 현장 확인 순서를 정하는 용도입니다.
 
-**도로망** — "도로망 불러오기"를 누르면 보는 사람의 브라우저가 Overpass API에서 동구 범위(`ROAD_BBOX`)의 도로를 한 번 받아(약 3MB) IndexedDB에 저장하고, 공유 데이터베이스가 있으면 `roads/part-N`(190KB 단위)과 `roads/meta`로 올려 다른 휴대폰은 다시 받지 않게 합니다. 도로 데이터 © OpenStreetMap contributors (ODbL).
+**도로망** — "도로망 불러오기"를 누르면 보는 사람의 브라우저가 Overpass API에서 동구 범위(`ROAD_BBOX`)의 도로와 단지·숲 영역을 한 번 받아(약 4MB) IndexedDB에 저장하고, 공유 데이터베이스가 있으면 `roads/part-N`(190KB 단위)과 `roads/meta`로 올려 다른 휴대폰은 다시 받지 않게 합니다. 도로 데이터 © OpenStreetMap contributors (ODbL).
 
 ## 데이터 구조
 
@@ -59,8 +61,8 @@ reports/{auto}
   issue, location, dong, code, lightId, desc, photo, status(접수|처리중|완료),
   createdAt, updatedAt, reporterId
 
-roads/part-N          OpenStreetMap 도로 조각 { ways:[{id,name,type,pts:[[lat,lng],…]}] }
-roads/meta            at, parts, count, attribution
+roads/part-N          OpenStreetMap 조각 { ways:[{id,name,type,sv,priv,pts:[[lat,lng],…]}], areas:[{t(apt|forest),name,pts}] }
+roads/meta            ver(ROADS_VER), at, parts, count, areas, attribution — ver가 다르면 다시 받음
 ```
 
 ## 실행 환경에 대한 안내
