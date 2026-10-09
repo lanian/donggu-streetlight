@@ -170,6 +170,19 @@ textarea.f-in{min-height:84px;resize:vertical}
 .photo-in{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .photo-in img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
 .thumb{max-width:100%;border-radius:8px;margin-top:8px;display:block}
+.pstrip{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.pstrip .pt{position:relative;width:88px}.pstrip img{width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
+.pstrip .lab{font-size:11px;color:var(--ink-2);text-align:center;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pstrip .x{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--bad);color:#fff;border:2px solid var(--bg);font-size:14px;line-height:18px;text-align:center;padding:0}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-top:8px}.pgrid button{padding:0;border:0;background:none;text-align:left}.pgrid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}.pgrid .lab{font-size:11px;color:var(--ink-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ovl{position:fixed;inset:0;z-index:60;background:#0B1120;color:#E6ECF7;display:flex;flex-direction:column}.ovl[hidden]{display:none}
+.ovl .bar{display:flex;gap:8px;align-items:center;padding:10px 12px;padding-top:max(10px,env(safe-area-inset-top));flex-wrap:wrap}.ovl .bar b{font-size:15px}.ovl .bar .x{margin-left:auto;background:#1A2538;color:#fff;border:0;width:40px;height:40px;border-radius:50%;font-size:22px}
+.ovl .stage{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}.ovl canvas,.ovl img.full{max-width:100%;max-height:100%;display:block}
+.ovl .tools{display:flex;gap:8px;padding:10px 12px;padding-bottom:max(10px,env(safe-area-inset-bottom));flex-wrap:wrap;align-items:center;background:#0F1726}.ovl .tools button{background:#1A2538;color:#fff;border:1px solid #2F3B52;border-radius:10px;padding:10px 12px;font:inherit;font-weight:600;min-height:44px}.ovl .tools button[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}.ovl .tools button.go{background:#E89A0C;color:#1B1300;border-color:#E89A0C;margin-left:auto}
+.ovl .tools input,.ovl .tools select{font:inherit;background:#1A2538;color:#fff;border:1px solid #2F3B52;border-radius:10px;padding:10px;min-height:44px}
+.ovl .cap{padding:6px 12px;font-size:13px;color:#A9B6CC;text-align:center}
+.ovl .cap button{background:#1A2538;color:#fff;border:1px solid #2F3B52;min-height:38px}.ovl .cap button[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%;height:100%;align-items:center}.cmp div{text-align:center;font-size:12px;color:#A9B6CC}.cmp img{max-width:100%;max-height:70vh;display:block;margin:0 auto}
+@media print{.wrap,nav.tabs,.sheet-bg,.toast,.ovl,.noprint{display:none!important}.sheet{display:block!important;position:static;max-height:none;overflow:visible;border-radius:0;background:#fff;color:#000}.sheet-in{max-width:none;padding:0}.psheet img{page-break-inside:avoid}}
+.psheet{display:grid;grid-template-columns:1fr 1fr;gap:12px}.psheet figure{margin:0;page-break-inside:avoid}.psheet img{width:100%;border:1px solid #ccc;border-radius:4px}.psheet figcaption{font-size:12px;margin-top:4px}
 
 /* sheet */
 .sheet-bg{position:fixed;inset:0;background:rgba(10,16,30,.45);z-index:30;display:none}
@@ -296,6 +309,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 <div class="sheet-bg" id="sheetBg"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="sheet-in" id="sheetIn"></div></div>
 <div class="toast" id="toast" role="status"></div>
+<div class="ovl" id="ovl" hidden></div>
 
 <script>
 "use strict";
@@ -393,7 +407,7 @@ function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");cl
 /* Local fallback store (GitHub Pages / plain hosting): same API surface as the shared db,
    backed by this browser's localStorage, seeded from seed/manifest.json. Not shared between devices. */
 function localDb(){
-  const KEY="donggu-streetlight-local";let data={lights:{},inspections:{},reports:{},patrols:{},roles:{}};const subs=[];
+  const KEY="donggu-streetlight-local";let data={lights:{},inspections:{},reports:{},patrols:{},roles:{},photos:{}};const subs=[];
   try{const s=localStorage.getItem(KEY);if(s)data=JSON.parse(s)}catch(e){}
   const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}subs.forEach(f=>f())};
   const snapOf=(col,q)=>{let rows=Object.entries(data[col]||{}).map(([id,d])=>({id,data:()=>d}));
@@ -418,6 +432,7 @@ function localDb(){
   };
   return{seed,collection:c=>query(c),doc:path=>{const [c,id]=path.split("/");return{
     set:async rec=>{(data[c]=data[c]||{})[id]=rec;save()},
+    get:async()=>{const d=(data[c]||{})[id];return{id,exists:!!d,data:()=>d}},
     update:async patch=>{data[c][id]=Object.assign(data[c][id]||{},patch);save()},
     delete:async()=>{if(data[c])delete data[c][id];save()}}}};
 }
@@ -729,7 +744,7 @@ let closeSheet=function(fromHistory){$("#sheet").classList.remove("open");$("#sh
 let draft=null;
 async function openLight(id){
   const l=byId(id);if(!l)return;
-  draft={lightId:id,checks:{},photo:null,result:null};
+  draft={lightId:id,checks:{},photo:null,photos:[],result:null};
   openSheet(`<div class="sheet-head st-${esc(l.status)}"><div><h3 style="font-size:19px">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:""}${esc(l.code)} <span class="chip">${esc(l.status)}</span></h3>
     <div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address)}</div><div class="muted">${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.lampId?` · 관리ID ${esc(l.lampId)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}${PT_LAST[l.id]?` · 순찰 통과 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" 점등 확인"}`:""}</div></div>
     <button class="x" aria-label="닫기" data-close>×</button></div>
@@ -744,16 +759,18 @@ async function openLight(id){
     <div class="seg" id="resSeg">${["정상","점검필요","고장"].map(s=>`<button type="button" data-res="${s}" aria-pressed="false">${s}</button>`).join("")}</div>
     <p class="muted" id="resHint">불량 항목을 체크하면 결과가 자동으로 제안돼요.</p>
     <label class="f" for="iMemo">메모</label><textarea class="f-in" id="iMemo" placeholder="측정값, 조치 내용, 필요한 부품 등"></textarea>
-    <label class="f">현장 사진</label><div class="photo-in"><button type="button" class="btn ghost sm" data-pick="iPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="iPhotoLib">앨범에서 선택</button><input type="file" id="iPhoto" accept="image/*" capture="environment" hidden><input type="file" id="iPhotoLib" accept="image/*" hidden><img id="iPrev" alt="" hidden></div>
+    <label class="f">현장 사진 <span class="muted">최대 ${PHOTO_MAX}장 · 찍은 뒤 구분(전경·표찰·고장 부위·조치 전/후)을 고르고 빨간 펜으로 표시할 수 있어요</span></label><div class="photo-in"><button type="button" class="btn ghost sm" data-pick="iPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="iPhotoLib">앨범에서 선택</button><input type="file" id="iPhoto" accept="image/*" capture="environment" hidden><input type="file" id="iPhotoLib" accept="image/*" multiple hidden></div><div class="pstrip" id="iPhotos"></div>
     <div style="margin-top:16px"><button class="btn sodium block" id="saveInsp" ${S.canWrite?"":"disabled"}>점검 결과 저장</button></div>
     <h2>점검 이력</h2><div id="histBox" class="muted">불러오는 중…</div>
+    <h2>사진 이력 <span class="muted" id="galN"></span></h2><div id="galBox" class="muted">불러오는 중…</div>
     ${l.edits&&l.edits.length?`<h2>정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
+  loadGallery(id);
   if(!db){$("#histBox").textContent="기록을 불러올 수 없어요.";return}
   try{
     const snap=await db.collection("inspections").where("lightId","==",id).limit(20).get();
     const rows=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.date-a.date);
     const box=$("#histBox");if(!box||!draft||draft.lightId!==id)return;
-    box.innerHTML=rows.length?rows.map(i=>`<div class="hist st-${esc(i.result)}"><b>${fmtDT(i.date)}</b> <span class="chip">${esc(i.result)}</span> <span>${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${typeof i.tiltDeg==="number"?`<div>등주 기울기 ${i.tiltDeg.toFixed(1)}°</div>`:""}${i.faults&&i.faults.length?`<div>불량: ${i.faults.map(esc).join(", ")}</div>`:""}${i.memo?`<div>${esc(i.memo)}</div>`:""}${i.photo?`<img class="thumb" src="${esc(i.photo)}" alt="점검 사진" style="max-height:200px">`:""}</div>`).join(""):"아직 점검 기록이 없어요.";
+    box.innerHTML=rows.length?rows.map(i=>`<div class="hist st-${esc(i.result)}"><b>${fmtDT(i.date)}</b> <span class="chip">${esc(i.result)}</span> <span>${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${typeof i.tiltDeg==="number"?`<div>등주 기울기 ${i.tiltDeg.toFixed(1)}°</div>`:""}${i.faults&&i.faults.length?`<div>불량: ${i.faults.map(esc).join(", ")}</div>`:""}${i.memo?`<div>${esc(i.memo)}</div>`:""}${i.thumbs&&i.thumbs.length?`<div class="pgrid">${i.thumbs.map(t=>`<button type="button" data-pview="${esc(t.id)}"><img src="${esc(t.t)}" alt="${esc(t.label||"점검 사진")}" loading="lazy"><div class="lab">${esc(t.label||"")}</div></button>`).join("")}</div>`:i.photo?`<img class="thumb" src="${esc(i.photo)}" alt="점검 사진" style="max-height:200px">`:""}</div>`).join(""):"아직 점검 기록이 없어요.";
   }catch(e){const b=$("#histBox");if(b)b.textContent="기록을 불러오지 못했어요."}
 }
 function suggestResult(){
@@ -774,7 +791,12 @@ async function saveInspection(){
   const rec={lightId:l.id,code:l.code,dong:l.dong,date:now,checks:{...draft.checks},faults,result:draft.result,memo:($("#iMemo").value||"").trim().slice(0,1000),inspector:S.me||null};
   if(typeof draft.tilt==="number")rec.tiltDeg=draft.tilt;
   if(draft.photo)rec.photo=draft.photo;
-  const ok=await write(async()=>{await db.collection("inspections").add(rec);await patchLight(l.id,{status:draft.result,lastInspected:now,lastResult:draft.result,updatedAt:now})},"점검 결과를 저장했어요.");
+  const photos=draft.photos||[];
+  const ok=await write(async()=>{
+    if(photos.length){rec.thumbs=[];for(const ph of photos){const ref=await db.collection("photos").add({lightId:l.id,code:l.code,dong:l.dong,label:ph.label,note:ph.note||"",data:ph.data,w:ph.w,h:ph.h,at:now,by:S.me||null,kind:"inspection"});rec.thumbs.push({id:ref.id,label:ph.label,t:ph.thumb})}rec.photoN=photos.length}
+    const iref=await db.collection("inspections").add(rec);
+    if(rec.thumbs)for(const t of rec.thumbs)try{await db.doc("photos/"+t.id).update({inspId:iref.id})}catch(e){}
+    await patchLight(l.id,{status:draft.result,lastInspected:now,lastResult:draft.result,updatedAt:now})},"점검 결과를 저장했어요.");
   if(ok)closeSheet();else if(btn){btn.disabled=false;btn.textContent="점검 결과 저장"}
 }
 
@@ -820,6 +842,12 @@ document.addEventListener("click",async e=>{
   if(t.dataset.reglink){if(need("admin"))regLink(t.dataset.reglink);return}
   if(t.dataset.regdel){if(!need("admin"))return;const l=byId(t.dataset.regdel);if(!l)return;if(!confirm(`${l.code} 미등록 항목을 삭제할까요? 되돌릴 수 없어요.`))return;write(()=>db.doc("lights/"+l.id).delete(),"삭제했어요.");return}
   if(t.dataset.platefix){if(need("inspect"))plateFix(t.dataset.platefix);return}
+  if(t.dataset.pdel){if(draft&&draft.photos){draft.photos.splice(+t.dataset.pdel,1);renderPhotoStrip()}return}
+  if(t.dataset.pedit){const ph=draft&&draft.photos&&draft.photos[+t.dataset.pedit];if(ph)editPhotoMeta(ph);return}
+  if(t.dataset.pview){openPhotoViewer(t.dataset.pview);return}
+  if(t.dataset.pcmp){openPhotoCompare(t.dataset.pcmp);return}
+  if(t.dataset.psheet){openPhotoSheet(t.dataset.psheet);return}
+  if(t.id==="psPrint"){window.print();return}
   if(t.dataset.ledit){if(need("admin"))openLightEdit(t.dataset.ledit);return}
   if(t.id==="leGps"){t.disabled=true;t.textContent="측정 중…";navigator.geolocation.getCurrentPosition(p=>{$("#leLat").value=p.coords.latitude.toFixed(6);$("#leLng").value=p.coords.longitude.toFixed(6);$("#leAcc").textContent=`현재 위치로 바꿈 (±${Math.round(p.coords.accuracy)}m)`;leMoveMarker();t.disabled=false;t.textContent="현재 위치로"},()=>{toast("위치를 못 잡았어요. 위치 권한을 확인하세요.");t.disabled=false;t.textContent="현재 위치로"},{enableHighAccuracy:true,timeout:15000,maximumAge:0});return}
   if(t.id==="leReset"){const l=byId(t.dataset.id);if(!l)return;$("#leLat").value=typeof l.lat==="number"?l.lat.toFixed(6):"";$("#leLng").value=typeof l.lng==="number"?l.lng.toFixed(6):"";$("#leAcc").textContent="원래 좌표로 되돌림";leMoveMarker();return}
@@ -891,9 +919,10 @@ document.addEventListener("change",async e=>{
   if(pid0==="nPhoto"){const f=e.target.files&&e.target.files[0];if(!f)return;try{const d=await compress(f);const prev=$("#nPrev");prev.src=d;prev.hidden=false;window.__nPhoto=d}catch(err){toast("사진을 읽지 못했어요.")}return}
   if(e.target.id==="nKind"){const n=$("#nNum"),rb=$("#nRoadBox");if(n)n.placeholder=e.target.value==="가로등"?"65-5":"642";if(rb)rb.hidden=e.target.value!=="가로등";return}
   const pid=e.target.id.replace(/Lib$/,"");
-  if(pid==="iPhoto"||pid==="rPhoto"){
+  if(pid==="iPhoto"){const fs=[...(e.target.files||[])];if(!fs.length||!draft)return;for(const f of fs){if((draft.photos||[]).length>=PHOTO_MAX){toast(`사진은 ${PHOTO_MAX}장까지예요.`);break}await openPhotoEditor(f,{code:(byId(draft.lightId)||{}).code||"",onDone:ph=>{draft.photos.push(ph);renderPhotoStrip()}})}return}
+  if(pid==="rPhoto"){
     const f=e.target.files&&e.target.files[0];if(!f)return;
-    try{const d=await compress(f);const prev=$(pid==="iPhoto"?"#iPrev":"#rPrev");prev.src=d;prev.hidden=false;if(pid==="iPhoto"&&draft)draft.photo=d;else window.__rPhoto=d}
+    try{const d=await compress(f);const prev=$("#rPrev");prev.src=d;prev.hidden=false;window.__rPhoto=d}
     catch(err){toast("사진을 읽지 못했어요. 다른 사진을 골라 주세요.")}
   }
 });
@@ -963,6 +992,83 @@ async function regLink(id){
   if(!t||t.reg){toast("대장에서 그 번호를 찾지 못했어요.");return}
   if(!confirm(`${t.code} (${t.dong}) 에 연결하고, 이 미등록 항목은 '대장반영'으로 바꿀까요?`))return;
   await write(async()=>{await patchLight(id,{reg:"대장반영",linkedId:t.id,updatedAt:Date.now()});if(l.status&&l.status!=="정상")await patchLight(t.id,{status:l.status,updatedAt:Date.now()})},`${t.code}에 연결했어요.`);
+}
+/* ---------- inspection photos: several per inspection, each its own doc in "photos" (≈80 KB), a tiny thumb kept
+   in the inspection record; an in-app editor adds a label, red-pen marks and a burned-in caption ---------- */
+const PHOTO_MAX=6,PHOTO_LABELS=["전경","표찰","고장 부위","조치 전","조치 후","기타"];
+let GAL={};
+function renderPhotoStrip(){const box=$("#iPhotos");if(!box||!draft)return;box.innerHTML=(draft.photos||[]).map((ph,i)=>`<div class="pt"><button type="button" style="padding:0;border:0;background:none" data-pedit="${i}"><img src="${ph.thumb}" alt="${esc(ph.label)}"></button><div class="lab">${esc(ph.label)}${ph.marked?" ✎":""}</div><button type="button" class="x" data-pdel="${i}" aria-label="사진 빼기">×</button></div>`).join("")}
+function editPhotoMeta(ph){const l=prompt(`구분을 고르세요: ${PHOTO_LABELS.join(" / ")}`,ph.label);if(l==null)return;if(PHOTO_LABELS.includes(l.trim()))ph.label=l.trim();const n=prompt("사진 설명 (선택)",ph.note||"");if(n!=null)ph.note=n.trim().slice(0,120);renderPhotoStrip()}
+function captionText(code,note){const d=new Date();const pos=S.pos?` · ${S.pos.lat.toFixed(5)}, ${S.pos.lng.toFixed(5)}`:"";return `${code||""} · ${fmtDT(d.getTime())} · ${S.names[S.me]||"점검자"}${pos}${note?" · "+note:""}`}
+async function openPhotoEditor(file,{code,onDone}){
+  let img;try{img=await decodeFile(file)}catch(e){toast("사진을 읽지 못했어요.");return}
+  const W=img.width||img.naturalWidth,H=img.height||img.naturalHeight;const r=Math.min(1,1000/Math.max(W,H));
+  const base=document.createElement("canvas");base.width=Math.round(W*r);base.height=Math.round(H*r);base.getContext("2d").drawImage(img,0,0,base.width,base.height);if(img.close)img.close();
+  const ov=$("#ovl");let strokes=[],cur=null,pen=true,label=PHOTO_LABELS[0],caption=true;
+  ov.innerHTML=`<div class="bar"><b>사진 확인</b><span class="muted" style="color:#A9B6CC">${esc(code)}</span><button class="x" id="peX" aria-label="취소">×</button></div>
+    <div class="stage"><canvas id="peC"></canvas></div>
+    <div class="cap">${PHOTO_LABELS.map(l=>`<button type="button" class="btn ghost sm" data-pelab="${l}" aria-pressed="${l===label}" style="margin:2px">${l}</button>`).join("")}</div>
+    <div class="tools"><button type="button" id="pePen" aria-pressed="true">✎ 빨간 펜</button><button type="button" id="peUndo">되돌리기</button><button type="button" id="peCap" aria-pressed="true">캡션 새김</button><input id="peNote" placeholder="설명 (선택)" maxlength="120" style="flex:1;min-width:120px"><button type="button" class="go" id="peOk">이 사진 추가</button></div>`;
+  ov.hidden=false;
+  const c=$("#peC");c.width=base.width;c.height=base.height;const ctx=c.getContext("2d");
+  const draw=()=>{ctx.drawImage(base,0,0);ctx.strokeStyle="#E8322B";ctx.lineWidth=Math.max(4,c.width/180);ctx.lineCap="round";ctx.lineJoin="round";for(const st of [...strokes,cur].filter(Boolean)){if(st.length<2)continue;ctx.beginPath();ctx.moveTo(st[0][0],st[0][1]);for(const [x,y] of st.slice(1))ctx.lineTo(x,y);ctx.stroke()}};
+  draw();
+  const pt=ev=>{const b=c.getBoundingClientRect();return[(ev.clientX-b.left)*c.width/b.width,(ev.clientY-b.top)*c.height/b.height]};
+  c.addEventListener("pointerdown",ev=>{if(!pen)return;c.setPointerCapture(ev.pointerId);cur=[pt(ev)];ev.preventDefault()});
+  c.addEventListener("pointermove",ev=>{if(!cur)return;cur.push(pt(ev));draw()});
+  const up=()=>{if(cur){if(cur.length>1)strokes.push(cur);cur=null;draw()}};c.addEventListener("pointerup",up);c.addEventListener("pointercancel",up);
+  return new Promise(res=>{
+    const close=()=>{ov.hidden=true;ov.innerHTML="";res()};
+    ov.querySelector("#peX").onclick=close;
+    ov.querySelector("#pePen").onclick=e=>{pen=!pen;e.currentTarget.setAttribute("aria-pressed",pen)};
+    ov.querySelector("#peUndo").onclick=()=>{strokes.pop();draw()};
+    ov.querySelector("#peCap").onclick=e=>{caption=!caption;e.currentTarget.setAttribute("aria-pressed",caption)};
+    ov.querySelectorAll("[data-pelab]").forEach(b=>b.onclick=()=>{label=b.dataset.pelab;ov.querySelectorAll("[data-pelab]").forEach(x=>x.setAttribute("aria-pressed",x===b))});
+    ov.querySelector("#peOk").onclick=()=>{
+      const note=ov.querySelector("#peNote").value.trim();
+      const out=document.createElement("canvas");out.width=c.width;out.height=c.height;const o=out.getContext("2d");o.drawImage(c,0,0);
+      if(caption){const fs=Math.max(13,Math.round(out.width/48));o.font=`600 ${fs}px system-ui,sans-serif`;const txt=captionText(code,label);const h=fs*1.8;o.fillStyle="rgba(0,0,0,.55)";o.fillRect(0,out.height-h,out.width,h);o.fillStyle="#fff";o.textBaseline="middle";o.fillText(txt,fs*.6,out.height-h/2,out.width-fs*1.2)}
+      const data=out.toDataURL("image/jpeg",.62);
+      const th=document.createElement("canvas");const tr=Math.min(1,180/Math.max(out.width,out.height));th.width=Math.round(out.width*tr);th.height=Math.round(out.height*tr);th.getContext("2d").drawImage(out,0,0,th.width,th.height);
+      onDone({data,thumb:th.toDataURL("image/jpeg",.5),label,note,w:out.width,h:out.height,marked:strokes.length>0});close()};
+  });
+}
+async function loadGallery(id){
+  const box=$("#galBox");if(!box||!db)return;
+  try{const snap=await db.collection("photos").where("lightId","==",id).limit(40).get();const rows=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.at-a.at);rows.forEach(r=>GAL[r.id]=r);
+    const n=$("#galN");if(n)n.textContent=rows.length||"";
+    if(!rows.length){box.innerHTML=`<span class="muted">아직 사진이 없어요. 점검 결과 저장 때 사진을 붙이면 여기에 쌓여요.</span>`;return}
+    const before=rows.find(r=>r.label==="조치 전"),after=rows.find(r=>r.label==="조치 후");
+    box.innerHTML=`<div class="pgrid">${rows.map(r=>`<button type="button" data-pview="${esc(r.id)}"><img src="${esc(r.data)}" alt="${esc(r.label||"")}" loading="lazy"><div class="lab">${esc(r.label||"")} · ${fmtD(r.at)}</div></button>`).join("")}</div>
+      <div class="split noprint">${before&&after?`<button class="btn ghost sm" data-pcmp="${esc(id)}">조치 전·후 비교</button>`:""}<button class="btn ghost sm" data-psheet="${esc(id)}">사진 대지 (인쇄)</button></div>`;
+  }catch(e){box.textContent="사진을 불러오지 못했어요."}
+}
+async function getPhoto(id){if(GAL[id])return GAL[id];try{const d=await db.doc("photos/"+id).get();const v=d&&(typeof d.data==="function"?d.data():d);if(v&&v.data){const r={id,...v};GAL[id]=r;return r}}catch(e){}return null}
+async function openPhotoViewer(id){
+  const r=await getPhoto(id);if(!r){toast("사진을 불러오지 못했어요.");return}
+  const sib=Object.values(GAL).filter(x=>x.lightId===r.lightId).sort((a,b)=>b.at-a.at);let i=Math.max(0,sib.findIndex(x=>x.id===id));
+  const ov=$("#ovl");ov.hidden=false;
+  const show=()=>{const x=sib[i]||r;ov.innerHTML=`<div class="bar"><b>${esc(x.code||"")}</b><span style="color:#A9B6CC">${esc(x.label||"")} · ${fmtDT(x.at)} · ${esc(S.names[x.by]||"점검자")}</span><button class="x" id="pvX" aria-label="닫기">×</button></div>
+    <div class="stage"><img class="full" src="${esc(x.data)}" alt="${esc(x.label||"")}"></div>
+    ${x.note?`<div class="cap">${esc(x.note)}</div>`:""}
+    <div class="tools"><button type="button" id="pvPrev" ${i<=0?"disabled":""}>‹ 이전</button><span style="color:#A9B6CC">${i+1} / ${sib.length||1}</span><button type="button" id="pvNext" ${i>=sib.length-1?"disabled":""}>다음 ›</button>${dl?`<button type="button" id="pvDl" style="margin-left:auto">내려받기</button>`:""}</div>`;
+    ov.querySelector("#pvX").onclick=()=>{ov.hidden=true;ov.innerHTML=""};
+    ov.querySelector("#pvPrev").onclick=()=>{if(i>0){i--;show()}};ov.querySelector("#pvNext").onclick=()=>{if(i<sib.length-1){i++;show()}};
+    const d=ov.querySelector("#pvDl");if(d)d.onclick=async()=>{try{const b=await (await fetch(x.data)).blob();await dl.save({filename:`${(x.code||"사진").replace(/\s+/g,"_")}_${fmtD(x.at).replace(/\./g,"")}_${x.label||""}.jpg`,data:b})}catch(e){}}};
+  show();
+}
+function openPhotoCompare(lightId){
+  const rows=Object.values(GAL).filter(x=>x.lightId===lightId);const b=rows.filter(x=>x.label==="조치 전").sort((a,b)=>b.at-a.at)[0],a=rows.filter(x=>x.label==="조치 후").sort((a,b)=>b.at-a.at)[0];if(!b||!a)return;
+  const ov=$("#ovl");ov.hidden=false;ov.innerHTML=`<div class="bar"><b>${esc(b.code||"")}</b><span style="color:#A9B6CC">조치 전·후</span><button class="x" id="pcX" aria-label="닫기">×</button></div>
+    <div class="stage"><div class="cmp"><div><img src="${esc(b.data)}" alt="조치 전">조치 전 · ${fmtD(b.at)}</div><div><img src="${esc(a.data)}" alt="조치 후">조치 후 · ${fmtD(a.at)}</div></div></div>`;
+  ov.querySelector("#pcX").onclick=()=>{ov.hidden=true;ov.innerHTML=""};
+}
+async function openPhotoSheet(lightId){
+  const l=byId(lightId);const rows=Object.values(GAL).filter(x=>x.lightId===lightId).sort((a,b)=>a.at-b.at);if(!l||!rows.length)return;
+  openSheet(`<div class="sheet-head noprint"><div><h3 style="font-size:19px">사진 대지</h3><div class="muted">인쇄하거나 PDF로 저장해 점검 보고서에 붙이세요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+    <div class="split noprint" style="margin:0 0 10px"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button></div>
+    <h2 style="margin-top:0">${kindBadge(l.kind)}${esc(l.code)} 현장 사진 대지</h2><div class="muted">${esc(l.dong)} · ${esc(l.address||"")} · 사진 ${rows.length}장 · 출력 ${fmtDT(Date.now())}</div>
+    <div class="psheet" style="margin-top:10px">${rows.map((r,i)=>`<figure><img src="${esc(r.data)}" alt=""><figcaption>${i+1}. ${esc(r.label||"")} · ${fmtDT(r.at)} · ${esc(S.names[r.by]||"점검자")}${r.note?` · ${esc(r.note)}`:""}</figcaption></figure>`).join("")}</div>`);
 }
 /* ---------- light attribute editing: registry stays read-only, changes go to lights/{id} with a per-change history ---------- */
 const EDIT_FIELDS={lampType:"광원",pole:"등주",sw:"점멸기",poleNo:"전주번호",replacedYear:"교체연도",lat:"위도",lng:"경도",removed:"철거",note:"비고"};

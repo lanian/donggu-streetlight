@@ -38,6 +38,13 @@
 - **사진 인식** — QR이 없거나 훼손된 경우 표찰 사진을 올리면 AI가 동 이름·번호·한전 전주번호(예: `9792C742`)를 읽습니다.
 - 읽은 번호가 대장에 없으면 "미등록"으로 표시하고 신규 등록 양식으로 이어집니다.
 
+## 점검 사진
+
+점검 결과 저장 화면에서 사진을 최대 6장 붙입니다. 사진을 고르면 바로 편집 화면이 떠서 구분(전경·표찰·고장 부위·조치 전·조치 후·기타)을 고르고, 빨간 펜으로 고장 부위를 표시하고, 설명을 적습니다. 저장 시 사진 아래에 "표찰번호 · 일시 · 점검자 · 좌표 · 구분" 캡션이 새겨져(끌 수 있음) 보고서 증빙으로 그대로 쓸 수 있습니다.
+
+- 사진은 긴 변 1000px JPEG(60~140KB)로 줄여 `photos/{auto}`에 한 장씩 저장하고, 점검 기록에는 180px 썸네일만 둡니다. 체험 모드에서는 localStorage 용량(약 5MB) 때문에 수십 장이 한계입니다.
+- 등 상세의 **사진 이력**에 그 등의 사진이 시간순으로 모이고, 눌러서 크게 보기·이전/다음·내려받기, "조치 전"과 "조치 후"가 모두 있으면 **전·후 비교**, **사진 대지(인쇄/PDF)** 를 만들 수 있습니다.
+
 ## 야간 차량 순찰
 
 차로 돌며 꺼진 등을 찾는 야간 순찰용 화면입니다(현장 점검 탭 → 야간 순찰). 동승자가 조작하는 것을 전제로 합니다.
@@ -95,7 +102,11 @@ lights/{id}        대장 id와 같은 키. status(정상|점검필요|고장|�
                    noPlate, lat, lng, acc, photo, note, foundAt, foundBy, linkedId(기존 등과 연결 시)
 
 inspections/{auto}
-  lightId, code, dong, date, checks{}, faults[], result, memo, tiltDeg, photo, inspector
+  lightId, code, dong, date, checks{}, faults[], result, memo, tiltDeg, inspector,
+  photoN, thumbs[{id(photos 문서), label, t(썸네일)}], patrol(순찰 기록이면 true)   (photo: 옛 단일 사진)
+
+photos/{auto}
+  lightId, code, dong, inspId, label, note, data(JPEG dataURL), w, h, at, by, kind
 
 reports/{auto}
   issue, location, dong, code, lightId, desc, photo, status(접수|처리중|완료),
