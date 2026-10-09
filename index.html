@@ -1114,7 +1114,7 @@ function reviewSection(){
     :`<div class="empty">이 범위에서는 모델상 어두운 구간이 안 잡혔어요.</div>`}`;
   }
   return `<div class="panel">
-    <p class="muted" style="margin:0 0 8px">${ROADS?"도로 중심선을 8m 간격으로 따라가며 주변 등의 합산 밝기를 계산해, 어둡게 남는 구간을 찾아요. ":""}동구 대장의 실제 설치 간격을 기준으로 삼아요${(()=>{const c=lightGrid()&&CALIB;return c&&c["가로등"]&&c["보안등"]?` (이웃 간격 중앙값 가로등 ${c["가로등"].p50}m·보안등 ${c["보안등"].p50}m, 상위 10% 기준 ${c["가로등"].p90}m·${c["보안등"].p90}m)`:""})()}. 두 등 사이가 그보다 넓거나 고장·수리중 등 때문에 중간이 어두워지는 곳을 찾고, 광원 종류(LED·CDM·삼파장 등)로 밝기를 보정해요. 실측 조도나 도로 형상은 반영되지 않으니 <b>현장 확인 순서를 정하는 용도</b>로 보세요.</p>
+    <p class="muted" style="margin:0 0 8px">${ROADS?"도로 중심선을 8m 간격으로 따라가며 주변 등의 합산 밝기를 계산해, 어둡게 남는 구간을 찾아요. ":""}동구 대장의 실제 설치 간격을 기준으로 삼아요${(()=>{const c=lightGrid()&&CALIB;return c&&c["가로등"]&&c["보안등"]?` (이웃 간격 중앙값 가로등 ${c["가로등"].p50}m·보안등 ${c["보안등"].p50}m, 상위 10% 기준 ${c["가로등"].p90}m·${c["보안등"].p90}m)`:""})()}. 두 등 사이가 그보다 넓거나 고장·수리중 등 때문에 중간이 어두워지는 곳을 찾고, 광원 종류(LED·CDM·삼파장 등)로 밝기를 보정해요. 도로 따라 검토는 아파트·학교 단지 안, 숲·산, 주차장 통로·사유지 진입로를 빼고 봐요. 실측 조도는 반영되지 않으니 <b>현장 확인 순서를 정하는 용도</b>로 보세요.</p>
     ${modeSeg}<div class="split" style="margin:0">${dongSel}${kindSel}<button class="btn sm" id="rvRun">검토 실행</button></div>${body}</div>`;
 }
 async function exportReviewCSV(){
