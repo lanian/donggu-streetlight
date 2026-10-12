@@ -134,6 +134,23 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ptbtns .bad{background:#C2372B}.ptbtns .warn{background:#B8740A}.ptcam{height:34vh;min-height:200px;margin-bottom:8px}.ptcam[hidden]{display:none}
 .ptmap{height:34vh;min-height:200px;margin-bottom:8px;border-radius:12px;overflow:hidden}.ptmap[hidden]{display:none}
 .ptme{background:none;border:0}.ptme .car{width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #2F5DA8;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 1px 3px rgba(0,0,0,.5));transform-origin:50% 65%}.ptme .dot{position:absolute;left:7px;top:7px;width:8px;height:8px;border-radius:50%;background:#2F5DA8;border:2px solid #fff}
+.ptfull{position:fixed;inset:0;z-index:55;background:#0F1726;color:#E6ECF7;display:flex;flex-direction:column}.ptfull[hidden]{display:none}
+.ptfull .top{display:flex;gap:8px;align-items:center;padding:8px 12px 4px;padding-top:max(8px,env(safe-area-inset-top))}.ptfull .top b{font-size:16px;white-space:nowrap}
+.ptfull .top select{font:inherit;font-size:13px;background:#1A2538;color:#fff;border:1px solid #3A4A66;border-radius:8px;padding:6px 6px;max-width:34%}
+.ptfull .top .bar{flex:1;height:8px;background:#1A2538;border-radius:4px;overflow:hidden;min-width:40px}.ptfull .top .bar i{display:block;height:100%;background:#2E8B57;transition:width .3s}
+.ptfull .top .x{background:#C2372B;color:#fff;border:0;width:44px;height:40px;border-radius:10px;font-weight:800;font-size:15px}
+.ptfull .pthud{padding:0 12px;margin-bottom:4px}.ptfull .pthud b{font-size:18px}
+.ptfull .body{flex:1;min-height:0;display:flex;flex-direction:column}
+.ptfull .view{flex:1 1 42%;min-height:160px;position:relative;display:flex;flex-direction:column;padding:0 12px}.ptfull .view[hidden]{display:none}
+.ptfull .ptcam,.ptfull .ptmap{flex:1;min-height:0;height:auto;margin:0}
+.ptfull .side{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;overflow:hidden}.ptfull .side>*{flex:none}.ptfull .side .ptahead{flex:1 1 auto;overflow:auto;min-height:56px}
+.ptfull .ptahead{padding:6px 12px;gap:4px;min-height:0}.ptfull .ptcard{padding:6px 10px;font-size:14px;min-height:44px}.ptfull .ptcard .d{font-size:18px}.ptfull .ptcard .side{font-size:11px}
+.ptfull .ptbtns{margin:4px 12px;gap:8px}.ptfull .ptbtns button{min-height:58px;font-size:17px}.ptfull .ptbtns button small{font-size:11px}
+.ptfull .ptlog{margin:0 12px;font-size:12px}.ptfull .ptlog div{padding:3px 0}
+.ptfull .bottom{display:flex;gap:6px;padding:8px 12px;padding-bottom:max(8px,env(safe-area-inset-bottom));align-items:center;background:#0B1120}
+.ptfull .bottom .seg{margin:0;flex:1}.ptfull .bottom .seg button{padding:8px 4px;font-size:13px}
+.ptfull .tb{background:#1A2538;color:#C9D2E3;border:1px solid #2F3B52;border-radius:10px;padding:8px 10px;font:inherit;font-size:13px;font-weight:600;min-height:40px}.ptfull .tb[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
+@media(orientation:landscape) and (min-width:600px){.ptfull .body{flex-direction:row}.ptfull .view{flex:1 1 55%;padding:0 6px 0 12px;min-height:0}.ptfull .side{flex:1 1 45%}.ptfull .ptbtns{grid-template-columns:1fr 1fr}.ptfull .ptbtns button{min-height:46px;font-size:15px}.ptfull .ptlog{display:none}}
 .ptview button{background:#1A2538;color:#C9D2E3;border-color:#2F3B52}.ptview button[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
 .ptnum{width:26px;height:26px;border-radius:50%;background:#2F3B52;color:#fff;font-weight:800;font-size:14px;display:inline-flex;align-items:center;justify-content:center;flex:none;border:2px solid #4A5873}.ptnum.sel{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
 .ptmapnum{background:none;border:0}.ptmapnum div{width:26px;height:26px;border-radius:50%;background:#2F3B52;color:#fff;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}.ptmapnum.sel div{background:#E89A0C;color:#1B1300}
@@ -317,6 +334,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="sheet-in" id="sheetIn"></div></div>
 <div class="toast" id="toast" role="status"></div>
 <div class="ovl" id="ovl" hidden></div>
+<div class="ptfull" id="ptFull" hidden></div>
 
 <script>
 "use strict";
@@ -745,7 +763,7 @@ let sheetHist=false;
 function openSheet(html){$("#sheetIn").innerHTML=`<div class="grab"></div>`+html;$("#sheet").classList.add("open");$("#sheetBg").classList.add("open");$("#sheet").scrollTop=0;document.body.style.overflow="hidden";setTimeout(()=>{const f=$("#sheet .x");f&&f.focus()},30);
   if(!sheetHist){try{history.pushState({sheet:1},"");sheetHist=true}catch(e){}}}
 // the phone's back button closes the sheet instead of leaving the app
-window.addEventListener("popstate",()=>{if(sheetHist){sheetHist=false;if($("#sheet").classList.contains("open"))closeSheet(true)}});
+window.addEventListener("popstate",()=>{if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}if(sheetHist){sheetHist=false;if($("#sheet").classList.contains("open"))closeSheet(true)}});
 let closeSheet=function(fromHistory){$("#sheet").classList.remove("open");$("#sheetBg").classList.remove("open");document.body.style.overflow="";draft=null;if(sheetHist&&!fromHistory){sheetHist=false;try{history.back()}catch(e){}}};
 let draft=null;
 async function openLight(id){
@@ -1568,7 +1586,8 @@ let PT_LAST={};
 function ptIndex(){PT_LAST={};for(const p of S.patrols.slice().reverse()){for(const id of p.passed||[])PT_LAST[id]={at:p.end||p.start};for(const m of p.marks||[])PT_LAST[m.id]={at:p.end||p.start,mark:m.result}}}
 const pt={on:false,watch:null,track:[],passed:new Map(),marks:[],spots:[],start:0,dist:0,pos:null,heading:null,speed:0,last:null,voice:false,wake:null,sel:null,ahead:[],paused:false,spoken:new Set(),key:"",dong:"전체",total:0,rec:null,listen:false,acc:null};
 const PT_DAYS=30; // a light counts as "patrolled" if a car passed it within this many days
-function ptReset(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;ptListen(false);if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;pt.cam=null;pt.view="none";if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}pt.track=[];pt.passed=new Map();pt.marks=[];pt.spots=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key="";pt.total=0;pt.acc=null}
+function ptHide(){const f=$("#ptFull");if(f&&!f.hidden){f.hidden=true;f.innerHTML="";if(!$("#sheet").classList.contains("open"))document.body.style.overflow=""}if(pt.hist){pt.hist=false;try{history.back()}catch(e){}}}
+function ptReset(){ptHide();if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;ptListen(false);if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;pt.cam=null;pt.view="none";if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}pt.track=[];pt.passed=new Map();pt.marks=[];pt.spots=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key="";pt.total=0;pt.acc=null}
 function ptWatch(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=navigator.geolocation.watchPosition(ptPos,()=>{const a=$("#ptAhead");if(a)a.innerHTML=`<div class="empty">위치 권한이 없어요. 설정에서 허용해 주세요.</div>`},{enableHighAccuracy:true,maximumAge:0,timeout:20000})}
 document.addEventListener("visibilitychange",()=>{if(pt.on&&document.visibilityState==="visible"){ptWatch();if(navigator.wakeLock&&!pt.wake)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});if(pt.listen)ptListen(true)}});
 /* voice commands (Chrome/Android; Safari partial): 꺼짐·고장 / 깜빡·어두 / 켜져·정상 / 취소 / 여기 */
@@ -1596,20 +1615,23 @@ function ptCoverage(dong){
 function ptSay(t){if(!pt.voice||!window.speechSynthesis)return;try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang="ko-KR";u.rate=1.05;speechSynthesis.speak(u)}catch(e){}}
 function openPatrol(dong){
   ptReset();pt.on=true;pt.start=Date.now();pt.dong=dong||S.dong||"전체";pt.total=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&(pt.dong==="전체"||l.dong===pt.dong)).length;
-  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">야간 순찰 <span class="muted">차량</span></h3><div class="muted">운전자는 조작하지 마세요. 동승자가 보면서, 지나가는 등이 꺼져 있으면 큰 버튼을 누르세요. 누르지 않고 지나간 등은 "점등 확인"으로 남아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
-    <div class="ptwrap">
-      <div class="pthud"><span><b id="ptSpd">–</b> km/h</span><span id="ptRoad"></span><span id="ptAcc"></span><span>지나간 등 <b id="ptN">0</b></span><span>표시 <b id="ptM">0</b></span></div>
-      <div class="ptprog"><select id="ptDong" aria-label="순찰 대상 동">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===pt.dong?"selected":""}>${d==="전체"?"동구 전체":d}</option>`).join("")}</select><div class="bar"><i id="ptBar" style="width:0%"></i></div><span id="ptPct">0%</span></div>
-      <div class="seg ptview" style="margin:0 0 8px"><button type="button" data-ptview="none" aria-pressed="true">목록만</button><button type="button" data-ptview="cam" aria-pressed="false">카메라</button><button type="button" data-ptview="map" aria-pressed="false">지도</button></div>
-      <div class="arwrap ptcam" id="ptCamWrap" hidden><video id="ptCam" playsinline muted></video><div class="fallback">카메라를 쓸 수 없어요.</div><div id="ptLayer"></div><div class="arhud"><span id="ptCamHead">진행 방향 기준</span><span class="muted" style="color:#C9D2E3">마커를 누르면 그 등이 선택돼요</span></div></div>
-      <div class="gmap ptmap" id="ptMapBox" hidden><button class="btn sm locbtn" id="ptMapFollow" aria-pressed="true">따라가기</button></div>
-      <div class="ptahead" id="ptAhead"><div class="muted" style="color:#A9B6CC">GPS를 기다리는 중… 차가 움직이면 진행 방향 앞의 등이 여기에 떠요.</div></div>
-      <div class="ptbtns"><button class="bad" data-ptmark="고장">꺼짐<small>고장으로 표시</small></button><button class="warn" data-ptmark="점검필요">어둡거나 깜빡임<small>점검필요로 표시</small></button><button class="ok" data-ptmark="정상" id="ptOkBtn" hidden>켜져 있음<small>수리 확인 · 정상으로</small></button><button class="spot" data-ptspot="1">여기 어두움<small>등 없는 지점 찍기</small></button><button class="undo" id="ptUndo">마지막 표시 취소</button></div>
-      <div class="muted" id="ptHeard" style="color:#8A98B3;font-size:12px;min-height:16px"></div>
-      <div class="ptlog" id="ptLog"></div>
+  const full=$("#ptFull");full.hidden=false;document.body.style.overflow="hidden";
+  full.innerHTML=`<div class="top"><b>야간 순찰</b><select id="ptDong" aria-label="순찰 대상 동">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===pt.dong?"selected":""}>${d==="전체"?"동구 전체":d}</option>`).join("")}</select><div class="bar"><i id="ptBar" style="width:0%"></i></div><span id="ptPct" class="muted" style="color:#A9B6CC;font-size:12px">0%</span><button class="x" id="ptEnd" aria-label="순찰 끝내기" title="순찰 끝내기">끝</button></div>
+    <div class="pthud"><span><b id="ptSpd">–</b> km/h</span><span id="ptRoad"></span><span id="ptAcc"></span><span>지나간 <b id="ptN">0</b></span><span>표시 <b id="ptM">0</b></span></div>
+    <div class="body">
+      <div class="view" id="ptView" hidden>
+        <div class="arwrap ptcam" id="ptCamWrap" hidden><video id="ptCam" playsinline muted></video><div class="fallback">카메라를 쓸 수 없어요.</div><div id="ptLayer"></div><div class="arhud"><span id="ptCamHead">진행 방향 기준</span></div></div>
+        <div class="gmap ptmap" id="ptMapBox" hidden><button class="btn sm locbtn" id="ptMapFollow" aria-pressed="true">따라가기</button></div>
+      </div>
+      <div class="side">
+        <div class="ptahead" id="ptAhead"><div class="muted" style="color:#A9B6CC;padding:8px 0">GPS를 기다리는 중… 차가 움직이면 진행 방향 앞의 등이 번호 순으로 떠요.</div></div>
+        <div class="ptbtns"><button class="bad" data-ptmark="고장">꺼짐<small>고장</small></button><button class="warn" data-ptmark="점검필요">어둡거나 깜빡임<small>점검필요</small></button><button class="ok" data-ptmark="정상" id="ptOkBtn" hidden>켜져 있음<small>수리 확인</small></button><button class="spot" data-ptspot="1">여기 어두움<small>등 없는 지점</small></button></div>
+        <div class="ptlog" id="ptLog"></div><div class="muted" id="ptHeard" style="color:#8A98B3;font-size:12px;min-height:14px;padding:0 12px"></div>
+      </div>
     </div>
-    <p class="muted" id="ptNote" style="margin:8px 0 0">시속 40km면 2초에 등 하나를 지나요. 버튼은 맨 위(가장 가까운) 등에 적용되고, 다른 등을 먼저 누르면 그 등에 적용돼요. 끝낸 뒤 목록을 확인하고 저장합니다.</p>
-    <div class="split"><button class="btn ghost sm" id="ptVoice" aria-pressed="false">음성 안내</button><button class="btn ghost sm" id="ptListen" aria-pressed="false">음성 명령</button><button class="btn ghost sm" id="ptPause" aria-pressed="false">일시정지</button><button class="btn sm" id="ptEnd" style="margin-left:auto">순찰 끝내기</button></div>`);
+    <div class="bottom"><div class="seg ptview"><button type="button" data-ptview="none" aria-pressed="true">목록</button><button type="button" data-ptview="cam" aria-pressed="false">카메라</button><button type="button" data-ptview="map" aria-pressed="false">지도</button></div><button class="tb" id="ptUndo">취소</button><button class="tb" id="ptVoice" aria-pressed="false">안내</button><button class="tb" id="ptListen" aria-pressed="false">음성</button><button class="tb" id="ptPause" aria-pressed="false">정지</button></div>`;
+  try{history.pushState({pt:1},"");pt.hist=true}catch(e){}
+  toast("운전자는 조작하지 마세요. 동승자가 보면서 꺼진 등을 누르세요.");
   if(!navigator.geolocation){$("#ptAhead").innerHTML=`<div class="empty">이 기기는 위치를 쓸 수 없어요.</div>`;return}
   ptWatch();
   if(navigator.wakeLock)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});
@@ -1672,6 +1694,7 @@ function ptMark(result){
 }
 function ptView(v){
   pt.view=v;document.querySelectorAll("[data-ptview]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.ptview===v));
+  const vw=$("#ptView");if(vw)vw.hidden=v==="none";
   ptCam(v==="cam");ptMap(v==="map");
 }
 function ptMap(on){
@@ -1744,6 +1767,7 @@ function ptSpot(){
 }
 const fmtT=t=>{const d=new Date(t);return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`};
 function ptFinish(){
+  pt.hist=false;ptHide();
   if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;
   if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;pt.end=Date.now();if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">순찰 결과</h3><div class="muted">표시한 등을 확인하고 저장하세요. 저장하면 표시한 등은 점검 기록·상태가 바뀌고, 지나간 등은 "순찰 통과(점등 확인)"로 남아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div><div id="ptSumm"></div>`);
