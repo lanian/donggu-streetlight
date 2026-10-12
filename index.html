@@ -132,6 +132,8 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ptbtns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 .ptbtns button{min-height:76px;border-radius:14px;border:0;font-size:19px;font-weight:800;color:#fff}
 .ptbtns .bad{background:#C2372B}.ptbtns .warn{background:#B8740A}.ptcam{height:34vh;min-height:200px;margin-bottom:8px}.ptcam[hidden]{display:none}
+.ptmap{height:34vh;min-height:200px;margin-bottom:8px;border-radius:12px;overflow:hidden}.ptmap[hidden]{display:none}
+.ptme{background:none;border:0}.ptme .car{width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #2F5DA8;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 1px 3px rgba(0,0,0,.5));transform-origin:50% 65%}.ptme .dot{position:absolute;left:7px;top:7px;width:8px;height:8px;border-radius:50%;background:#2F5DA8;border:2px solid #fff}
 .ptarrow{font-size:18px;color:#FFB347;width:22px;text-align:center;flex:none;display:inline-block;transition:transform .4s ease-out;transform-origin:50% 50%}
 .ptbtns .ok{background:#2E8B57}.ptbtns .spot{background:#5B4B9E}.ptbtns button[hidden]{display:none}
 .ptprog{display:flex;gap:8px;align-items:center;margin:0 0 8px;font-size:12px;color:#A9B6CC}.ptprog select{font:inherit;font-size:13px;background:#1A2538;color:#fff;border:1px solid #3A4A66;border-radius:8px;padding:4px 6px}.ptprog .bar{flex:1;height:8px;background:#1A2538;border-radius:4px;overflow:hidden}.ptprog .bar i{display:block;height:100%;background:#2E8B57;transition:width .3s}.ptbtns .undo{background:#2F3B52;grid-column:1/-1;min-height:48px;font-size:15px;font-weight:600}
@@ -884,6 +886,8 @@ document.addEventListener("click",async e=>{
   if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;closeSheet();S.tab="admin";render();const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
   if(t.id==="ptListen"){ptListen(!pt.listen);return}
   if(t.id==="ptCamBtn"){ptCam(!pt.camOn);return}
+  if(t.id==="ptMapBtn"){ptMap(!pt.mapOn);return}
+  if(t.id==="ptMapFollow"){pt.mapFollow=true;t.setAttribute("aria-pressed","true");if(pt.map&&pt.pos)pt.map.setView([pt.pos.lat,pt.pos.lng],Math.max(pt.map.getZoom(),17));return}
   if(t.id==="ptShare"){const p={start:pt.start,end:pt.end,dist:pt.dist,dong:pt.dong,passed:[...pt.passed.keys()],marks:pt.marks,spots:pt.spots};navigator.share({title:"야간 순찰 일지",text:ptReportText(p)}).catch(()=>{});return}
   if(t.dataset.ptgo){if(need("inspect"))openPatrol(t.dataset.ptgo);return}
   if(t.dataset.ptunmap){const cut=Date.now()-PT_DAYS*86400000;const pts=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&!(PT_LAST[l.id]&&PT_LAST[l.id].at>cut));openMap("custom",{pts,title:`최근 ${PT_DAYS}일 순찰 안 된 등`});return}
@@ -1562,7 +1566,7 @@ let PT_LAST={};
 function ptIndex(){PT_LAST={};for(const p of S.patrols.slice().reverse()){for(const id of p.passed||[])PT_LAST[id]={at:p.end||p.start};for(const m of p.marks||[])PT_LAST[m.id]={at:p.end||p.start,mark:m.result}}}
 const pt={on:false,watch:null,track:[],passed:new Map(),marks:[],spots:[],start:0,dist:0,pos:null,heading:null,speed:0,last:null,voice:false,wake:null,sel:null,ahead:[],paused:false,spoken:new Set(),key:"",dong:"전체",total:0,rec:null,listen:false,acc:null};
 const PT_DAYS=30; // a light counts as "patrolled" if a car passed it within this many days
-function ptReset(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;ptListen(false);if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;pt.cam=null;if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}pt.track=[];pt.passed=new Map();pt.marks=[];pt.spots=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key="";pt.total=0;pt.acc=null}
+function ptReset(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;ptListen(false);if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;pt.cam=null;if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}pt.track=[];pt.passed=new Map();pt.marks=[];pt.spots=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key="";pt.total=0;pt.acc=null}
 function ptWatch(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=navigator.geolocation.watchPosition(ptPos,()=>{const a=$("#ptAhead");if(a)a.innerHTML=`<div class="empty">위치 권한이 없어요. 설정에서 허용해 주세요.</div>`},{enableHighAccuracy:true,maximumAge:0,timeout:20000})}
 document.addEventListener("visibilitychange",()=>{if(pt.on&&document.visibilityState==="visible"){ptWatch();if(navigator.wakeLock&&!pt.wake)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});if(pt.listen)ptListen(true)}});
 /* voice commands (Chrome/Android; Safari partial): 꺼짐·고장 / 깜빡·어두 / 켜져·정상 / 취소 / 여기 */
@@ -1595,13 +1599,14 @@ function openPatrol(dong){
       <div class="pthud"><span><b id="ptSpd">–</b> km/h</span><span id="ptRoad"></span><span id="ptAcc"></span><span>지나간 등 <b id="ptN">0</b></span><span>표시 <b id="ptM">0</b></span></div>
       <div class="ptprog"><select id="ptDong" aria-label="순찰 대상 동">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===pt.dong?"selected":""}>${d==="전체"?"동구 전체":d}</option>`).join("")}</select><div class="bar"><i id="ptBar" style="width:0%"></i></div><span id="ptPct">0%</span></div>
       <div class="arwrap ptcam" id="ptCamWrap" hidden><video id="ptCam" playsinline muted></video><div class="fallback">카메라를 쓸 수 없어요.</div><div id="ptLayer"></div><div class="arhud"><span id="ptCamHead">진행 방향 기준</span><span class="muted" style="color:#C9D2E3">마커를 누르면 그 등이 선택돼요</span></div></div>
+      <div class="gmap ptmap" id="ptMapBox" hidden><button class="btn sm locbtn" id="ptMapFollow" aria-pressed="true">따라가기</button></div>
       <div class="ptahead" id="ptAhead"><div class="muted" style="color:#A9B6CC">GPS를 기다리는 중… 차가 움직이면 진행 방향 앞의 등이 여기에 떠요.</div></div>
       <div class="ptbtns"><button class="bad" data-ptmark="고장">꺼짐<small>고장으로 표시</small></button><button class="warn" data-ptmark="점검필요">어둡거나 깜빡임<small>점검필요로 표시</small></button><button class="ok" data-ptmark="정상" id="ptOkBtn" hidden>켜져 있음<small>수리 확인 · 정상으로</small></button><button class="spot" data-ptspot="1">여기 어두움<small>등 없는 지점 찍기</small></button><button class="undo" id="ptUndo">마지막 표시 취소</button></div>
       <div class="muted" id="ptHeard" style="color:#8A98B3;font-size:12px;min-height:16px"></div>
       <div class="ptlog" id="ptLog"></div>
     </div>
     <p class="muted" id="ptNote" style="margin:8px 0 0">시속 40km면 2초에 등 하나를 지나요. 버튼은 맨 위(가장 가까운) 등에 적용되고, 다른 등을 먼저 누르면 그 등에 적용돼요. 끝낸 뒤 목록을 확인하고 저장합니다.</p>
-    <div class="split"><button class="btn ghost sm" id="ptCamBtn" aria-pressed="false">카메라 보기</button><button class="btn ghost sm" id="ptVoice" aria-pressed="false">음성 안내</button><button class="btn ghost sm" id="ptListen" aria-pressed="false">음성 명령</button><button class="btn ghost sm" id="ptPause" aria-pressed="false">일시정지</button><button class="btn sm" id="ptEnd" style="margin-left:auto">순찰 끝내기</button></div>`);
+    <div class="split"><button class="btn ghost sm" id="ptCamBtn" aria-pressed="false">카메라 보기</button><button class="btn ghost sm" id="ptMapBtn" aria-pressed="false">지도 보기</button><button class="btn ghost sm" id="ptVoice" aria-pressed="false">음성 안내</button><button class="btn ghost sm" id="ptListen" aria-pressed="false">음성 명령</button><button class="btn ghost sm" id="ptPause" aria-pressed="false">일시정지</button><button class="btn sm" id="ptEnd" style="margin-left:auto">순찰 끝내기</button></div>`);
   if(!navigator.geolocation){$("#ptAhead").innerHTML=`<div class="empty">이 기기는 위치를 쓸 수 없어요.</div>`;return}
   ptWatch();
   if(navigator.wakeLock)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});
@@ -1637,7 +1642,7 @@ function ptDraw(force){
   if(!$("#ptAhead"))return;
   $("#ptSpd").textContent=Math.round(pt.speed*3.6);$("#ptN").textContent=pt.passed.size;$("#ptM").textContent=pt.marks.length+pt.spots.length;
   if(pt.total){const inD=pt.dong==="전체"?pt.passed.size:[...pt.passed.keys()].filter(id=>{const l=byId(id);return l&&l.dong===pt.dong}).length;const pct=Math.min(100,Math.round(inD/pt.total*100));$("#ptBar").style.width=pct+"%";$("#ptPct").textContent=`${pct}% (${inD}/${pt.total})`}
-  if(pt.camOn)ptCamDraw();
+  if(pt.camOn)ptCamDraw();if(pt.mapOn)ptMapDraw();
   const okb=$("#ptOkBtn");if(okb){const f=pt.sel?byId(pt.sel):(pt.ahead[0]&&pt.ahead[0].l);okb.hidden=!(f&&f.status!=="정상")}
   if(ROADS&&pt.pos&&(!pt.roadAt||Date.now()-pt.roadAt>4000)){pt.roadAt=Date.now();$("#ptRoad").textContent=nearestRoadName(pt.pos)||""}
   const key=pt.ahead.map(a=>a.l.id+":"+a.d+":"+a.side).join("|")+"#"+pt.sel+"#"+pt.marks.length+"#"+pt.spots.length;
@@ -1661,6 +1666,41 @@ function ptMark(result){
   if(result==="정상"&&tgt.status==="정상"){toast(`${tgt.code}은(는) 이미 정상이에요.`);return}
   pt.marks=pt.marks.filter(m=>m.id!==tgt.id);pt.marks.push({id:tgt.id,code:tgt.code,result,at:Date.now(),pos:pt.pos?[pt.pos.lat,pt.pos.lng]:null});
   pt.sel=null;if(navigator.vibrate)navigator.vibrate(result==="고장"?[60,40,60]:60);ptSay(`${tgt.code} ${result}`);toast(`${tgt.code} → ${result}`);ptDraw(true);
+}
+function ptMap(on){
+  const box=$("#ptMapBox"),b=$("#ptMapBtn");if(!box)return;
+  if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}
+  pt.mapOn=!!on;if(b)b.setAttribute("aria-pressed",pt.mapOn);box.hidden=!pt.mapOn;
+  if(!pt.mapOn)return;
+  if(!window.L){box.insertAdjacentHTML("beforeend",`<div class="empty">지도 라이브러리를 불러오지 못했어요.</div>`);return}
+  const ll=pt.pos?[pt.pos.lat,pt.pos.lng]:(S.pos?[S.pos.lat,S.pos.lng]:[35.146,126.923]);
+  pt.map=L.map(box,{zoomControl:false,attributionControl:true,tap:true,preferCanvas:true}).setView(ll,17);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(pt.map);
+  pt.mapFollow=true;$("#ptMapFollow").setAttribute("aria-pressed","true");
+  pt.map.on("dragstart",()=>{pt.mapFollow=false;$("#ptMapFollow").setAttribute("aria-pressed","false")});
+  pt.mapTrack=L.polyline(pt.track.slice(-600),{color:"#2F5DA8",weight:4,opacity:.7}).addTo(pt.map);
+  pt.mapLights=L.layerGroup().addTo(pt.map);pt.mapMarks=L.layerGroup().addTo(pt.map);
+  pt.mapMe=L.marker(ll,{icon:L.divIcon({className:"ptme",html:'<div class="car"></div>',iconSize:[22,26],iconAnchor:[11,17]}),interactive:false,zIndexOffset:1000}).addTo(pt.map);
+  pt.mapCenter=null;pt.mapKey="";
+  setTimeout(()=>pt.map&&pt.map.invalidateSize(),250);ptMapDraw(true);
+}
+function ptMapDraw(force){
+  if(!pt.mapOn||!pt.map||!pt.pos)return;
+  const ll=[pt.pos.lat,pt.pos.lng];
+  pt.mapMe.setLatLng(ll);const car=pt.mapMe.getElement()&&pt.mapMe.getElement().querySelector(".car");if(car)car.style.transform=`rotate(${pt.heading==null?0:Math.round(pt.heading)}deg)`;
+  if(pt.mapFollow)pt.map.panTo(ll,{animate:true,duration:.4});
+  if(pt.track.length>1)pt.mapTrack.setLatLngs(pt.track.slice(-600));
+  // nearby lights: refreshed when the car has moved 80 m from the last refresh
+  if(force||!pt.mapCenter||distM(pt.mapCenter,pt.pos)>80){pt.mapCenter={lat:pt.pos.lat,lng:pt.pos.lng};pt.mapLights.clearLayers();const G=lightGrid();const me=G.toXY(pt.pos);
+    for(const {it} of G.near(me.x,me.y,320)){const l=it.l;if(l.removed)continue;const m=L.circleMarker([l.lat,l.lng],{radius:l.status==="정상"?5:7,color:KIND_COL[l.kind]||"#fff",weight:2,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});m.on("click",()=>{pt.sel=pt.sel===l.id?null:l.id;ptDraw(true)});m.bindTooltip(l.code);m.addTo(pt.mapLights)}}
+  const key=[...pt.passed.keys()].length+"|"+pt.marks.map(m=>m.id+m.result).join(",")+"|"+pt.spots.length+"|"+(pt.sel||(pt.ahead[0]&&pt.ahead[0].l.id)||"");
+  if(force||key!==pt.mapKey){pt.mapKey=key;pt.mapMarks.clearLayers();
+    const marked=new Map(pt.marks.map(m=>[m.id,m.result]));
+    for(const id of pt.passed.keys()){if(marked.has(id))continue;const l=byId(id);if(l&&typeof l.lat==="number")L.circleMarker([l.lat,l.lng],{radius:3,color:"#2E8B57",weight:2,fillColor:"#2E8B57",fillOpacity:1,interactive:false}).addTo(pt.mapMarks)}
+    for(const m of pt.marks){const l=byId(m.id);if(l&&typeof l.lat==="number")L.circleMarker([l.lat,l.lng],{radius:9,color:"#fff",weight:2,fillColor:m.result==="고장"?"#C2372B":m.result==="정상"?"#2E8B57":"#E89A0C",fillOpacity:1,interactive:false}).addTo(pt.mapMarks)}
+    for(const sp of pt.spots)L.circleMarker([sp.lat,sp.lng],{radius:8,color:"#fff",weight:2,fillColor:"#5B4B9E",fillOpacity:1,interactive:false}).addTo(pt.mapMarks);
+    const fid=pt.sel||(pt.ahead[0]&&pt.ahead[0].l.id);const f=fid&&byId(fid);if(f&&typeof f.lat==="number")L.circleMarker([f.lat,f.lng],{radius:12,color:"#E89A0C",weight:3,fill:false,interactive:false}).addTo(pt.mapMarks);
+  }
 }
 async function ptCam(on){
   const wrap=$("#ptCamWrap"),v=$("#ptCam"),b=$("#ptCamBtn");if(!wrap)return;
@@ -1694,7 +1734,7 @@ function ptSpot(){
 }
 const fmtT=t=>{const d=new Date(t);return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`};
 function ptFinish(){
-  if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;
+  if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;
   if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;pt.end=Date.now();if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">순찰 결과</h3><div class="muted">표시한 등을 확인하고 저장하세요. 저장하면 표시한 등은 점검 기록·상태가 바뀌고, 지나간 등은 "순찰 통과(점등 확인)"로 남아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div><div id="ptSumm"></div>`);
   ptSummary();
