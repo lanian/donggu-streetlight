@@ -134,6 +134,9 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ptbtns .bad{background:#C2372B}.ptbtns .warn{background:#B8740A}.ptcam{height:34vh;min-height:200px;margin-bottom:8px}.ptcam[hidden]{display:none}
 .ptmap{height:34vh;min-height:200px;margin-bottom:8px;border-radius:12px;overflow:hidden}.ptmap[hidden]{display:none}
 .ptme{background:none;border:0}.ptme .car{width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #2F5DA8;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 1px 3px rgba(0,0,0,.5));transform-origin:50% 65%}.ptme .dot{position:absolute;left:7px;top:7px;width:8px;height:8px;border-radius:50%;background:#2F5DA8;border:2px solid #fff}
+.ptview button{background:#1A2538;color:#C9D2E3;border-color:#2F3B52}.ptview button[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
+.ptnum{width:26px;height:26px;border-radius:50%;background:#2F3B52;color:#fff;font-weight:800;font-size:14px;display:inline-flex;align-items:center;justify-content:center;flex:none;border:2px solid #4A5873}.ptnum.sel{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
+.ptmapnum{background:none;border:0}.ptmapnum div{width:26px;height:26px;border-radius:50%;background:#2F3B52;color:#fff;font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}.ptmapnum.sel div{background:#E89A0C;color:#1B1300}
 .ptarrow{font-size:18px;color:#FFB347;width:22px;text-align:center;flex:none;display:inline-block;transition:transform .4s ease-out;transform-origin:50% 50%}
 .ptbtns .ok{background:#2E8B57}.ptbtns .spot{background:#5B4B9E}.ptbtns button[hidden]{display:none}
 .ptprog{display:flex;gap:8px;align-items:center;margin:0 0 8px;font-size:12px;color:#A9B6CC}.ptprog select{font:inherit;font-size:13px;background:#1A2538;color:#fff;border:1px solid #3A4A66;border-radius:8px;padding:4px 6px}.ptprog .bar{flex:1;height:8px;background:#1A2538;border-radius:4px;overflow:hidden}.ptprog .bar i{display:block;height:100%;background:#2E8B57;transition:width .3s}.ptbtns .undo{background:#2F3B52;grid-column:1/-1;min-height:48px;font-size:15px;font-weight:600}
@@ -238,7 +241,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .arm{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;gap:2px;transition:left .45s cubic-bezier(.2,.7,.3,1),top .45s cubic-bezier(.2,.7,.3,1);cursor:pointer;border:0;background:transparent;padding:0}
 @media (prefers-reduced-motion:reduce){.arm{transition:none}}
 .arm .tag{background:rgba(16,24,40,.85);color:#fff;border-radius:10px;padding:5px 9px;font-size:12px;line-height:1.3;white-space:nowrap;border:2px solid var(--c);text-align:center}
-.arm .tag b{display:block;font-size:13px}
+.arm .tag b{display:block;font-size:13px}.arm .tag .ptnum{display:inline-flex}
 .arm .pin{width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid var(--c)}
 .arm.far .tag{opacity:.7;transform:scale(.88)}
 .aredge{position:absolute;top:22%;color:#fff;font-size:12px;background:rgba(16,24,40,.75);border-radius:99px;padding:5px 9px;border:0;cursor:pointer}
@@ -885,8 +888,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.ptspotdel){pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
   if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;closeSheet();S.tab="admin";render();const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
   if(t.id==="ptListen"){ptListen(!pt.listen);return}
-  if(t.id==="ptCamBtn"){ptCam(!pt.camOn);return}
-  if(t.id==="ptMapBtn"){ptMap(!pt.mapOn);return}
+  if(t.dataset.ptview){ptView(t.dataset.ptview);return}
   if(t.id==="ptMapFollow"){pt.mapFollow=true;t.setAttribute("aria-pressed","true");if(pt.map&&pt.pos)pt.map.setView([pt.pos.lat,pt.pos.lng],Math.max(pt.map.getZoom(),17));return}
   if(t.id==="ptShare"){const p={start:pt.start,end:pt.end,dist:pt.dist,dong:pt.dong,passed:[...pt.passed.keys()],marks:pt.marks,spots:pt.spots};navigator.share({title:"야간 순찰 일지",text:ptReportText(p)}).catch(()=>{});return}
   if(t.dataset.ptgo){if(need("inspect"))openPatrol(t.dataset.ptgo);return}
@@ -1566,7 +1568,7 @@ let PT_LAST={};
 function ptIndex(){PT_LAST={};for(const p of S.patrols.slice().reverse()){for(const id of p.passed||[])PT_LAST[id]={at:p.end||p.start};for(const m of p.marks||[])PT_LAST[m.id]={at:p.end||p.start,mark:m.result}}}
 const pt={on:false,watch:null,track:[],passed:new Map(),marks:[],spots:[],start:0,dist:0,pos:null,heading:null,speed:0,last:null,voice:false,wake:null,sel:null,ahead:[],paused:false,spoken:new Set(),key:"",dong:"전체",total:0,rec:null,listen:false,acc:null};
 const PT_DAYS=30; // a light counts as "patrolled" if a car passed it within this many days
-function ptReset(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;ptListen(false);if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;pt.cam=null;if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}pt.track=[];pt.passed=new Map();pt.marks=[];pt.spots=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key="";pt.total=0;pt.acc=null}
+function ptReset(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;ptListen(false);if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;pt.cam=null;pt.view="none";if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}pt.track=[];pt.passed=new Map();pt.marks=[];pt.spots=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key="";pt.total=0;pt.acc=null}
 function ptWatch(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=navigator.geolocation.watchPosition(ptPos,()=>{const a=$("#ptAhead");if(a)a.innerHTML=`<div class="empty">위치 권한이 없어요. 설정에서 허용해 주세요.</div>`},{enableHighAccuracy:true,maximumAge:0,timeout:20000})}
 document.addEventListener("visibilitychange",()=>{if(pt.on&&document.visibilityState==="visible"){ptWatch();if(navigator.wakeLock&&!pt.wake)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});if(pt.listen)ptListen(true)}});
 /* voice commands (Chrome/Android; Safari partial): 꺼짐·고장 / 깜빡·어두 / 켜져·정상 / 취소 / 여기 */
@@ -1598,6 +1600,7 @@ function openPatrol(dong){
     <div class="ptwrap">
       <div class="pthud"><span><b id="ptSpd">–</b> km/h</span><span id="ptRoad"></span><span id="ptAcc"></span><span>지나간 등 <b id="ptN">0</b></span><span>표시 <b id="ptM">0</b></span></div>
       <div class="ptprog"><select id="ptDong" aria-label="순찰 대상 동">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===pt.dong?"selected":""}>${d==="전체"?"동구 전체":d}</option>`).join("")}</select><div class="bar"><i id="ptBar" style="width:0%"></i></div><span id="ptPct">0%</span></div>
+      <div class="seg ptview" style="margin:0 0 8px"><button type="button" data-ptview="none" aria-pressed="true">목록만</button><button type="button" data-ptview="cam" aria-pressed="false">카메라</button><button type="button" data-ptview="map" aria-pressed="false">지도</button></div>
       <div class="arwrap ptcam" id="ptCamWrap" hidden><video id="ptCam" playsinline muted></video><div class="fallback">카메라를 쓸 수 없어요.</div><div id="ptLayer"></div><div class="arhud"><span id="ptCamHead">진행 방향 기준</span><span class="muted" style="color:#C9D2E3">마커를 누르면 그 등이 선택돼요</span></div></div>
       <div class="gmap ptmap" id="ptMapBox" hidden><button class="btn sm locbtn" id="ptMapFollow" aria-pressed="true">따라가기</button></div>
       <div class="ptahead" id="ptAhead"><div class="muted" style="color:#A9B6CC">GPS를 기다리는 중… 차가 움직이면 진행 방향 앞의 등이 여기에 떠요.</div></div>
@@ -1606,7 +1609,7 @@ function openPatrol(dong){
       <div class="ptlog" id="ptLog"></div>
     </div>
     <p class="muted" id="ptNote" style="margin:8px 0 0">시속 40km면 2초에 등 하나를 지나요. 버튼은 맨 위(가장 가까운) 등에 적용되고, 다른 등을 먼저 누르면 그 등에 적용돼요. 끝낸 뒤 목록을 확인하고 저장합니다.</p>
-    <div class="split"><button class="btn ghost sm" id="ptCamBtn" aria-pressed="false">카메라 보기</button><button class="btn ghost sm" id="ptMapBtn" aria-pressed="false">지도 보기</button><button class="btn ghost sm" id="ptVoice" aria-pressed="false">음성 안내</button><button class="btn ghost sm" id="ptListen" aria-pressed="false">음성 명령</button><button class="btn ghost sm" id="ptPause" aria-pressed="false">일시정지</button><button class="btn sm" id="ptEnd" style="margin-left:auto">순찰 끝내기</button></div>`);
+    <div class="split"><button class="btn ghost sm" id="ptVoice" aria-pressed="false">음성 안내</button><button class="btn ghost sm" id="ptListen" aria-pressed="false">음성 명령</button><button class="btn ghost sm" id="ptPause" aria-pressed="false">일시정지</button><button class="btn sm" id="ptEnd" style="margin-left:auto">순찰 끝내기</button></div>`);
   if(!navigator.geolocation){$("#ptAhead").innerHTML=`<div class="empty">이 기기는 위치를 쓸 수 없어요.</div>`;return}
   ptWatch();
   if(navigator.wakeLock)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});
@@ -1648,7 +1651,7 @@ function ptDraw(force){
   const key=pt.ahead.map(a=>a.l.id+":"+a.d+":"+a.side).join("|")+"#"+pt.sel+"#"+pt.marks.length+"#"+pt.spots.length;
   if(!force&&key===pt.key)return;pt.key=key;
   const marked=new Map(pt.marks.map(m=>[m.id,m.result]));
-  $("#ptAhead").innerHTML=pt.ahead.length?pt.ahead.map((a,i)=>`<button class="ptcard st-${esc(a.l.status)} ${(pt.sel?pt.sel===a.l.id:i===0)?"first":""}" data-ptsel="${esc(a.l.id)}"><span class="ptarrow" style="transform:rotate(${pt.heading==null?0:Math.round(angDiff(pt.heading,a.b))}deg)" aria-hidden="true">⬆</span>${kindBadge(a.l.kind)}<span><b>${esc(a.l.code)}</b><br><span class="side">${a.side}${a.l.status!=="정상"?` · ${esc(a.l.status)}`:""}${marked.has(a.l.id)?` · <b style="color:#FFB347">${esc(marked.get(a.l.id))} 표시됨</b>`:""}</span></span><span class="d">${a.fwd<0?"지남":a.d+"m"}</span></button>`).join(""):`<div class="muted" style="color:#A9B6CC">${pt.pos?"앞쪽 140m 안에 등록된 등이 없어요.":"GPS를 기다리는 중…"}</div>`;
+  $("#ptAhead").innerHTML=pt.ahead.length?pt.ahead.map((a,i)=>`<button class="ptcard st-${esc(a.l.status)} ${(pt.sel?pt.sel===a.l.id:i===0)?"first":""}" data-ptsel="${esc(a.l.id)}"><span class="ptnum ${(pt.sel?pt.sel===a.l.id:i===0)?"sel":""}">${i+1}</span><span class="ptarrow" style="transform:rotate(${pt.heading==null?0:Math.round(angDiff(pt.heading,a.b))}deg)" aria-hidden="true">⬆</span>${kindBadge(a.l.kind)}<span><b>${esc(a.l.code)}</b><br><span class="side">${a.side}${a.l.status!=="정상"?` · ${esc(a.l.status)}`:""}${marked.has(a.l.id)?` · <b style="color:#FFB347">${esc(marked.get(a.l.id))} 표시됨</b>`:""}</span></span><span class="d">${a.fwd<0?"지남":a.d+"m"}</span></button>`).join(""):`<div class="muted" style="color:#A9B6CC">${pt.pos?"앞쪽 140m 안에 등록된 등이 없어요.":"GPS를 기다리는 중…"}</div>`;
   const items=[...pt.marks.map(m=>({at:m.at,html:`<b>${esc(m.code)}</b> ${esc(m.result)} <span style="color:#8A98B3">${fmtT(m.at)}</span><button data-ptdrop="${esc(m.id)}">삭제</button>`})),...pt.spots.map((sp,i)=>({at:sp.at,html:`<b>어두운 지점</b> ${sp.near?esc(sp.near)+" 근처":""} <span style="color:#8A98B3">${fmtT(sp.at)}</span><button data-ptspotdel="${i}">삭제</button>`}))].sort((a,b)=>b.at-a.at).slice(0,5);
   $("#ptLog").innerHTML=items.map(i=>`<div>${i.html}</div>`).join("");
 }
@@ -1666,6 +1669,10 @@ function ptMark(result){
   if(result==="정상"&&tgt.status==="정상"){toast(`${tgt.code}은(는) 이미 정상이에요.`);return}
   pt.marks=pt.marks.filter(m=>m.id!==tgt.id);pt.marks.push({id:tgt.id,code:tgt.code,result,at:Date.now(),pos:pt.pos?[pt.pos.lat,pt.pos.lng]:null});
   pt.sel=null;if(navigator.vibrate)navigator.vibrate(result==="고장"?[60,40,60]:60);ptSay(`${tgt.code} ${result}`);toast(`${tgt.code} → ${result}`);ptDraw(true);
+}
+function ptView(v){
+  pt.view=v;document.querySelectorAll("[data-ptview]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.ptview===v));
+  ptCam(v==="cam");ptMap(v==="map");
 }
 function ptMap(on){
   const box=$("#ptMapBox"),b=$("#ptMapBtn");if(!box)return;
@@ -1688,18 +1695,19 @@ function ptMapDraw(force){
   if(!pt.mapOn||!pt.map||!pt.pos)return;
   const ll=[pt.pos.lat,pt.pos.lng];
   pt.mapMe.setLatLng(ll);const car=pt.mapMe.getElement()&&pt.mapMe.getElement().querySelector(".car");if(car)car.style.transform=`rotate(${pt.heading==null?0:Math.round(pt.heading)}deg)`;
-  if(pt.mapFollow)pt.map.panTo(ll,{animate:true,duration:.4});
+  if(pt.mapFollow){const h=pt.heading;const ahead=h==null?ll:[pt.pos.lat+60*Math.cos(h*Math.PI/180)/110540,pt.pos.lng+60*Math.sin(h*Math.PI/180)/(111320*Math.cos(pt.pos.lat*Math.PI/180))];pt.map.panTo(ahead,{animate:true,duration:.4})}
   if(pt.track.length>1)pt.mapTrack.setLatLngs(pt.track.slice(-600));
   // nearby lights: refreshed when the car has moved 80 m from the last refresh
   if(force||!pt.mapCenter||distM(pt.mapCenter,pt.pos)>80){pt.mapCenter={lat:pt.pos.lat,lng:pt.pos.lng};pt.mapLights.clearLayers();const G=lightGrid();const me=G.toXY(pt.pos);
-    for(const {it} of G.near(me.x,me.y,320)){const l=it.l;if(l.removed)continue;const m=L.circleMarker([l.lat,l.lng],{radius:l.status==="정상"?5:7,color:KIND_COL[l.kind]||"#fff",weight:2,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});m.on("click",()=>{pt.sel=pt.sel===l.id?null:l.id;ptDraw(true)});m.bindTooltip(l.code);m.addTo(pt.mapLights)}}
-  const key=[...pt.passed.keys()].length+"|"+pt.marks.map(m=>m.id+m.result).join(",")+"|"+pt.spots.length+"|"+(pt.sel||(pt.ahead[0]&&pt.ahead[0].l.id)||"");
+    for(const {it} of G.near(me.x,me.y,320)){const l=it.l;if(l.removed)continue;const m=L.circleMarker([l.lat,l.lng],{radius:l.status==="정상"?5:7,color:KIND_COL[l.kind]||"#fff",weight:2,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});m.bindTooltip(l.code);m.addTo(pt.mapLights)}}
+  const key=[...pt.passed.keys()].length+"|"+pt.marks.map(m=>m.id+m.result).join(",")+"|"+pt.spots.length+"|"+(pt.sel||"")+"|"+pt.ahead.map(a=>a.l.id).join(",");
   if(force||key!==pt.mapKey){pt.mapKey=key;pt.mapMarks.clearLayers();
     const marked=new Map(pt.marks.map(m=>[m.id,m.result]));
     for(const id of pt.passed.keys()){if(marked.has(id))continue;const l=byId(id);if(l&&typeof l.lat==="number")L.circleMarker([l.lat,l.lng],{radius:3,color:"#2E8B57",weight:2,fillColor:"#2E8B57",fillOpacity:1,interactive:false}).addTo(pt.mapMarks)}
     for(const m of pt.marks){const l=byId(m.id);if(l&&typeof l.lat==="number")L.circleMarker([l.lat,l.lng],{radius:9,color:"#fff",weight:2,fillColor:m.result==="고장"?"#C2372B":m.result==="정상"?"#2E8B57":"#E89A0C",fillOpacity:1,interactive:false}).addTo(pt.mapMarks)}
     for(const sp of pt.spots)L.circleMarker([sp.lat,sp.lng],{radius:8,color:"#fff",weight:2,fillColor:"#5B4B9E",fillOpacity:1,interactive:false}).addTo(pt.mapMarks);
-    const fid=pt.sel||(pt.ahead[0]&&pt.ahead[0].l.id);const f=fid&&byId(fid);if(f&&typeof f.lat==="number")L.circleMarker([f.lat,f.lng],{radius:12,color:"#E89A0C",weight:3,fill:false,interactive:false}).addTo(pt.mapMarks);
+    const fid=pt.sel||(pt.ahead[0]&&pt.ahead[0].l.id);
+    pt.ahead.forEach((a,i)=>{const l=a.l;if(typeof l.lat!=="number")return;const m=L.marker([l.lat,l.lng],{icon:L.divIcon({className:"ptmapnum "+(fid===l.id?"sel":""),html:`<div>${i+1}</div>`,iconSize:[26,26],iconAnchor:[13,13]}),zIndexOffset:500});m.on("click",()=>{pt.sel=pt.sel===l.id?null:l.id;ptDraw(true)});m.addTo(pt.mapMarks)});
   }
 }
 async function ptCam(on){
@@ -1714,17 +1722,19 @@ function ptCamDraw(){
   const layer=$("#ptLayer");if(!layer||!pt.camOn)return;
   const H=pt.heading;
   if(H==null||!pt.cam){layer.innerHTML=`<div class="aredge" style="left:50%;transform:translateX(-50%)">${pt.pos?"차가 움직이면 진행 방향을 잡아요":"위치를 기다리는 중"}</div>`;pt.camKeys=null;return}
-  const want=new Map();const placed=[];
-  for(const {l,d,b} of pt.cam){const diff=angDiff(H,b);const x=Math.min(88,Math.max(12,50+diff/(AR_FOV/2)*50));let y=Math.min(80,(0.42+(1-Math.min(d,140)/140)*.38)*100);let bumps=0;while(placed.some(p=>Math.abs(p.x-x)<22&&Math.abs(p.y-y)<12)&&bumps<4){y-=12;bumps++}y=Math.max(18,y);placed.push({x,y});want.set(l.id,{l,d,x,y})}
+  const want=new Map();const placed=[];let left=[],right=[];
+  pt.ahead.forEach((a,i)=>{const {l,d,b}=a;const diff=angDiff(H,b);if(Math.abs(diff)>AR_FOV/2+8||a.fwd<-3){(diff<0?left:right).push(i+1);return}const x=Math.min(88,Math.max(12,50+diff/(AR_FOV/2)*50));let y=Math.min(80,(0.42+(1-Math.min(d,140)/140)*.38)*100);let bumps=0;while(placed.some(p=>Math.abs(p.x-x)<22&&Math.abs(p.y-y)<12)&&bumps<4){y-=12;bumps++}y=Math.max(18,y);placed.push({x,y});want.set(l.id,{l,d,x,y,n:i+1})});
   if(!pt.camKeys){layer.innerHTML="";pt.camKeys=new Set()}
   for(const id of [...pt.camKeys]){if(!want.has(id)){const n=layer.querySelector(`[data-mk="${CSS.escape(id)}"]`);n&&n.remove();pt.camKeys.delete(id)}}
   const first=pt.sel||(pt.ahead[0]&&pt.ahead[0].l.id);
-  want.forEach(({l,d,x,y},id)=>{
+  want.forEach(({l,d,x,y,n:num},id)=>{
     let n=layer.querySelector(`[data-mk="${CSS.escape(id)}"]`);const cls=`arm st-${esc(l.status)} ${d>80?"far":""} ${first===id?"tgt":""}`;const txt=`${d}m${l.status!=="정상"?" · "+esc(l.status):""}`;
-    if(!n){n=document.createElement("button");n.dataset.mk=id;n.dataset.ptsel=id;n.innerHTML=`<span class="tag" style="box-shadow:inset 0 3px 0 ${KIND_COL[l.kind]||"#fff"}"><b>${esc(l.code)}</b><span class="dtxt">${txt}</span></span><span class="pin"></span>`;n.style.left=x.toFixed(1)+"%";n.style.top=y.toFixed(1)+"%";n.className=cls;layer.appendChild(n);pt.camKeys.add(id)}
-    else{if(n.className!==cls)n.className=cls;const t=n.querySelector(".dtxt");if(t&&t.textContent!==txt)t.textContent=txt;const cx=parseFloat(n.style.left),cy=parseFloat(n.style.top);if(Math.abs(cx-x)>.6)n.style.left=x.toFixed(1)+"%";if(Math.abs(cy-y)>.6)n.style.top=y.toFixed(1)+"%"}
+    if(!n){n=document.createElement("button");n.dataset.mk=id;n.dataset.ptsel=id;n.innerHTML=`<span class="tag" style="box-shadow:inset 0 3px 0 ${KIND_COL[l.kind]||"#fff"}"><b><span class="ptnum" style="width:20px;height:20px;font-size:12px;margin-right:4px;vertical-align:-4px">${num}</span>${esc(l.code)}</b><span class="dtxt">${txt}</span></span><span class="pin"></span>`;n.style.left=x.toFixed(1)+"%";n.style.top=y.toFixed(1)+"%";n.className=cls;layer.appendChild(n);pt.camKeys.add(id)}
+    else{if(n.className!==cls)n.className=cls;const t=n.querySelector(".dtxt");if(t&&t.textContent!==txt)t.textContent=txt;const nb=n.querySelector(".ptnum");if(nb&&nb.textContent!==String(num))nb.textContent=num;const cx=parseFloat(n.style.left),cy=parseFloat(n.style.top);if(Math.abs(cx-x)>.6)n.style.left=x.toFixed(1)+"%";if(Math.abs(cy-y)>.6)n.style.top=y.toFixed(1)+"%"}
   });
-  const hd=$("#ptCamHead");if(hd)hd.textContent=`진행 방향 ${Math.round(H)}° · 앞 ${pt.cam.length}개`;
+  let el=layer.querySelector(".aredge.l");if(left.length){if(!el){el=document.createElement("div");el.className="aredge l";layer.appendChild(el)}const t=`◀ ${left.join(",")}`;if(el.textContent!==t)el.textContent=t}else if(el)el.remove();
+  let er=layer.querySelector(".aredge.r");if(right.length){if(!er){er=document.createElement("div");er.className="aredge r";layer.appendChild(er)}const t=`${right.join(",")} ▶`;if(er.textContent!==t)er.textContent=t}else if(er)er.remove();
+  const hd=$("#ptCamHead");if(hd)hd.textContent=`진행 방향 ${Math.round(H)}° · 번호는 아래 목록과 같아요`;
 }
 function ptSpot(){
   if(!pt.on||!pt.pos){toast("아직 위치를 못 잡았어요.");return}
