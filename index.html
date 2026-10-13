@@ -48,6 +48,7 @@ html{scroll-padding-top:env(safe-area-inset-top,0px)}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1,"ss05" 1}
 b,strong,.code{font-weight:700}
 button,input,select,textarea{font:inherit;color:inherit}
+input[type=checkbox]{width:20px;height:20px;accent-color:var(--sodium);margin:0 2px;flex:none}
 button{cursor:pointer}
 :focus-visible{outline:3px solid var(--sodium);outline-offset:2px}
 .wrap{max-width:760px;margin:0 auto;padding:0 16px 110px}
@@ -61,8 +62,8 @@ header.top>div:last-child{flex:none;display:flex;flex-direction:row!important;al
 header h1{font-size:17px;line-height:1.2;margin:0;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
 header p{margin:0;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:380px){header p{display:none}}
-.sync{font-size:0;color:var(--ink-2);white-space:nowrap;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--line);background:var(--card)}
-.sync span{display:none}
+.sync{font-size:11px;color:var(--ink-2);white-space:nowrap;height:28px;display:flex;align-items:center;gap:5px;padding:0 9px 0 7px;border-radius:99px;border:1px solid var(--line);background:var(--card)}
+@media(max-width:360px){.sync span{display:none}.sync{padding:0 7px}}
 .themebtn{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--card);display:flex;align-items:center;justify-content:center;padding:0}.themebtn svg{width:16px;height:16px}
 .sync i{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--line);margin:0}
 .sync.on i{background:var(--ok)}
@@ -159,7 +160,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ptme{background:none;border:0}.ptme .car{width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #2F5DA8;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 1px 3px rgba(0,0,0,.5));transform-origin:50% 65%}.ptme .dot{position:absolute;left:7px;top:7px;width:8px;height:8px;border-radius:50%;background:#2F5DA8;border:2px solid #fff}
 .ptfull{position:fixed;inset:0;z-index:55;background:#0F1726;color:#E6ECF7;display:flex;flex-direction:column}.ptfull[hidden]{display:none}
 .ptfull .top{display:flex;gap:8px;align-items:center;padding:8px 12px 4px;padding-top:max(8px,env(safe-area-inset-top))}.ptfull .top b{font-size:16px;white-space:nowrap}
-.ptfull .top select{font:inherit;font-size:13px;background:#1A2538;color:#fff;border:1px solid #3A4A66;border-radius:8px;padding:6px 6px;max-width:34%}
+.ptfull .top select{font:inherit;font-size:13px;background:#1A2538;color:#fff;border:1px solid #3A4A66;border-radius:8px;padding:8px 6px;max-width:34%;min-height:40px}
 .ptfull .top .bar{flex:1;height:8px;background:#1A2538;border-radius:4px;overflow:hidden;min-width:40px}.ptfull .top .bar i{display:block;height:100%;background:#2E8B57;transition:width .3s}
 .ptfull .top .x{background:#C2372B;color:#fff;border:0;width:44px;height:40px;border-radius:10px;font-weight:800;font-size:15px}
 .ptfull .pthud{padding:0 12px;margin-bottom:4px}.ptfull .pthud b{font-size:18px}
@@ -171,7 +172,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ptfull .ptbtns{margin:4px 12px;gap:8px}.ptfull .ptbtns button{min-height:58px;font-size:17px}.ptfull .ptbtns button small{font-size:11px}
 .ptfull .ptlog{margin:0 12px;font-size:12px}.ptfull .ptlog div{padding:3px 0}
 .ptfull .bottom{display:flex;gap:6px;padding:8px 12px;padding-bottom:max(8px,env(safe-area-inset-bottom));align-items:center;background:#0B1120}
-.ptfull .bottom .seg{margin:0;flex:1}.ptfull .bottom .seg button{padding:8px 4px;font-size:13px}
+.ptfull .bottom .seg{margin:0;flex:1;flex-wrap:nowrap}.ptfull .bottom .seg button{padding:8px 6px;font-size:13px;min-width:52px;flex:1}
 .ptfull .tb{background:#1A2538;color:#C9D2E3;border:1px solid #2F3B52;border-radius:10px;padding:8px 10px;font:inherit;font-size:13px;font-weight:600;min-height:40px}.ptfull .tb[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
 @media(orientation:landscape) and (min-width:600px){.ptfull .body{flex-direction:row}.ptfull .view{flex:1 1 55%;padding:0 6px 0 12px;min-height:0}.ptfull .side{flex:1 1 45%}.ptfull .ptbtns{grid-template-columns:1fr 1fr}.ptfull .ptbtns button{min-height:46px;font-size:15px}.ptfull .ptlog{display:none}}
 .ptview button{background:#1A2538;color:#C9D2E3;border-color:#2F3B52}.ptview button[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
@@ -194,7 +195,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 .row .dist{font-size:12px;font-weight:700;color:var(--ink);margin-right:2px}
 .chipbar{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin:0 -16px 8px;padding-left:16px;padding-right:16px;scrollbar-width:none}
 .chipbar::-webkit-scrollbar{display:none}
-.chipbar button{flex:none;border:1px solid var(--line);background:var(--card);border-radius:99px;padding:7px 13px;font-size:13px;white-space:nowrap}
+.chipbar button{flex:none;border:1px solid var(--line);background:var(--card);border-radius:99px;padding:8px 13px;font-size:13px;white-space:nowrap;min-height:38px}
 .chipbar button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .notice.slim{padding:7px 12px;font-size:12px;display:flex;gap:8px;align-items:center}
 .notice.slim b{font-weight:700}
@@ -204,7 +205,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .btn.block{width:100%}
 .seg{display:flex;flex-wrap:wrap;gap:6px}
-.seg button{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:6px 12px;font-size:13px}
+.seg button{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:8px 13px;font-size:13px;min-height:40px}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 
 .check{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
@@ -212,7 +213,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 .check .q{flex:1}
 .check .q small{display:block;color:var(--ink-2);font-size:12px}
 .pair{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex:none}
-.pair button{border:0;background:var(--card);padding:8px 13px;font-size:13px;font-weight:600}
+.pair button{border:0;background:var(--card);padding:10px 14px;font-size:14px;font-weight:600;min-height:42px;min-width:54px}
 .pair button.g[aria-pressed="true"]{background:var(--ok);color:#fff}
 .pair button.b[aria-pressed="true"]{background:var(--bad);color:#fff}
 
@@ -247,7 +248,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 .sheet-head .x::before{content:"";width:10px;height:10px;border-left:2.5px solid currentColor;border-bottom:2.5px solid currentColor;transform:rotate(45deg);margin-left:4px}
 .sheet-foot{position:sticky;bottom:0;z-index:5;margin:12px -16px 0;padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
 .subnav{position:sticky;top:64px;z-index:5;display:flex;gap:6px;overflow-x:auto;margin:0 -16px 8px;padding:6px 16px;background:var(--bg);scrollbar-width:none}.subnav::-webkit-scrollbar{display:none}
-.subnav button{flex:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:6px 12px;font:inherit;font-size:13px;font-weight:600}
+.subnav button{flex:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:8px 13px;font:inherit;font-size:13px;font-weight:600;min-height:38px}
 @media (min-width:900px){.sheet{left:auto;width:min(760px,100%);box-shadow:-8px 0 24px rgba(10,16,30,.18)}}
 
 /* map */
@@ -636,7 +637,7 @@ function lightRow(l){
   return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>
     <span class="body">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:l.noPlate&&!l.plateFixed?`<span class="reg np">표찰없음</span>`:""}<span class="code">${esc(l.code)}</span> <span class="muted">${esc(l.dong)}${l.lampType?` · ${esc(l.lampType)}`:""}</span>
     <span class="addr" style="display:block">${esc(l.address)}</span></span>
-    <span class="meta">${S.near&&S.pos&&typeof l.lat==="number"?`<span class="dist">${fmtDist(distM(S.pos,l))}</span>`:""}<span class="chip">${esc(l.status)}</span>${l.redoNote&&l.status==="점검필요"?`<span class="due">재점검 요청</span>`:isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${l.lastInspected?fmtD(l.lastInspected):"점검 기록 없음"}</span>`}</span></button>`;
+    <span class="meta">${S.near&&S.pos&&typeof l.lat==="number"?`<span class="dist">${fmtDist(distM(S.pos,l))}</span>`:""}<span class="chip">${esc(l.status)}</span>${DRAFTS[l.id]?`<span class="due" style="color:var(--fix)">작성 중</span>`:l.redoNote&&l.status==="점검필요"?`<span class="due">재점검 요청</span>`:isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${l.lastInspected?fmtD(l.lastInspected):"점검 기록 없음"}</span>`}</span></button>`;
 }
 function filtered(){
   const q=S.q.trim().toLowerCase();
@@ -808,8 +809,14 @@ function openSheet(html){$("#sheetIn").innerHTML=`<div class="grab"></div>`+html
   if(!sheetHist){try{history.pushState({sheet:1},"");sheetHist=true}catch(e){}}}
 // the phone's back button closes the sheet instead of leaving the app
 window.addEventListener("popstate",()=>{if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}if(sheetHist){sheetHist=false;if($("#sheet").classList.contains("open"))closeSheet(true)}});
-let closeSheet=function(fromHistory){$("#sheet").classList.remove("open");$("#sheetBg").classList.remove("open");document.body.style.overflow="";draft=null;if(sheetHist&&!fromHistory){sheetHist=false;try{history.back()}catch(e){}}};
-let draft=null;
+let closeSheet=function(fromHistory){if(stashDraft())setTimeout(render,0);$("#sheet").classList.remove("open");$("#sheetBg").classList.remove("open");document.body.style.overflow="";draft=null;if(sheetHist&&!fromHistory){sheetHist=false;try{history.back()}catch(e){}}};
+let draft=null;const DRAFTS={};
+function draftDirty(d){return d&&(Object.keys(d.checks||{}).length||d.result||(d.photos&&d.photos.length)||d.memo||typeof d.tilt==="number")}
+function stashDraft(){if(!draft||!draft.lightId)return false;const m=$("#iMemo");if(m)draft.memo=m.value;const had=!!DRAFTS[draft.lightId];if(draftDirty(draft))DRAFTS[draft.lightId]=draft;else delete DRAFTS[draft.lightId];return had!==!!DRAFTS[draft.lightId]}
+function restoreDraft(id){const d=DRAFTS[id];if(!d)return false;draft=d;
+  Object.entries(d.checks||{}).forEach(([k,v])=>document.querySelectorAll(`#checks [data-ck="${k}"]`).forEach(b=>b.setAttribute("aria-pressed",b.dataset.v===v)));
+  if(d.result)document.querySelectorAll("#resSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.res===d.result));
+  const m=$("#iMemo");if(m&&d.memo)m.value=d.memo;renderPhotoStrip();toast("작성 중이던 점검 내용을 불러왔어요.");return true}
 async function openLight(id){
   const l=byId(id);if(!l)return;
   draft={lightId:id,checks:{},photo:null,photos:[],result:null};
@@ -834,7 +841,7 @@ async function openLight(id){
     <h2 id="shHist">점검 이력</h2><div id="histBox" class="muted">불러오는 중…</div>
     <h2 id="shGal">사진 이력 <span class="muted" id="galN"></span></h2><div id="galBox" class="muted">불러오는 중…</div>
     ${l.edits&&l.edits.length?`<h2 id="shEdit">정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
-  loadGallery(id);
+  restoreDraft(id);loadGallery(id);
   if(!db){$("#histBox").textContent="기록을 불러올 수 없어요.";return}
   try{
     const snap=await db.collection("inspections").where("lightId","==",id).limit(20).get();
@@ -853,7 +860,7 @@ function suggestResult(){
 async function saveInspection(){
   const l=byId(draft.lightId);if(!l)return;
   const done=Object.keys(draft.checks).length;
-  if(done<CHECKS.length){toast(`점검 항목 ${CHECKS.length-done}개가 남았어요.`);return}
+  if(done<CHECKS.length){const left=CHECKS.length-done;if(!confirm(`점검표 ${left}개 항목이 비어 있어요. 나머지를 '양호'로 기록하고 저장할까요?`))return;CHECKS.forEach(([k])=>{if(!draft.checks[k])draft.checks[k]="ok"});if(!draft.result)suggestResult()}
   if(!draft.result){toast("점검 결과를 선택해 주세요.");return}
   const btn=$("#saveInsp");btn.disabled=true;btn.textContent="저장 중…";
   const now=Date.now();
@@ -867,7 +874,7 @@ async function saveInspection(){
     const iref=await db.collection("inspections").add(rec);
     if(rec.thumbs)for(const t of rec.thumbs)try{await db.doc("photos/"+t.id).update({inspId:iref.id})}catch(e){}
     await patchLight(l.id,{status:draft.result,lastInspected:now,lastResult:draft.result,redoNote:null,updatedAt:now})},"점검 결과를 저장했어요.");
-  if(ok)closeSheet();else if(btn){btn.disabled=false;btn.textContent="점검 결과 저장"}
+  if(ok){delete DRAFTS[l.id];draft=null;closeSheet()}else if(btn){btn.disabled=false;btn.textContent="점검 결과 저장"}
 }
 
 /* ---------- events ---------- */
