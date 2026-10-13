@@ -121,7 +121,7 @@ $("#send").onclick=async()=>{
   if(!st.issue){showErr("무슨 문제인지 하나 골라 주세요.");return}
   const contact=$("#contact").value.trim();if(contact&&!$("#consent").checked){showErr("연락처를 남기려면 보관 동의에 체크해 주세요.");return}
   const useGps=$("#useGps").checked;
-  const rec={receipt:receiptNo(),code:st.code,issue:st.issue,desc:$("#desc").value.trim().slice(0,500),lat:useGps&&st.pos?st.pos.lat:null,lng:useGps&&st.pos?st.pos.lng:null,acc:useGps&&st.pos?st.pos.acc:null,photo:st.photo||null,contact:contact||null,consent:!!contact,at:Date.now(),ua:navigator.userAgent.slice(0,80)};
+  const rec={receipt:receiptNo(),code:st.code,issue:st.issue,desc:$("#desc").value.trim().slice(0,500),lat:useGps&&st.pos?st.pos.lat:null,lng:useGps&&st.pos?st.pos.lng:null,acc:useGps&&st.pos?st.pos.acc:null,photo:st.photo||null,contact:contact||null,consent:!!contact,at:Date.now(),ua:navigator.userAgent.slice(0,80),imported:false};
   const btn=$("#send");btn.disabled=true;btn.textContent="보내는 중…";
   try{
     if(C.backend==="firestore"&&C.firestore&&C.firestore.projectId){await sendFirestore(rec);finish(rec,"담당 부서에 바로 전달됐어요.")}

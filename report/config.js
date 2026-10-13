@@ -8,7 +8,7 @@ window.REPORT_CONFIG = {
   sms: "",                           // 문자 접수 번호 (예: "01000000000"). 비우면 문자 버튼이 숨겨져요
   mail: "",                          // 이메일 접수 주소. 비우면 이메일 버튼이 숨겨져요
   backend: null,                     // null | "firestore"
-  firestore: { projectId: "", apiKey: "", collection: "citizen_reports" },
+  firestore: { projectId: "", apiKey: "", collection: "citizen_reports" },   // 직원 앱의 "QR 신고 가져오기"도 이 값을 써요 (Google 로그인 필요)
   privacyDays: 90,                   // 연락처 보관 기간 안내(일)
   maxPhotoKB: 150
 };

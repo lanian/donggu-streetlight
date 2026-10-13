@@ -23,6 +23,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script>if(typeof qrcode!=="function"){document.write('<script src="vendor/qrcode.js"><\/script>')}</script>
+<script src="report/config.js"></script>
 <script>if(!window.L){document.write('<script src="vendor/leaflet.js"><\/script>')}</script>
 <style>
 /* Leaflet 1.9.4 core CSS (BSD-2), image refs removed */
@@ -754,11 +755,12 @@ function reportCard(r,admin){
   const l=r.lightId?byId(r.lightId):null;
   return `<div class="panel st-${esc(r.status)}" style="border-left:5px solid var(--c)">
     <div style="display:flex;gap:8px;align-items:center"><b>${esc(r.issue)}</b><span class="chip" style="margin-left:auto">${esc(r.status)}</span></div>
-    <div class="muted">${l?kindBadge(l.kind):""}${esc(r.dong||"")} ${esc(r.location||"")}${r.code?` · ${esc(r.code)}`:""}</div>
+    <div class="muted">${l?kindBadge(l.kind):""}${r.code?`<b>${esc(r.code)}</b> · `:""}${esc(r.dong||"")} ${esc(r.location||"")}</div>
+    ${r.via||r.receipt||r.contact?`<div class="muted">${[r.via,r.receipt,r.contact?`연락처 ${esc(r.contact)}`:""].filter(Boolean).map(esc).join(" · ")}</div>`:""}
     ${r.desc?`<div style="margin-top:6px">${esc(r.desc)}</div>`:""}
     ${r.photo?`<img class="thumb" src="${esc(r.photo)}" alt="신고 사진" loading="lazy" style="max-height:180px">`:""}
     <div class="muted" style="margin-top:6px">${fmtDT(r.createdAt)} 접수${r.updatedAt&&r.status!=="접수"?` · ${fmtDT(r.updatedAt)} ${esc(r.status)}`:""}</div>
-    ${admin&&S.canWrite?`<div class="split">${RSTAT.filter(s=>s!==r.status).map(s=>`<button class="btn ghost sm" data-rstat="${esc(r.id)}" data-to="${s}">${s}로 변경</button>`).join("")}
+    ${admin&&S.canWrite?`<div class="split">${RSTAT.filter(s=>s!==r.status).map(s=>`<button class="btn ghost sm" data-rstat="${esc(r.id)}" data-to="${s}">${s}로 변경</button>`).join("")}${l?`<button class="btn ghost sm" data-light="${esc(l.id)}">등 열기</button>`:""}${typeof r.lat==="number"?`<button class="btn ghost sm" data-rmap="${esc(r.id)}">신고 위치</button>`:""}
       ${l&&l.status!=="고장"&&l.status!=="수리중"&&r.status!=="완료"?`<button class="btn sm" data-tofault="${esc(r.id)}">${esc(l.code)} 고장 등록</button>`:""}</div>`:""}
   </div>`;
 }
@@ -967,7 +969,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.lstat&&draft){if(!need("inspect"))return;const id=draft.lightId,to=t.dataset.lstat;if(await write(()=>patchLight(id,{status:to,updatedAt:Date.now()}),`${to}(으)로 변경했어요.`))closeSheet();return}
   if(t.dataset.issue){document.querySelectorAll("#issueSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
   if(t.id==="sendReport"){sendReport(t);return}
-  if(t.dataset.rstat){if(!need("admin"))return;const to=t.dataset.to;write(()=>db.doc("reports/"+t.dataset.rstat).update({status:to,updatedAt:Date.now()}),`신고를 ${to}(으)로 변경했어요.`);return}
+  if(t.dataset.rstat){if(!need("admin"))return;const to=t.dataset.to;write(()=>db.doc("reports/"+t.dataset.rstat).update({status:to,updatedAt:Date.now(),...(to==="완료"?{contact:""}:{})}),`신고를 ${to}(으)로 변경했어요.`);return}
   if(t.dataset.tofault){const r=S.reports.find(x=>x.id===t.dataset.tofault);if(!r)return;write(async()=>{await patchLight(r.lightId,{status:"고장",updatedAt:Date.now()});if(r.status==="접수")await db.doc("reports/"+r.id).update({status:"처리중",updatedAt:Date.now()})},"가로등을 고장으로 등록했어요.");return}
   if(t.id==="addLight"){if(need("inspect"))addLight();return}
   if(t.dataset.regset){if(!need("admin"))return;const to=t.dataset.to;write(()=>patchLight(t.dataset.regset,{reg:to,regAt:Date.now(),updatedAt:Date.now()}),`'${to}'(으)로 바꿨어요.`);return}
@@ -991,6 +993,8 @@ document.addEventListener("click",async e=>{
   if(t.id==="csv8"){exportReportsCSV();return}
   if(t.id==="ibAdd"){if(need("inspect"))addInboxReport(t);return}
   if(t.id==="ibMore"){IB.show+=30;render();return}
+  if(t.dataset.rmap){const r=S.reports.find(x=>x.id===t.dataset.rmap);if(r&&typeof r.lat==="number")openMap("custom",{pts:S.lights.filter(l=>typeof l.lat==="number"&&distM(r,l)<=150).concat([{id:"rp",code:"신고 위치",status:"고장",kind:"신고",lat:r.lat,lng:r.lng,dong:"",address:r.desc||""}]),title:`신고 위치 · ${r.code||r.issue}`});return}
+  if(t.id==="ibImport"){if(need("inspect"))importCitizenReports();return}
   if(t.dataset.ibissue){document.querySelectorAll("#ibIssue button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
   if(t.dataset.qrsize){QR.size=t.dataset.qrsize;render();return}
   if(t.id==="repShare"){navigator.share({title:"가로등 점검 요약",text:repSummaryText()}).catch(()=>{});return}
@@ -1170,7 +1174,36 @@ function inboxSection(){
   </div>
   <h2 style="display:flex;align-items:center;gap:8px">신고 목록 <span class="muted">${rs.length}</span><label class="muted" style="margin-left:auto;font-weight:400;display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="ibOnly" ${IB.only?"checked":""}> 미완료만</label></h2>
   ${rs.length?`<div class="list">${rs.slice(0,IB.show).map(r=>reportCard(r,can("admin"))).join("")}${rs.length>IB.show?`<button class="btn ghost block" id="ibMore">더 보기 · ${rs.length-IB.show}건 남음</button>`:""}</div>`:`<div class="empty">${IB.only?"미완료 신고가 없어요.":"접수된 신고가 없어요."}</div>`}
-  ${dl&&S.reports.length?`<div class="split"><button class="btn ghost sm" id="csv8">신고 CSV</button></div>`:""}`;
+  <div class="split">${dl&&S.reports.length?`<button class="btn ghost sm" id="csv8">신고 CSV</button>`:""}${fsReady()?`<button class="btn ghost sm" id="ibImport" ${IB.importing?"disabled":""}>${IB.importing?"가져오는 중…":"QR 신고 가져오기"}</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${IB.importMsg||(fsReady()?"신고 페이지로 들어온 건을 서버에서 받아요 (Google 로그인)":"자동 접수(Firestore)는 report/config.js에 설정하면 켜져요")}</span></div>`;
+}
+/* ---------- stage 2: pull citizen reports from Firestore (staff Google sign-in), file them in the inbox ---------- */
+function fsReady(){const c=window.REPORT_CONFIG;return !!(c&&c.backend==="firestore"&&c.firestore&&c.firestore.projectId&&c.firestore.apiKey)}
+function loadScript(src){return new Promise((res,rej)=>{if(document.querySelector(`script[src="${src}"]`))return res();const sc=document.createElement("script");sc.src=src;sc.onload=res;sc.onerror=()=>rej(new Error("load "+src));document.head.appendChild(sc)})}
+async function fsApp(){
+  const c=window.REPORT_CONFIG.firestore;const V="10.12.2";
+  for(const m of ["app","auth","firestore"])await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-${m}-compat.js`);
+  if(!firebase.apps.length)firebase.initializeApp({apiKey:c.apiKey,authDomain:c.authDomain||`${c.projectId}.firebaseapp.com`,projectId:c.projectId});
+  if(!firebase.auth().currentUser){const prov=new firebase.auth.GoogleAuthProvider();try{await firebase.auth().signInWithPopup(prov)}catch(e){if(e&&/popup/.test(e.code||""))await firebase.auth().signInWithRedirect(prov);else throw e}}
+  return firebase.firestore();
+}
+async function importCitizenReports(){
+  if(IB.importing)return;IB.importing=true;IB.importMsg="";render();
+  const c=window.REPORT_CONFIG.firestore;let n=0,skipped=0;
+  try{
+    const fs=await fsApp();
+    const snap=await fs.collection(c.collection||"citizen_reports").where("imported","==",false).orderBy("at","desc").limit(100).get();
+    for(const d of snap.docs){const x=d.data();
+      if(S.reports.some(r=>r.ext===d.id)){skipped++;continue}
+      let l=null,code=x.code||"";if(code){const p=parseCode(code);if(p){l=lookup(p);code=l?l.code:labelText(p)}}
+      if(!l&&typeof x.lat==="number"){const G=lightGrid();const me=G.toXY({lat:x.lat,lng:x.lng});const nb=G.near(me.x,me.y,40).filter(o=>!o.it.l.removed).sort((a,b)=>a.d-b.d)[0];if(nb&&!code){l=nb.it.l}}
+      const rec={issue:x.issue||"기타",location:[x.desc?"":"",typeof x.lat==="number"?`${x.lat}, ${x.lng} (±${x.acc||"?"}m)`:""].filter(Boolean).join(" "),dong:l?l.dong:"",code,lightId:l?l.id:null,desc:(x.desc||"").slice(0,1000),via:"QR 신고 페이지",receipt:x.receipt||"",contact:x.contact||"",photo:x.photo||null,lat:x.lat??null,lng:x.lng??null,status:"접수",createdAt:x.at||Date.now(),importedAt:Date.now(),ext:d.id,reporterId:null};
+      await db.collection("reports").add(rec);
+      try{await d.ref.update({imported:true,importedAt:Date.now(),contact:firebase.firestore.FieldValue.delete(),photo:firebase.firestore.FieldValue.delete()})}catch(e){}
+      n++;
+    }
+    IB.importMsg=`${n}건 가져왔어요${skipped?` (이미 있는 ${skipped}건 건너뜀)`:""}.`;toast(IB.importMsg);
+  }catch(e){IB.importMsg=/auth/.test(e&&e.code||"")?"로그인이 취소됐거나 허용되지 않은 계정이에요.":"가져오지 못했어요: "+(e&&(e.code||e.message)||"오류");toast(IB.importMsg)}
+  IB.importing=false;render();
 }
 async function addInboxReport(btn){
   const issue=(document.querySelector("#ibIssue button[aria-pressed='true']")||{}).dataset?.ibissue||"기타";
