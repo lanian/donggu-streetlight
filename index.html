@@ -256,6 +256,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 @media print{.rep{color:#000}.rep .kpi div,.rep th,.rep td{border-color:#bbb}.rep .trend .bar i{-webkit-print-color-adjust:exact;print-color-adjust:exact}.status .bar i,.kind,.chip{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 .qrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(var(--mm) + 56mm),1fr));gap:6mm}.qrl{display:flex;gap:4mm;align-items:center;border:1px dashed var(--line);border-radius:6px;padding:4mm;background:#fff;color:#000;break-inside:avoid}.qrimg{width:var(--mm);height:var(--mm);flex:none}.qrimg svg{width:100%;height:100%;display:block}.qrt b{display:block;font-size:15px;font-variant-numeric:tabular-nums}.qrt span{font-size:10px;color:#444}
 @media print{.qrgrid{gap:4mm}.qrl{border-color:#999}}
+.psheet.ph-s{grid-template-columns:repeat(3,1fr)}.psheet.ph-l{grid-template-columns:1fr}.pair-ba{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative;padding-top:18px;break-inside:avoid}.pair-ba .pl{position:absolute;top:0;left:0;font-size:12px;font-weight:700;color:var(--ink-2)}.psheet.ph-s .pair-ba{grid-template-columns:1fr 1fr}
 .psheet{display:grid;grid-template-columns:1fr 1fr;gap:12px}.psheet figure{margin:0;page-break-inside:avoid}.psheet img{width:100%;border:1px solid #ccc;border-radius:4px}.psheet figcaption{font-size:12px;margin-top:4px}
 
 /* sheet */
@@ -1053,6 +1054,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.psheet){openPhotoSheet(t.dataset.psheet);return}
   if(t.id==="psPrint"||t.id==="repPrint"){window.print();return}
   if(t.dataset.rep){REP[t.dataset.rep]=t.dataset.v;render();return}
+  if(t.dataset.repph){REP_PH[t.dataset.repph]=t.dataset.v;render();return}
   if(t.id==="csv7"){exportReportCSV();return}
   if(t.id==="bkExport"){if(need("admin"))backupExport();return}
   if(t.id==="bkImport"){if(need("admin"))backupImport();return}
@@ -1383,9 +1385,9 @@ function reportSection(){
   const controls=`<div class="panel noprint" style="margin-bottom:12px">
     ${seg("period",[["month","이번 달"],["last","지난 달"],["7","최근 7일"],["30","최근 30일"],["custom","직접"]],REP.period)}
     ${REP.period==="custom"?`<div class="grid2" style="margin-top:8px"><input class="f-in" type="date" id="repFrom" value="${esc(REP.from)}"><input class="f-in" type="date" id="repTo" value="${esc(REP.to)}"></div>`:""}
-    <div class="grid2" style="margin-top:8px"><select class="f-in" id="repDong">${dongOptions(REP.dong)}</select><label class="muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="repPhotos" ${REP.photos?"checked":""}> 고장 사진 부록</label></div>
+    <div class="grid2" style="margin-top:8px"><select class="f-in" id="repDong">${dongOptions(REP.dong)}</select><label class="muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="repPhotos" ${REP.photos?"checked":""}> 사진 부록</label></div>
     <div class="split"><button class="btn sm" id="repPrint">인쇄 / PDF 저장</button>${dl?`<button class="btn ghost sm" id="csv7">표 CSV</button>`:""}${navigator.share?`<button class="btn ghost sm" id="repShare">요약 공유</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${REP.loading?"기록 불러오는 중…":REP.data?`최근 ${REP.data.insp.length}건 기준`:REP.err||""}</span></div></div>`;
-  const photoAppendix=REP.photos?(()=>{const ph=found.flatMap(i=>(i.thumbs||[]).map(t=>({...t,code:i.code,date:i.date,result:i.result}))).slice(0,40);return ph.length?`<h3>부록 · 고장·점검필요 사진 <span class="muted">${ph.length}장</span></h3><div class="pgrid">${ph.map(t=>`<button type="button" data-pview="${esc(t.id)}"><img src="${esc(t.t)}" alt="${esc(t.label||"")}" loading="lazy"><div class="lab">${esc(t.code)} · ${esc(t.label||"")} · ${fmtD(t.date)}</div></button>`).join("")}</div>`:`<h3>부록 · 사진</h3><p class="muted">기간 내 고장·점검필요 건에 사진이 없어요.</p>`})():"";
+  const photoAppendix=REP.photos?repPhotoAppendix(ins):"";
   return controls+`<div class="rep" id="repBody">
     <div class="cover"><h2>${esc(title)}</h2><div class="muted">기간 ${periodTxt} · 작성 ${fmtDT(Date.now())} · ${esc(S.names[S.me]||"담당자")}</div></div>
     <div class="kpi"><div><b>${lights.length.toLocaleString()}</b><span>대상 등</span></div><div><b>${ins.length}</b><span>점검 건수</span></div><div><b>${open.length}</b><span>현재 조치 필요</span></div>
@@ -1404,6 +1406,22 @@ function reportSection(){
     ${photoAppendix}
     <p class="muted" style="margin-top:16px;font-size:11px">${REP.data?`점검 기록은 최근 ${REP.data.insp.length}건을 기준으로 집계했어요.`:""} 밝기·조명 범위는 모델 추정이며 실측값이 아니에요.</p>
   </div>`;
+}
+/* photo appendix: full-size photos of the period's inspections, before/after pairs side by side, loaded on demand */
+const REP_PH={want:[],docs:{},loading:false,scope:"bad",size:"m"};
+function repPhotoAppendix(ins){
+  const src=(REP_PH.scope==="all"?ins:ins.filter(i=>i.result!=="정상")).filter(i=>i.thumbs&&i.thumbs.length);
+  const items=src.flatMap(i=>i.thumbs.map(t=>({id:t.id,label:t.label||"",code:i.code,lightId:i.lightId,date:i.date,result:i.result,by:i.inspector,t:t.t}))).slice(0,REP_PH.size==="l"?24:48);
+  const missing=items.filter(x=>!REP_PH.docs[x.id]).map(x=>x.id);
+  if(missing.length&&!REP_PH.loading){REP_PH.loading=true;(async()=>{for(const id of missing){const d=await getPhoto(id);REP_PH.docs[id]=d||{missing:true}}REP_PH.loading=false;render()})()}
+  const ctl=`<div class="split noprint" style="margin:0 0 8px"><div class="seg">${[["bad","이상 건만"],["all","기간 내 전부"]].map(([v,t])=>`<button type="button" data-repph="scope" data-v="${v}" aria-pressed="${REP_PH.scope===v}">${t}</button>`).join("")}</div><div class="seg">${[["s","작게"],["m","보통"],["l","크게"]].map(([v,t])=>`<button type="button" data-repph="size" data-v="${v}" aria-pressed="${REP_PH.size===v}">${t}</button>`).join("")}</div>${REP_PH.loading?`<span class="muted" style="align-self:center;font-size:12px">원본 사진 불러오는 중…</span>`:""}</div>`;
+  if(!items.length)return `<h3>부록 · 사진</h3>${ctl}<p class="muted">${REP_PH.scope==="bad"?"기간 내 이상 건에 사진이 없어요.":"기간 내 점검에 사진이 없어요."}</p>`;
+  // group by light: 조치 전·후가 같이 있으면 나란히
+  const byLight={};items.forEach(x=>{(byLight[x.lightId||x.code]=byLight[x.lightId||x.code]||[]).push(x)});
+  const fig=x=>{const d=REP_PH.docs[x.id];const src=d&&d.data?d.data:x.t;return `<figure><img src="${esc(src)}" alt="${esc(x.label)}" loading="lazy"><figcaption><b>${esc(x.code)}</b> · ${esc(x.label)}${x.result!=="정상"?` · <span class="chip st-${esc(x.result)}" style="font-size:11px;padding:0 6px">${esc(x.result)}</span>`:""}<br>${fmtDT(x.date)} · ${esc(S.names[x.by]||"점검자")}${d&&d.note?` · ${esc(d.note)}`:""}</figcaption></figure>`};
+  const blocks=Object.values(byLight).map(arr=>{const b=arr.find(x=>x.label==="조치 전"),a=arr.find(x=>x.label==="조치 후");const rest=arr.filter(x=>x!==b&&x!==a);
+    return (b&&a?`<div class="pair-ba"><div class="pl">조치 전 · 후</div>${fig(b)}${fig(a)}</div>`:"")+rest.map(fig).join("")+(b&&!a?fig(b):"")+(a&&!b?fig(a):"")}).join("");
+  return `<h3>부록 · 사진 <span class="muted">${items.length}장</span></h3>${ctl}<div class="psheet ph-${REP_PH.size}">${blocks}</div>`;
 }
 function repSummaryText(){const {a,b}=repRange();const ins=(REP.data?REP.data.insp:S.insp).filter(i=>i.date>=a&&i.date<=b);const open=S.lights.filter(l=>!l.removed&&l.status!=="정상"&&inDong(l,REP.dong));
   return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${fmtD(a)}~${fmtD(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${S.patrols.filter(p=>p.start>=a&&p.start<=b).length}회`}
