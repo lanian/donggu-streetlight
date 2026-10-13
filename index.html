@@ -95,6 +95,11 @@ h3{font-size:15px;margin:0 0 6px}
 .tools input{flex:1 1 150px}
 .tools select{flex:0 1 auto;max-width:40%}
 .tools .btn.sm{white-space:nowrap;flex:none}
+.iconbtn{flex:none;width:44px;height:44px;border-radius:var(--r-ctl);border:1px solid var(--line);background:var(--card);display:flex;align-items:center;justify-content:center;position:relative;padding:0;color:var(--ink)}.iconbtn svg{width:20px;height:20px}
+.iconbtn[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}.iconbtn .secnum{position:absolute;top:-6px;right:-6px;margin:0;background:var(--sodium);color:#1B1300}
+.filterbox{margin:0 0 10px;padding:10px 12px}.frow{display:flex;gap:10px;align-items:center;padding:6px 0}.frow .fl{flex:none;width:34px;font-size:12px;color:var(--ink-2);font-weight:600}.frow .f-in{flex:1;padding:8px 10px}
+.frow .chips{display:flex;gap:6px;flex-wrap:wrap}.frow .chips button{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:6px 11px;font-size:13px}.frow .chips button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chipbar.active{margin-top:-2px}
 
 .list{display:flex;flex-direction:column;gap:8px}
 .row{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:var(--r-panel);padding:10px 12px 10px 10px;text-align:left;width:100%}
@@ -646,7 +651,7 @@ function nearToggle(){
   else if(S.posWatch!=null){navigator.geolocation.clearWatch(S.posWatch);S.posWatch=null}
   render();
 }
-const ICONS={car:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17H3v-5l2-5h14l2 5v5h-2"/><path d="M5 12h14"/><circle cx="7.5" cy="17" r="2"/><circle cx="16.5" cy="17" r="2"/></svg>',scan:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="4" height="4"/><rect x="13" y="7" width="4" height="4"/><rect x="7" y="13" width="4" height="4"/><path d="M13 13h4v4"/></svg>',
+const ICONS={pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-7.1 7-12a7 7 0 0 0-14 0c0 4.9 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg>',filter:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18M6 12h12M10 19h4"/></svg>',car:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17H3v-5l2-5h14l2 5v5h-2"/><path d="M5 12h14"/><circle cx="7.5" cy="17" r="2"/><circle cx="16.5" cy="17" r="2"/></svg>',scan:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="4" height="4"/><rect x="13" y="7" width="4" height="4"/><rect x="7" y="13" width="4" height="4"/><path d="M13 13h4v4"/></svg>',
   near:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>',
   map:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg>'};
 function vInspect(){
@@ -661,13 +666,16 @@ function vInspect(){
     <button id="arBtn">${ICONS.near}<span>주변 찾기<small>카메라 방향 안내</small></span></button>
     <button id="mapBtn" data-mapscope="filtered">${ICONS.map}<span>지도<small>현재 목록</small></span></button>
   </div>
-  <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색" enterkeyhint="search">
-  <select id="dong" aria-label="법정동">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===S.dong?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select></div>
-  <div class="chipbar" id="kindFilter">
-    <button type="button" id="nearSort" aria-pressed="${S.near}">${S.near?"📍 내 주변 순":"📍 내 주변 순"}</button>
-    <button type="button" id="openOnly" aria-pressed="${S.stat==="고장"||S.stat==="점검필요"||S.stat==="수리중"}">조치 필요만${open?` <span class="muted" style="font-size:11px">${open}</span>`:""}</button>
-    ${["전체",...KINDS].map(k=>{const c=k==="전체"?null:kindCounts(S.lights)[k];if(k!=="전체"&&!c)return"";return `<button type="button" data-kind="${k}" aria-pressed="${k===S.kind}">${k==="전체"?"모든 종류":`<i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${KIND_COL[k]};margin-right:5px"></i>${k}`}</button>`}).join("")}
-  </div>
+  ${(()=>{const act=[S.dong!=="전체"?["dong",S.dong]:null,S.kind!=="전체"?["kind",S.kind]:null,S.stat?["stat",S.stat==="__open"?"조치 필요":S.stat]:null].filter(Boolean);const kc=kindCounts(S.lights);
+  return `<div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색" enterkeyhint="search">
+    <button type="button" class="iconbtn" id="nearSort" aria-pressed="${S.near}" title="내 주변 순으로">${ICONS.pin}</button>
+    <button type="button" class="iconbtn" id="filterBtn" aria-pressed="${!!S.filterOpen}" title="필터">${ICONS.filter}${act.length?`<span class="secnum">${act.length}</span>`:""}</button></div>
+  ${S.filterOpen?`<div class="panel filterbox" id="kindFilter">
+    <div class="frow"><span class="fl">동</span><select class="f-in" id="dong" aria-label="법정동">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===S.dong?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select></div>
+    <div class="frow"><span class="fl">종류</span><div class="chips">${["전체",...KINDS].map(k=>{if(k!=="전체"&&!kc[k])return"";return `<button type="button" data-kind="${k}" aria-pressed="${k===S.kind}">${k==="전체"?"모두":`<i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${KIND_COL[k]};margin-right:5px"></i>${k}`}</button>`}).join("")}</div></div>
+    <div class="frow"><span class="fl">상태</span><div class="chips"><button type="button" id="openOnly" aria-pressed="${S.stat==="__open"}">조치 필요만${open?` <span class="muted" style="font-size:11px">${open}</span>`:""}</button>${LSTAT.map(st=>`<button type="button" data-stat="${st}" aria-pressed="${S.stat===st}">${st}</button>`).join("")}</div></div>
+    <div class="split" style="margin-top:8px"><button type="button" class="btn ghost sm" id="filterReset">모두 지우기</button><button type="button" class="btn sm" id="filterDone" style="margin-left:auto">닫기</button></div></div>`
+  :act.length?`<div class="chipbar active"><span class="muted" style="align-self:center;font-size:12px">필터</span>${act.map(([k,v])=>`<button type="button" data-fclear="${k}" aria-pressed="true">${esc(v)} ×</button>`).join("")}</div>`:""}`})()}
   <h2 style="margin-top:6px">${S.near&&S.pos?"가까운 순":S.q.trim()?"검색 결과":"점검할 등"} <span class="muted">${list.length.toLocaleString()}</span>${S.near&&!S.pos?`<span class="muted" style="font-weight:400;font-size:13px"> · 위치 잡는 중…</span>`:""}</h2>
   ${S.near||S.q.trim()||due===0?"":`<p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${DUE_DAYS}일) 경과 ${due}개.</p>`}
   <div class="list">${list.length?list.slice(0,S.limit).map(lightRow).join("")+(list.length>S.limit?`<button class="btn ghost block" id="moreList">더 보기 · ${list.length-S.limit}개 남음</button>`:""):`<div class="empty">${S.lights.length?`조건에 맞는 가로등이 없어요.<div class="muted" style="margin-top:4px">${[S.dong!=="전체"?`동: ${esc(S.dong)}`:"",S.kind!=="전체"?`종류: ${esc(S.kind)}`:"",S.stat?`상태: ${S.stat==="__open"?"조치 필요":esc(S.stat)}`:"",S.q.trim()?`검색: ${esc(S.q)}`:""].filter(Boolean).join(" · ")}</div><div class="split" style="justify-content:center"><button class="btn ghost sm" id="clearFilters">필터 모두 해제</button></div>`:(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}</div>`;
@@ -872,6 +880,10 @@ document.addEventListener("click",async e=>{
   if(t.id==="moreList"){S.limit+=100;render();return}
   if(t.id==="clearFilters"){S.stat=null;S.dong="전체";S.kind="전체";S.q="";S.limit=60;render();return}
   if(t.id==="nearSort"){nearToggle();return}
+  if(t.id==="filterBtn"){S.filterOpen=!S.filterOpen;render();return}
+  if(t.id==="filterDone"){S.filterOpen=false;render();return}
+  if(t.id==="filterReset"){S.dong="전체";S.kind="전체";S.stat=null;S.limit=60;render();return}
+  if(t.dataset.fclear){const k=t.dataset.fclear;if(k==="dong")S.dong="전체";else if(k==="kind")S.kind="전체";else S.stat=null;S.limit=60;render();return}
   if(t.id==="rvRun"){const dong=$("#rvDong").value,kind=$("#rvKind").value;const mode=S.rvMode||(ROADS?"roads":"pairs");t.disabled=true;t.textContent="계산 중…";setTimeout(()=>{const cands=mode==="roads"&&ROADS?roadReview(dong,kind):lightReview(dong,kind);S.review={mode:mode==="roads"&&ROADS?"roads":"pairs",dong,kind,cands,show:20,n:S.lights.filter(l=>(dong==="전체"||l.dong===dong)&&(kind==="전체"||l.kind===kind)).length};render();const el=document.getElementById("sec-light");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64})},30);return}
   if(t.dataset.rvmode){S.rvMode=t.dataset.rvmode;render();return}
   if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");if(t.dataset.refetch){ROADS=null;idbSet("roads",null)}roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
@@ -2188,7 +2200,7 @@ async function openScanner(ctx){
       <div class="split"><button class="btn ghost sm" data-pick="scanPhotoLib">다른 사진 고르기</button><button class="btn ghost sm" data-pick="scanPhoto">다시 찍기</button><button class="btn ghost sm" id="camBack">카메라로 돌아가기</button></div></div>
     <div id="photoPick"><label class="f">또는 표찰 사진으로 읽기 <span class="muted" style="font-weight:400">(찍거나 앨범에서 골라요)</span></label>
     <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="scanPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="scanPhotoLib">앨범에서 선택</button><input type="file" id="scanPhoto" accept="image/*" capture="environment" hidden><input type="file" id="scanPhotoLib" accept="image/*" hidden><img id="scanPrev" alt="" hidden style="display:none"></div></div>
-    <p class="muted" id="scanNote">${window.claude&&window.claude.use?"사진 인식은 AI가 표찰 글자를 읽어요. 처음 한 번 동의가 필요하고, 읽은 결과는 저장 전에 확인할 수 있어요.":"체험 모드에서는 휴대폰 안에서 글자를 읽어요(기기 OCR). 처음 한 번 한글 인식 데이터를 내려받고, 정확도가 낮을 수 있으니 번호를 확인하세요."}</p>
+    <p class="muted" id="scanNote">${window.claude&&window.claude.use?"사진을 올리면 표찰 글자를 읽어요. 읽은 번호는 저장 전에 확인할 수 있어요.":"체험 모드는 휴대폰 안에서 글자를 읽어요. 처음엔 인식 데이터를 받느라 잠깐 걸리고, 읽은 번호는 저장 전에 확인하세요."}</p>
     <div id="scanResult"></div>`);
   if(!sampleNs&&window.claude&&window.claude.use){claude.use("sample").then(async s=>{sampleNs=s;try{const lim=s&&await s.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}const n=$("#scanNote");if(n&&!scan.sampleImg)n.textContent="이 화면에서는 사진 인식을 쓸 수 없어요. QR 스캔이나 직접 입력을 이용하세요."})}
   scanLocate();startCam();
