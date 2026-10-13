@@ -1,0 +1,16 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 주민 신고: 누구나 "새로 만들기"만, 읽기·수정·삭제는 직원 계정만
+    match /citizen_reports/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['code','issue','desc','lat','lng','acc','photo','contact','consent','at','ua','receipt'])
+        && request.resource.data.issue is string && request.resource.data.issue.size() <= 40
+        && request.resource.data.desc is string && request.resource.data.desc.size() <= 500
+        && (!('code' in request.resource.data) || request.resource.data.code.size() <= 40)
+        && (!('photo' in request.resource.data) || request.resource.data.photo.size() <= 220000)
+        && (!('contact' in request.resource.data) || request.resource.data.contact.size() <= 40)
+        && request.resource.data.at is int;
+      allow read, update, delete: if request.auth != null && request.auth.token.email.matches('.*@donggu[.]kr$'); // 직원 도메인으로 바꾸세요
+    }
+  }
+}

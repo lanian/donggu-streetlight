@@ -21,6 +21,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <script>if(!window.jsQR){document.write('<script src="vendor/jsQR.js"><\/script>')}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>if(typeof qrcode!=="function"){document.write('<script src="vendor/qrcode.js"><\/script>')}</script>
 <script>if(!window.L){document.write('<script src="vendor/leaflet.js"><\/script>')}</script>
 <style>
 /* Leaflet 1.9.4 core CSS (BSD-2), image refs removed */
@@ -249,6 +251,8 @@ textarea.f-in{min-height:84px;resize:vertical}
 .rep .trend{display:flex;gap:8px;align-items:flex-end;height:120px;padding:4px 0 0}.rep .trend .m{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end}.rep .trend .bar{width:100%;max-width:44px;display:flex;flex-direction:column-reverse;gap:2px}.rep .trend .bar i{display:block;border-radius:2px}.rep .trend .bar i:last-child{border-radius:4px 4px 2px 2px}.rep .trend small{font-size:11px;color:var(--ink-2);white-space:nowrap}.rep .trend b{font-size:12px}
 .rep .pgrid img{aspect-ratio:4/3}
 @media print{.rep{color:#000}.rep .kpi div,.rep th,.rep td{border-color:#bbb}.rep .trend .bar i{-webkit-print-color-adjust:exact;print-color-adjust:exact}.status .bar i,.kind,.chip{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.qrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(var(--mm) + 56mm),1fr));gap:6mm}.qrl{display:flex;gap:4mm;align-items:center;border:1px dashed var(--line);border-radius:6px;padding:4mm;background:#fff;color:#000;break-inside:avoid}.qrimg{width:var(--mm);height:var(--mm);flex:none}.qrimg svg{width:100%;height:100%;display:block}.qrt b{display:block;font-size:15px;font-variant-numeric:tabular-nums}.qrt span{font-size:10px;color:#444}
+@media print{.qrgrid{gap:4mm}.qrl{border-color:#999}}
 .psheet{display:grid;grid-template-columns:1fr 1fr;gap:12px}.psheet figure{margin:0;page-break-inside:avoid}.psheet img{width:100%;border:1px solid #ccc;border-radius:4px}.psheet figcaption{font-size:12px;margin-top:4px}
 
 /* sheet */
@@ -466,7 +470,9 @@ const CHECKS=[
   ["tree","주변 간섭","수목, 간판, 시야 가림"]
 ];
 const DUE_DAYS=90;
-const FEATURES={reports:false}; // 주민 신고: 유지관리 부담으로 보류 (true로 바꾸면 탭·관리 섹션이 다시 켜짐)
+const FEATURES={reports:false}; // 주민용 탭은 끔: 주민 신고는 별도 페이지(report/)로 분리
+const REPORT_URL="https://lanian.github.io/donggu-streetlight/report/"; // 표찰 QR이 여는 주민 신고 페이지
+const INBOX_VIA=["전화","문자","이메일","방문","QR 신고 페이지","기타"]; // 주민 신고: 유지관리 부담으로 보류 (true로 바꾸면 탭·관리 섹션이 다시 켜짐)
 
 const S={lights:[],insp:[],reports:[],patrols:[],roles:[],demoRole:null,tab:"inspect",q:"",dong:"전체",stat:null,kind:"전체",limit:60,near:false,pos:null,posWatch:null,me:null,canWrite:true,live:false,names:{}};
 let db=null,user=null,dl=null;
@@ -793,6 +799,8 @@ const ADMIN_SECTIONS={
   patrol:{t:"야간 순찰 기록",d:"순찰 범위·경로·일지",n:()=>S.patrols.length||null,write:true,body:()=>patrolSection()},
   edit:{t:"정보 수정된 등",d:"변경 내역·CSV",n:()=>editedList().length||null,write:true,body:()=>editedSection()},
   report:{t:"보고서",d:"기간별 점검 보고서 · 인쇄/PDF",n:null,body:()=>reportSection()},
+  inbox:{t:"신고함",d:"전화·문자·QR로 들어온 신고",n:()=>S.reports.filter(r=>r.status!=="완료").length||null,write:true,body:()=>inboxSection()},
+  qr:{t:"QR 라벨",d:"표찰용 신고 QR 인쇄",n:null,admin:true,body:()=>qrSection()},
   roles:{t:"사용자·권한",d:"관리자·점검자 지정",n:()=>S.roles.length||null,admin:true,body:()=>roleSection()}
 };
 function adminKeys(){return Object.keys(ADMIN_SECTIONS).filter(k=>{const x=ADMIN_SECTIONS[k];if(x.admin&&!can("admin"))return false;if(x.write&&!S.canWrite)return false;return true})}
@@ -863,6 +871,7 @@ async function openLight(id){
     ${can("admin")?`<button class="btn ghost sm hact" data-ledit="${esc(l.id)}">정보 수정</button>`:""}<button class="x" aria-label="닫기" data-close>×</button></div>
     ${(()=>{const li=lightInfo(l);if(!li)return"";return `<div class="muted" style="margin:2px 0 6px">💡 예상 조명 반경 ${li.reach}m${li.on===0?" · 현재 꺼짐":li.on<1?" · 점검필요로 감쇠":""}${li.n1?` · 가장 가까운 등 ${esc(li.n1.code)} ${li.n1.d}m`:""}${li.gapNow?` · <span style="color:var(--warn)">이웃 등과 간격이 넓어요</span>`:""}${li.riskIfOut?` · <span style="color:var(--bad)">꺼지면 ${li.riskIfOut}개 구간이 어두워져요</span>`:""}</div>`})()}
     ${l.redoNote&&l.status==="점검필요"?`<div class="notice slim"><b>재점검 요청</b> ${esc(l.redoNote)}</div>`:""}
+    ${(()=>{const rs=S.reports.filter(r=>r.lightId===l.id&&r.status!=="완료");return rs.length?`<div class="notice slim"><b>신고 ${rs.length}건</b> ${esc(rs[0].issue)}${rs[0].desc?` · ${esc(rs[0].desc.slice(0,40))}`:""} <span class="muted">${fmtD(rs[0].createdAt)}</span><button class="btn ghost sm" data-asec="inbox" style="margin-left:auto">신고함</button></div>`:""})()}
     ${l.removed?`<div class="muted" style="margin:2px 0 6px;color:var(--bad)">철거된 등으로 기록돼 있어요${l.removedAt?` (${fmtD(l.removedAt)})`:""}.</div>`:""}${l.note?`<div class="muted" style="margin:2px 0 6px">📝 ${esc(l.note)}</div>`:""}
     ${S.canWrite?`<div class="split" style="margin:6px 0 4px;align-items:center"><span class="muted">상태 바꾸기</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}</div>`:""}
     <div class="subnav" id="lightNav"><button type="button" data-sjump="shCheck">점검표</button><button type="button" data-sjump="shRes">결과·사진</button><button type="button" data-sjump="shHist">이력</button><button type="button" data-sjump="shGal">사진 이력</button><button type="button" data-dossier="${esc(l.id)}" style="margin-left:auto;border-style:dashed">이력서 인쇄</button>${l.edits&&l.edits.length?`<button type="button" data-sjump="shEdit">변경 이력</button>`:""}</div>
@@ -979,6 +988,11 @@ document.addEventListener("click",async e=>{
   if(t.id==="psPrint"||t.id==="repPrint"){window.print();return}
   if(t.dataset.rep){REP[t.dataset.rep]=t.dataset.v;render();return}
   if(t.id==="csv7"){exportReportCSV();return}
+  if(t.id==="csv8"){exportReportsCSV();return}
+  if(t.id==="ibAdd"){if(need("inspect"))addInboxReport(t);return}
+  if(t.id==="ibMore"){IB.show+=30;render();return}
+  if(t.dataset.ibissue){document.querySelectorAll("#ibIssue button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
+  if(t.dataset.qrsize){QR.size=t.dataset.qrsize;render();return}
   if(t.id==="repShare"){navigator.share({title:"가로등 점검 요약",text:repSummaryText()}).catch(()=>{});return}
   if(t.dataset.dossier){openLightDossier(t.dataset.dossier);return}
   if(t.dataset.ledit){if(need("admin"))openLightEdit(t.dataset.ledit);return}
@@ -1041,9 +1055,12 @@ document.addEventListener("click",async e=>{
 });
 $("#sheetBg").addEventListener("click",()=>closeSheet());
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classList.contains("open"))closeSheet()});
-document.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;S.limit=60;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
+document.addEventListener("input",e=>{if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
 document.addEventListener("change",async e=>{
   if(e.target.id==="rvNoLight"){S.rvNoLight=e.target.checked;render();return}
+  if(e.target.id==="ibOnly"){IB.only=e.target.checked;render();return}
+  if(e.target.id==="qrDong"){QR.dong=e.target.value;render();return}
+  if(e.target.id==="qrKind"){QR.kind=e.target.value;render();return}
   if(e.target.id==="repDong"){REP.dong=e.target.value;render();return}
   if(e.target.id==="repPhotos"){REP.photos=e.target.checked;render();return}
   if(e.target.id==="repFrom"||e.target.id==="repTo"){REP[e.target.id==="repFrom"?"from":"to"]=e.target.value;render();return}
@@ -1137,6 +1154,55 @@ async function regLink(id){
 const IR={period:7,result:"전체",who:"전체",only:false,show:30,more:null,loading:false};
 function inspList(){const base=IR.more||S.insp;const cut=IR.period?Date.now()-IR.period*86400000:0;return base.filter(i=>(!cut||i.date>=cut)&&(IR.result==="전체"||i.result===IR.result)&&(IR.who==="전체"||i.inspector===IR.who)&&(!IR.only||!i.reviewedAt))}
 async function inspLoadMore(){if(IR.loading||!db)return;IR.loading=true;try{const snap=await db.collection("inspections").orderBy("date","desc").limit(400).get();IR.more=snap.docs.map(d=>({id:d.id,...d.data()}))}catch(e){}IR.loading=false;render();resolveNames()}
+/* ---------- citizen reports come in by phone, SMS, e-mail or the public QR page; staff log them here ---------- */
+const IB={show:30,only:true};
+function inboxSection(){
+  const rs=S.reports.filter(r=>!IB.only||r.status!=="완료");
+  return `<details class="help"><summary>신고 접수는</summary><p>주민은 표찰의 QR로 여는 신고 페이지(앱과 분리)나 전화·문자로 신고해요. 여기서는 담당자가 받은 신고를 기록하고 처리 상태(접수→처리중→완료)를 관리해요. 접수 시 등 번호를 넣으면 그 등과 연결되고, 등 상세에서도 보여요.</p></details>
+  <div class="panel">
+    <div class="grid2"><div><label class="f" for="ibVia">접수 경로</label><select class="f-in" id="ibVia">${INBOX_VIA.map(v=>`<option>${v}</option>`).join("")}</select></div><div><label class="f" for="ibRc">접수번호 (QR 신고면)</label><input class="f-in" id="ibRc" placeholder="R251013-AB12"></div></div>
+    <label class="f" for="ibNum">등 번호 <span class="muted">(표찰 번호, 모르면 비움)</span></label><div class="row" style="display:flex;gap:8px"><input class="f-in" id="ibNum" placeholder="산수동 642 / 지호로 65-5" autocomplete="off"><button type="button" class="btn ghost sm" data-scan="inbox" style="flex:none">스캔</button></div>
+    <label class="f">문제 유형</label><div class="seg" id="ibIssue">${ISSUES.map((i,k)=>`<button type="button" data-ibissue="${esc(i)}" aria-pressed="${k===0}">${i}</button>`).join("")}</div>
+    <label class="f" for="ibLoc">위치 설명</label><input class="f-in" id="ibLoc" placeholder="예: ○○마트 앞 두 번째 기둥">
+    <label class="f" for="ibDesc">내용</label><textarea class="f-in" id="ibDesc" placeholder="신고자가 말한 내용"></textarea>
+    <label class="f" for="ibContact">신고자 연락처 <span class="muted">(선택 · 처리 후 지움)</span></label><input class="f-in" id="ibContact" inputmode="tel" placeholder="010-">
+    <div class="split"><button class="btn sodium" id="ibAdd">신고 접수</button></div>
+  </div>
+  <h2 style="display:flex;align-items:center;gap:8px">신고 목록 <span class="muted">${rs.length}</span><label class="muted" style="margin-left:auto;font-weight:400;display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="ibOnly" ${IB.only?"checked":""}> 미완료만</label></h2>
+  ${rs.length?`<div class="list">${rs.slice(0,IB.show).map(r=>reportCard(r,can("admin"))).join("")}${rs.length>IB.show?`<button class="btn ghost block" id="ibMore">더 보기 · ${rs.length-IB.show}건 남음</button>`:""}</div>`:`<div class="empty">${IB.only?"미완료 신고가 없어요.":"접수된 신고가 없어요."}</div>`}
+  ${dl&&S.reports.length?`<div class="split"><button class="btn ghost sm" id="csv8">신고 CSV</button></div>`:""}`;
+}
+async function addInboxReport(btn){
+  const issue=(document.querySelector("#ibIssue button[aria-pressed='true']")||{}).dataset?.ibissue||"기타";
+  const num=$("#ibNum").value.trim();let l=null,code="";if(num){const p=parseCode(num);if(p){l=lookup(p);code=l?l.code:labelText(p)}else code=num}
+  const loc=$("#ibLoc").value.trim(),desc=$("#ibDesc").value.trim();
+  if(!code&&!loc){toast("등 번호나 위치 설명 중 하나는 적어 주세요.");return}
+  const rec={issue,location:loc.slice(0,200),dong:l?l.dong:"",code,lightId:l?l.id:null,desc:desc.slice(0,1000),via:$("#ibVia").value,receipt:$("#ibRc").value.trim().slice(0,20),contact:$("#ibContact").value.trim().slice(0,40),status:"접수",createdAt:Date.now(),reporterId:S.me||null};
+  btn.disabled=true;btn.textContent="접수 중…";
+  const ok=await write(()=>db.collection("reports").add(rec),`신고를 접수했어요${l?` (${l.code}에 연결)`:""}.`);
+  if(ok)render();else{btn.disabled=false;btn.textContent="신고 접수"}
+}
+async function exportReportsCSV(){
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
+  const rows=[["접수일시","상태","경로","접수번호","등 번호","동","위치","유형","내용","연락처","처리일시"],...S.reports.map(r=>[fmtDT(r.createdAt),r.status,r.via||"",r.receipt||"",r.code||"",r.dong||"",r.location||"",r.issue,r.desc||"",r.contact||"",r.status!=="접수"?fmtDT(r.updatedAt):""])];
+  const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
+  try{await dl.save({filename:`동구가로등_신고_${fmtD(Date.now()).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
+}
+/* ---------- QR labels: one QR per plate, pointing at the public report page with the plate number ---------- */
+const QR={dong:"전체",kind:"전체",q:"",size:"m"};
+function qrUrl(l){return `${REPORT_URL}?c=${encodeURIComponent(l.code)}`}
+function qrSvg(text,px){try{const q=qrcode(0,"M");q.addData(text);q.make();return q.createSvgTag({cellSize:Math.max(1,Math.floor(px/q.getModuleCount())),margin:0,scalable:true})}catch(e){return ""}}
+function qrSection(){
+  if(typeof qrcode!=="function")return `<div class="empty">QR 생성 라이브러리를 불러오지 못했어요. 네트워크를 확인하고 다시 열어 주세요.</div>`;
+  const ls=S.lights.filter(l=>!l.removed&&!l.noPlate&&l.code&&(QR.dong==="전체"||l.dong===QR.dong)&&(QR.kind==="전체"||l.kind===QR.kind)&&(!QR.q||l.code.replace(/\s+/g,"").toLowerCase().includes(QR.q.replace(/\s+/g,"").toLowerCase())));
+  const show=ls.slice(0,120);const mm=QR.size==="s"?22:QR.size==="l"?38:30;
+  return `<details class="help"><summary>어떻게 쓰나요</summary><p>표찰마다 QR을 인쇄해 붙이면, 주민이 휴대폰으로 찍었을 때 등 번호가 채워진 신고 페이지가 열려요(직원 앱과 분리). 점검자가 앱의 표찰 스캔으로 찍으면 그 등이 바로 열려요. 라벨은 인쇄 → PDF 저장 후 라벨지에 출력하세요. 한 번에 120장까지 보여요.</p><p>QR 주소: <code>${esc(REPORT_URL)}?c=표찰번호</code></p></details>
+  <div class="panel noprint" style="margin-bottom:10px">
+    <div class="grid2"><select class="f-in" id="qrDong">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===QR.dong?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select><select class="f-in" id="qrKind">${["전체",...KINDS].map(k=>`<option value="${k}" ${k===QR.kind?"selected":""}>${k==="전체"?"모든 종류":k}</option>`).join("")}</select></div>
+    <div class="grid2" style="margin-top:8px"><input class="f-in" id="qrQ" placeholder="번호 검색 (예: 지호로 65)" value="${esc(QR.q)}"><div class="seg">${[["s","작게"],["m","보통"],["l","크게"]].map(([v,t])=>`<button type="button" data-qrsize="${v}" aria-pressed="${QR.size===v}">${t}</button>`).join("")}</div></div>
+    <div class="split"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button><span class="muted" style="align-self:center">${ls.length.toLocaleString()}개 중 ${show.length}개 표시</span></div></div>
+  <div class="qrgrid" style="--mm:${mm}mm">${show.map(l=>`<div class="qrl"><div class="qrimg">${qrSvg(qrUrl(l),200)}</div><div class="qrt"><b>${esc(l.code)}</b><span>${esc(l.kind)} · 고장 신고는 QR을 찍어 주세요</span></div></div>`).join("")}</div>`;
+}
 /* ---------- period report: one printable page the office can file ---------- */
 const REP={period:"month",from:"",to:"",dong:"전체",photos:false,data:null,loading:false,err:""};
 function repRange(){const now=new Date();let a,b=now.getTime();
@@ -2386,13 +2452,14 @@ function onLive(text){
     <div class="muted">${esc(l.kind||"가로등")} · ${esc(l.lampType||"")} · ${esc(l.address)}</div>
     <div class="muted">마지막 점검 ${fmtD(l.lastInspected)}${due?" · <span style='color:var(--sodium)'>점검주기 경과</span>":""}${rOpen?` · <span style='color:#FFB4A8'>미처리 신고 ${rOpen}건</span>`:""}</div>
     ${l.poleNo?`<div class="muted">전주 ${esc(l.poleNo)}</div>`:""}
-    <div class="split" style="margin-top:8px">${scan.ctx==="report"?`<button class="btn sm" data-apply="report">신고 양식에 넣기</button>`:`<button class="btn sm" data-apply="open">${scan.ctx==="inspect"?"이 등 점검하기":"이 등 열기"}</button>`}</div>`
+    <div class="split" style="margin-top:8px">${scan.ctx==="report"?`<button class="btn sm" data-apply="report">신고 양식에 넣기</button>`:scan.ctx==="inbox"?`<button class="btn sm" data-apply="inbox">신고 접수 양식에 넣기</button>`:`<button class="btn sm" data-apply="open">${scan.ctx==="inspect"?"이 등 점검하기":"이 등 열기"}</button>`}</div>`
   :`<b>${esc(labelText(p))}</b> <span class="chip">미등록 ${esc(p.kind)}</span><div class="muted">대장에 없는 번호예요.</div>
-    <div class="split" style="margin-top:8px">${scan.ctx==="report"?`<button class="btn sm" data-apply="report">신고 양식에 넣기</button>`:S.canWrite?`<button class="btn sm" data-apply="register">신규 등록</button>`:""}</div>`;
+    <div class="split" style="margin-top:8px">${scan.ctx==="report"?`<button class="btn sm" data-apply="report">신고 양식에 넣기</button>`:scan.ctx==="inbox"?`<button class="btn sm" data-apply="inbox">신고 접수 양식에 넣기</button>`:S.canWrite?`<button class="btn sm" data-apply="register">신규 등록</button>`:""}</div>`;
   if(navigator.vibrate)navigator.vibrate(30);
 }
 function onDecoded(text,how){
   stopCam(false);
+  try{if(/^https?:\/\//i.test(text)){const u=new URL(text);const c=u.searchParams.get("c");if(c)text=c}}catch(e){}
   const p=parseCode(text),pole=parsePole(text);
   showScanResult({code:p,pole,raw:text,how});
 }
@@ -2442,6 +2509,7 @@ function showScanResult(r){
       ${r.code&&l&&scan.ctx==="admin"?`<button class="btn" data-apply="open">이 등 열기</button>`:""}
       ${r.code&&!l&&S.canWrite&&scan.ctx!=="report"?`<button class="btn" data-apply="register">미등록 양식에 넣기</button>${scan.pos?`<button class="btn ghost" data-apply="quick">현재 위치로 바로 저장</button>`:""}`:""}
       ${r.code&&scan.ctx==="report"?`<button class="btn sodium" data-apply="report">신고 양식에 넣기</button>`:""}
+      ${r.code&&scan.ctx==="inbox"?`<button class="btn sodium" data-apply="inbox">신고 접수 양식에 넣기</button>`:""}
       ${r.code&&!l&&scan.ctx==="inspect"&&S.canWrite?`<button class="btn ghost" data-apply="register">신규 등록</button>`:""}
       <button class="btn ghost" id="scanStart">다시 스캔</button>
     </div></div>`;
@@ -2456,6 +2524,7 @@ function applyScan(what){
     if(!rec.dong){const near=S.lights.filter(x=>typeof x.lat==="number").map(x=>({x,d:distM(scan.pos,x)})).sort((a,b)=>a.d-b.d)[0];if(near)rec.dong=near.x.dong}
     write(()=>db.doc("lights/"+id).set(rec),`${txt}을(를) 미등록으로 저장했어요. 관리 현황에서 확인하세요.`).then(ok=>{if(ok){closeSheet();S.tab="admin";render();openAdminSection("pend")}});return}
   stopCam(false);closeSheet();
+  if(what==="inbox"||scan.ctx==="inbox"){closeSheet();S.tab="admin";render();openAdminSection("inbox");const x=$("#ibNum");if(x)x.value=txt;toast(`${txt} 번호를 넣었어요.`);return}
   if(what==="report"){S.tab="report";render();$("#rNum").value=p.kind==="가로등"?txt:p.num;if(p.dong)$("#rDong").value=p.dong;else if(l)$("#rDong").value=l.dong;$("#rLoc").focus();toast(`${txt} 번호를 넣었어요.`);return}
   if(what==="register"){S.tab="admin";render();openAdminSection("reg");const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
     $("#nNoPlate").checked=false;["nNum","nRoad"].forEach(x=>{const el=$("#"+x);if(el)el.disabled=false});

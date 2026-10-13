@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>가로등 고장 신고</title>
+<meta name="theme-color" content="#16233D">
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/svg+xml" href="../icons/icon.svg">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#16233D;--ink-2:#4A5873;--line:#D8DEE8;--bg:#EEF1F5;--card:#fff;--sodium:#E89A0C;--sodium-soft:#FFF1D6;--ok:#2C7A57;--bad:#C2372B;--bad-soft:#FBE4E1;
+  --font:"Pretendard Variable",Pretendard,"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;box-sizing:border-box}
+@media(prefers-color-scheme:dark){:root{--ink:#E8ECF3;--ink-2:#A3AEC2;--line:#2C3850;--bg:#0F1726;--card:#17223A;--sodium:#F5B03A;--sodium-soft:#3A2E14;--ok:#5CC495;--bad:#F07A6E;--bad-soft:#3D1B19}}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:520px;margin:0 auto;padding:0 16px 40px}
+header{display:flex;align-items:center;gap:10px;padding:14px 0 6px;padding-top:max(14px,env(safe-area-inset-top))}
+header svg{width:28px;height:36px;flex:none}header h1{font-size:18px;margin:0;font-weight:800;letter-spacing:-.02em}header p{margin:0;font-size:12px;color:var(--ink-2)}
+h2{font-size:15px;margin:18px 0 8px;font-weight:800}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.code{font-size:26px;font-weight:800;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.f-in{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card);font:inherit;color:inherit;font-size:16px}
+textarea.f-in{min-height:96px;resize:vertical}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chips button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:10px 14px;font:inherit;font-size:15px;min-height:44px}.chips button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn{border:0;border-radius:12px;padding:14px 18px;font:inherit;font-weight:700;font-size:16px;background:var(--ink);color:var(--bg);min-height:50px;cursor:pointer}.btn.sodium{background:var(--sodium);color:#1B1300}.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}.btn.block{width:100%}.btn:disabled{opacity:.5}
+.muted{color:var(--ink-2);font-size:13px}
+.row{display:flex;gap:10px;align-items:center}
+label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:8px}label.ck input{width:20px;height:20px;accent-color:var(--sodium);flex:none;margin-top:2px}
+.thumb{width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-top:8px;display:block}
+.notice{background:var(--sodium-soft);border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0}
+.err{background:var(--bad-soft);color:var(--bad);border-radius:10px;padding:10px 12px;font-size:14px;margin:10px 0}
+.done{text-align:center;padding:30px 10px}.done .big{font-size:44px}.done .rc{font-size:22px;font-weight:800;margin:6px 0 2px;font-variant-numeric:tabular-nums}
+.foot{margin-top:24px;font-size:12px;color:var(--ink-2)}
+:focus-visible{outline:3px solid var(--sodium);outline-offset:2px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <svg viewBox="0 0 46 58" aria-hidden="true"><path d="M8 58V14c0-6 4-10 10-10h14" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M26 2h16a3 3 0 0 1 3 3v3H23V5a3 3 0 0 1 3-3z" fill="currentColor"/><path d="M24 9h20l-3 6H27z" fill="var(--sodium)"/><path d="M34 15l-9 30h18z" fill="var(--sodium)" opacity=".18"/></svg>
+    <div><h1>가로등 고장 신고</h1><p id="orgLine"></p></div>
+  </header>
+
+  <main id="form">
+    <h2>어느 등인가요</h2>
+    <div class="panel">
+      <div id="codeKnown" hidden><div class="muted">기둥 표찰 번호</div><div class="code" id="codeText"></div><button type="button" class="btn ghost" id="codeEdit" style="margin-top:8px;min-height:40px;padding:8px 14px;font-size:14px">번호가 다르면 고치기</button></div>
+      <div id="codeAsk"><label class="muted" for="codeIn">기둥에 붙은 표찰 번호 (예: 산수동 642, 지호로 65-5). 모르면 비워 두고 아래 위치를 적어 주세요.</label><input class="f-in" id="codeIn" placeholder="산수동 642" autocomplete="off" style="margin-top:6px"></div>
+    </div>
+
+    <h2>무슨 문제인가요</h2>
+    <div class="chips" id="issues"></div>
+
+    <h2>자세한 내용 <span class="muted" style="font-weight:400">(선택)</span></h2>
+    <textarea class="f-in" id="desc" maxlength="500" placeholder="예: 저녁 7시부터 계속 꺼져 있어요. ○○마트 앞 두 번째 기둥."></textarea>
+
+    <h2>사진 <span class="muted" style="font-weight:400">(선택, 1장)</span></h2>
+    <div class="row"><button type="button" class="btn ghost" id="photoBtn">사진 찍기</button><button type="button" class="btn ghost" id="photoLibBtn">앨범에서</button><button type="button" class="btn ghost" id="photoDel" hidden>빼기</button></div>
+    <input type="file" id="photo" accept="image/*" capture="environment" hidden><input type="file" id="photoLib" accept="image/*" hidden>
+    <img id="prev" class="thumb" alt="" hidden>
+    <p class="muted">얼굴이나 차량 번호판이 나오지 않게 찍어 주세요.</p>
+
+    <h2>위치</h2>
+    <label class="ck"><input type="checkbox" id="useGps" checked> 지금 내 위치를 함께 보내요 <span class="muted" id="gpsState"></span></label>
+    <p class="muted">번호를 모를 때 등을 찾는 데 쓰여요. 신고 처리 외에는 쓰지 않아요.</p>
+
+    <h2>연락처 <span class="muted" style="font-weight:400">(선택)</span></h2>
+    <input class="f-in" id="contact" inputmode="tel" placeholder="처리 결과를 받고 싶으면 전화번호" maxlength="40">
+    <label class="ck"><input type="checkbox" id="consent"> 처리 결과 안내 목적으로 연락처를 <span id="pdays"></span>일 보관하는 데 동의해요</label>
+
+    <div id="err" class="err" hidden></div>
+    <div style="margin-top:18px"><button type="button" class="btn sodium block" id="send">신고 보내기</button></div>
+    <div id="alt" class="row" style="margin-top:10px;flex-wrap:wrap" hidden></div>
+    <p class="foot">이 페이지는 신고만 받아요. 접수 상태 확인은 <span id="phoneLine"></span>로 문의해 주세요. 신고 내용·사진·위치는 가로등 고장 처리 목적으로만 쓰이고, 연락처는 처리 안내 후 지워요.</p>
+  </main>
+
+  <section id="done" class="done" hidden>
+    <div class="big">✓</div>
+    <div>접수됐어요</div>
+    <div class="rc" id="receipt"></div>
+    <p class="muted" id="doneMsg"></p>
+    <div id="doneCopy" hidden><p class="muted">문자·이메일 앱이 열리지 않으면 아래 내용을 복사해서 보내 주세요.</p><textarea class="f-in" id="copyText" readonly style="min-height:120px"></textarea><button type="button" class="btn ghost" id="copyBtn" style="margin-top:8px">내용 복사</button></div>
+    <p class="foot">감사합니다. 같은 등을 여러 번 신고하지 않으셔도 돼요.</p>
+  </section>
+</div>
+<script src="config.js"></script>
+<script>
+const C=Object.assign({org:"",dept:"",phone:"",sms:"",mail:"",backend:null,firestore:{},privacyDays:90,maxPhotoKB:150},window.REPORT_CONFIG||{});
+const ISSUES=["불이 꺼져 있어요","깜빡거려요","낮에도 켜져 있어요","등이 파손됐어요","기둥이 기울었어요","전선이 노출됐어요","기타"];
+const $=s=>document.querySelector(s);
+const st={code:"",issue:"",photo:null,pos:null};
+$("#orgLine").textContent=[C.org,C.dept].filter(Boolean).join(" ");$("#pdays").textContent=C.privacyDays;$("#phoneLine").textContent=C.phone||"담당 부서";
+// plate code from the QR link (?c=산수동 642) or typed
+const q=new URLSearchParams(location.search).get("c");
+function setCode(c){st.code=(c||"").trim().slice(0,40);$("#codeKnown").hidden=!st.code;$("#codeAsk").hidden=!!st.code;$("#codeText").textContent=st.code}
+setCode(q);
+$("#codeEdit").onclick=()=>{$("#codeIn").value=st.code;setCode("");$("#codeIn").focus()};
+$("#codeIn").addEventListener("input",e=>{st.code=e.target.value.trim().slice(0,40)});
+$("#issues").innerHTML=ISSUES.map(i=>`<button type="button" aria-pressed="false">${i}</button>`).join("");
+$("#issues").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;st.issue=b.textContent;document.querySelectorAll("#issues button").forEach(x=>x.setAttribute("aria-pressed",x===b))});
+// photo: shrink to ~150 KB so it fits in one record
+async function shrink(file){const img=await new Promise((res,rej)=>{const i=new Image(),u=URL.createObjectURL(file);i.onload=()=>{URL.revokeObjectURL(u);res(i)};i.onerror=rej;i.src=u});
+  let max=1000,qv=.7,out;for(let k=0;k<5;k++){const r=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*r);c.height=Math.round(img.height*r);c.getContext("2d").drawImage(img,0,0,c.width,c.height);out=c.toDataURL("image/jpeg",qv);if(out.length*0.75/1024<=C.maxPhotoKB)break;max*=.8;qv-=.08}return out}
+$("#photoBtn").onclick=()=>{$("#photo").value="";$("#photo").click()};$("#photoLibBtn").onclick=()=>{$("#photoLib").value="";$("#photoLib").click()};
+for(const id of ["photo","photoLib"])$("#"+id).addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];if(!f)return;try{st.photo=await shrink(f);$("#prev").src=st.photo;$("#prev").hidden=false;$("#photoDel").hidden=false}catch(err){showErr("사진을 읽지 못했어요. 다른 사진을 골라 주세요.")}});
+$("#photoDel").onclick=()=>{st.photo=null;$("#prev").hidden=true;$("#photoDel").hidden=true};
+// location
+function getPos(){return new Promise(res=>{if(!navigator.geolocation)return res(null);navigator.geolocation.getCurrentPosition(p=>res({lat:+p.coords.latitude.toFixed(6),lng:+p.coords.longitude.toFixed(6),acc:Math.round(p.coords.accuracy)}),()=>res(null),{enableHighAccuracy:true,timeout:8000,maximumAge:30000})})}
+$("#useGps").addEventListener("change",async e=>{if(e.target.checked){$("#gpsState").textContent="(위치 잡는 중…)";st.pos=await getPos();$("#gpsState").textContent=st.pos?`(±${st.pos.acc}m)`:"(위치를 못 잡았어요)"}else{st.pos=null;$("#gpsState").textContent=""}});
+(async()=>{$("#gpsState").textContent="(위치 잡는 중…)";st.pos=await getPos();$("#gpsState").textContent=st.pos?`(±${st.pos.acc}m)`:"(위치를 못 잡았어요 — 꺼도 돼요)"})();
+function showErr(m){const e=$("#err");e.textContent=m;e.hidden=false;e.scrollIntoView({block:"center"})}
+function receiptNo(){const d=new Date();const r=Math.random().toString(36).slice(2,6).toUpperCase();return `R${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${r}`}
+function buildText(rec){return `[가로등 고장 신고 ${rec.receipt}]\n등 번호: ${rec.code||"(모름)"}\n문제: ${rec.issue}\n내용: ${rec.desc||"-"}\n위치: ${rec.lat?`${rec.lat}, ${rec.lng} (±${rec.acc}m)`:"-"}\n연락처: ${rec.contact||"-"}\n시각: ${new Date(rec.at).toLocaleString("ko-KR")}`}
+async function sendFirestore(rec){const f=C.firestore;const url=`https://firestore.googleapis.com/v1/projects/${f.projectId}/databases/(default)/documents/${f.collection||"citizen_reports"}?key=${encodeURIComponent(f.apiKey)}`;
+  const fields={};for(const [k,v] of Object.entries(rec)){if(v==null||v==="")continue;fields[k]=typeof v==="number"?(Number.isInteger(v)?{integerValue:String(v)}:{doubleValue:v}):typeof v==="boolean"?{booleanValue:v}:{stringValue:String(v)}}
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fields})});if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}
+$("#send").onclick=async()=>{
+  $("#err").hidden=true;
+  if(!st.issue){showErr("무슨 문제인지 하나 골라 주세요.");return}
+  const contact=$("#contact").value.trim();if(contact&&!$("#consent").checked){showErr("연락처를 남기려면 보관 동의에 체크해 주세요.");return}
+  const useGps=$("#useGps").checked;
+  const rec={receipt:receiptNo(),code:st.code,issue:st.issue,desc:$("#desc").value.trim().slice(0,500),lat:useGps&&st.pos?st.pos.lat:null,lng:useGps&&st.pos?st.pos.lng:null,acc:useGps&&st.pos?st.pos.acc:null,photo:st.photo||null,contact:contact||null,consent:!!contact,at:Date.now(),ua:navigator.userAgent.slice(0,80)};
+  const btn=$("#send");btn.disabled=true;btn.textContent="보내는 중…";
+  try{
+    if(C.backend==="firestore"&&C.firestore&&C.firestore.projectId){await sendFirestore(rec);finish(rec,"담당 부서에 바로 전달됐어요.")}
+    else{
+      const text=buildText(rec);const hasPhoto=!!rec.photo;
+      finish(rec,`아직 자동 접수가 연결되지 않아 문자·이메일로 보내 주셔야 해요.${hasPhoto?" 사진은 메시지에 직접 첨부해 주세요.":""}`,text);
+      const alt=$("#alt");alt.hidden=false;
+      if(C.sms)alt.insertAdjacentHTML("beforeend",`<a class="btn sodium" href="sms:${C.sms}${/iphone|ipad/i.test(navigator.userAgent)?"&":"?"}body=${encodeURIComponent(text)}">문자로 보내기</a>`);
+      if(C.mail)alt.insertAdjacentHTML("beforeend",`<a class="btn ghost" href="mailto:${C.mail}?subject=${encodeURIComponent("가로등 고장 신고 "+rec.receipt)}&body=${encodeURIComponent(text)}">이메일로 보내기</a>`);
+      $("#done").appendChild(alt);
+    }
+  }catch(e){btn.disabled=false;btn.textContent="신고 보내기";showErr("보내지 못했어요. 잠시 후 다시 시도하거나 "+(C.phone||"담당 부서")+"로 전화해 주세요.")}
+};
+function finish(rec,msg,copy){$("#form").hidden=true;$("#done").hidden=false;$("#receipt").textContent=rec.receipt;$("#doneMsg").textContent=msg;if(copy){$("#doneCopy").hidden=false;$("#copyText").value=copy;$("#copyBtn").onclick=async()=>{try{await navigator.clipboard.writeText(copy);$("#copyBtn").textContent="복사했어요"}catch(e){$("#copyText").select()}}}window.scrollTo(0,0)}
+</script>
+</body>
+</html>
