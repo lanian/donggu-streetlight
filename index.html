@@ -205,17 +205,23 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ovl .cap{padding:6px 12px;font-size:13px;color:#A9B6CC;text-align:center}
 .ovl .cap button{background:#1A2538;color:#fff;border:1px solid #2F3B52;min-height:38px}.ovl .cap button[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
 .cmp{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%;height:100%;align-items:center}.cmp div{text-align:center;font-size:12px;color:#A9B6CC}.cmp img{max-width:100%;max-height:70vh;display:block;margin:0 auto}
-@media print{.wrap,nav.tabs,.sheet-bg,.toast,.ovl,.noprint{display:none!important}.sheet{display:block!important;position:static;max-height:none;overflow:visible;border-radius:0;background:#fff;color:#000}.sheet-in{max-width:none;padding:0}.psheet img{page-break-inside:avoid}}
+@media print{.wrap,nav.tabs,.sheet-bg,.toast,.ovl,.noprint,.subnav,.sheet-foot{display:none!important}.sheet{display:block!important;position:static;max-height:none;overflow:visible;border-radius:0;background:#fff;color:#000}.sheet-in{max-width:none;padding:0}.psheet img{page-break-inside:avoid}}
 .psheet{display:grid;grid-template-columns:1fr 1fr;gap:12px}.psheet figure{margin:0;page-break-inside:avoid}.psheet img{width:100%;border:1px solid #ccc;border-radius:4px}.psheet figcaption{font-size:12px;margin-top:4px}
 
 /* sheet */
-.sheet-bg{position:fixed;inset:0;background:rgba(10,16,30,.45);z-index:30;display:none}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:31;background:var(--bg);border-radius:16px 16px 0 0;max-height:92%;overflow:auto;display:none;padding:0 0 env(safe-area-inset-bottom,0px)}
-.sheet.open,.sheet-bg.open{display:block}
-.sheet-in{max-width:760px;margin:0 auto;padding:10px 16px 28px}
-.sheet .grab{width:42px;height:5px;border-radius:3px;background:var(--line);margin:4px auto 10px}
-.sheet-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:6px}
-.sheet-head .x{margin-left:auto;border:0;background:transparent;font-size:24px;line-height:1;padding:2px 6px;color:var(--ink-2)}
+.sheet-bg{display:none!important}
+.sheet{position:fixed;inset:0;z-index:31;background:var(--bg);overflow:auto;display:none;padding:0 0 env(safe-area-inset-bottom,0px);overscroll-behavior:contain}
+.sheet.open{display:block}
+.sheet-in{max-width:760px;margin:0 auto;padding:0 16px 28px}
+.sheet .grab{display:none}
+.sheet-head{position:sticky;top:0;z-index:6;display:flex;align-items:flex-start;gap:8px;margin:0 -16px 8px;padding:10px 12px 8px;padding-top:max(10px,env(safe-area-inset-top));background:var(--bg);border-bottom:1px solid var(--line);box-shadow:0 2px 8px rgba(10,16,30,.06)}
+.sheet-head>div{min-width:0}.sheet-head h3{font-size:18px!important;line-height:1.25;margin:0}.sheet-head .muted{font-size:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sheet-head .x{order:-1;margin:0;flex:none;width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--card);font-size:0;color:var(--ink);display:flex;align-items:center;justify-content:center;align-self:center}
+.sheet-head .x::before{content:"";width:10px;height:10px;border-left:2.5px solid currentColor;border-bottom:2.5px solid currentColor;transform:rotate(45deg);margin-left:4px}
+.sheet-foot{position:sticky;bottom:0;z-index:5;margin:12px -16px 0;padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+.subnav{position:sticky;top:64px;z-index:5;display:flex;gap:6px;overflow-x:auto;margin:0 -16px 8px;padding:6px 16px;background:var(--bg);scrollbar-width:none}.subnav::-webkit-scrollbar{display:none}
+.subnav button{flex:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:6px 12px;font:inherit;font-size:13px;font-weight:600}
+@media (min-width:900px){.sheet{left:auto;width:min(760px,100%);box-shadow:-8px 0 24px rgba(10,16,30,.18)}}
 
 /* map */
 .map{width:100%;height:auto;display:block}
@@ -300,7 +306,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .bubble i{position:absolute;top:2px;width:10px;height:10px;border-radius:50%;background:var(--sodium);left:calc(50% - 5px);transition:left .1s}
 .hist{border-left:3px solid var(--c);padding:4px 0 4px 10px;margin:8px 0}
 @media (max-width:420px){.tally b{font-size:20px}}
-@media (prefers-reduced-motion:no-preference){.sheet.open{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
+@media (prefers-reduced-motion:no-preference){.sheet.open{animation:slidein .2s ease-out}@keyframes slidein{from{transform:translateX(40px);opacity:.5}}}
 </style>
 </head>
 <body>
@@ -760,7 +766,7 @@ function vReport(){
 
 /* ---------- sheets ---------- */
 let sheetHist=false;
-function openSheet(html){$("#sheetIn").innerHTML=`<div class="grab"></div>`+html;$("#sheet").classList.add("open");$("#sheetBg").classList.add("open");$("#sheet").scrollTop=0;document.body.style.overflow="hidden";setTimeout(()=>{const f=$("#sheet .x");f&&f.focus()},30);
+function openSheet(html){$("#sheetIn").innerHTML=`<div class="grab"></div>`+html;$("#sheet").classList.add("open");$("#sheetBg").classList.add("open");$("#sheet").scrollTop=0;document.body.style.overflow="hidden";setTimeout(()=>{const f=$("#sheet .x");f&&f.focus();const h=$("#sheet .sheet-head"),n=$("#sheet .subnav");if(h&&n)n.style.top=h.offsetHeight+"px"},30);
   if(!sheetHist){try{history.pushState({sheet:1},"");sheetHist=true}catch(e){}}}
 // the phone's back button closes the sheet instead of leaving the app
 window.addEventListener("popstate",()=>{if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}if(sheetHist){sheetHist=false;if($("#sheet").classList.contains("open"))closeSheet(true)}});
@@ -776,19 +782,20 @@ async function openLight(id){
     ${l.redoNote&&l.status==="점검필요"?`<div class="notice slim"><b>재점검 요청</b> ${esc(l.redoNote)}</div>`:""}
     ${l.removed?`<div class="muted" style="margin:2px 0 6px;color:var(--bad)">철거된 등으로 기록돼 있어요${l.removedAt?` (${fmtD(l.removedAt)})`:""}.</div>`:""}${l.note?`<div class="muted" style="margin:2px 0 6px">📝 ${esc(l.note)}</div>`:""}
     ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}${can("admin")?`<button class="btn ghost sm" data-ledit="${esc(l.id)}" style="margin-left:auto">등 정보 수정</button>`:""}</div>`:""}
-    <h2>점검표</h2>
+    <div class="subnav" id="lightNav"><button type="button" data-sjump="shCheck">점검표</button><button type="button" data-sjump="shRes">결과·사진</button><button type="button" data-sjump="shHist">이력</button><button type="button" data-sjump="shGal">사진 이력</button>${l.edits&&l.edits.length?`<button type="button" data-sjump="shEdit">변경 이력</button>`:""}</div>
+    <h2 id="shCheck">점검표</h2>
     <div class="panel" id="checks">${CHECKS.map(([k,t,s])=>`<div class="check"><div class="q">${t}<small>${s}</small></div><div class="pair" role="group" aria-label="${t}"><button class="g" data-ck="${k}" data-v="ok" aria-pressed="false">양호</button><button class="b" data-ck="${k}" data-v="bad" aria-pressed="false">불량</button></div></div>`).join("")}
       <div class="split"><button class="btn ghost sm" id="allOk">모두 양호</button><button class="btn ghost sm" id="tiltBtn">등주 기울기 측정</button></div>
       <div id="tiltBox" hidden></div></div>
-    <label class="f">점검 결과</label>
+    <label class="f" id="shRes">점검 결과</label>
     <div class="seg" id="resSeg">${["정상","점검필요","고장"].map(s=>`<button type="button" data-res="${s}" aria-pressed="false">${s}</button>`).join("")}</div>
     <p class="muted" id="resHint">불량 항목을 체크하면 결과가 자동으로 제안돼요.</p>
     <label class="f" for="iMemo">메모</label><textarea class="f-in" id="iMemo" placeholder="측정값, 조치 내용, 필요한 부품 등"></textarea>
     <label class="f">현장 사진 <span class="muted">최대 ${PHOTO_MAX}장 · 찍은 뒤 구분(전경·표찰·고장 부위·조치 전/후)을 고르고 빨간 펜으로 표시할 수 있어요</span></label><div class="photo-in"><button type="button" class="btn ghost sm" data-pick="iPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="iPhotoLib">앨범에서 선택</button><input type="file" id="iPhoto" accept="image/*" capture="environment" hidden><input type="file" id="iPhotoLib" accept="image/*" multiple hidden></div><div class="pstrip" id="iPhotos"></div>
-    <div style="margin-top:16px"><button class="btn sodium block" id="saveInsp" ${S.canWrite?"":"disabled"}>점검 결과 저장</button></div>
-    <h2>점검 이력</h2><div id="histBox" class="muted">불러오는 중…</div>
-    <h2>사진 이력 <span class="muted" id="galN"></span></h2><div id="galBox" class="muted">불러오는 중…</div>
-    ${l.edits&&l.edits.length?`<h2>정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
+    ${S.canWrite&&can("inspect")?`<div class="sheet-foot"><button class="btn sodium block" id="saveInsp">점검 결과 저장</button></div>`:""}
+    <h2 id="shHist">점검 이력</h2><div id="histBox" class="muted">불러오는 중…</div>
+    <h2 id="shGal">사진 이력 <span class="muted" id="galN"></span></h2><div id="galBox" class="muted">불러오는 중…</div>
+    ${l.edits&&l.edits.length?`<h2 id="shEdit">정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
   loadGallery(id);
   if(!db){$("#histBox").textContent="기록을 불러올 수 없어요.";return}
   try{
@@ -872,6 +879,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="irLoad"){inspLoadMore();render();return}
   if(t.dataset.ichk){if(need("admin"))inspReview(t.dataset.ichk,false);return}
   if(t.dataset.iredo){if(need("admin"))inspReview(t.dataset.iredo,true);return}
+  if(t.dataset.sjump){const el=document.getElementById(t.dataset.sjump),sh=$("#sheet");if(el&&sh){const h=$("#sheet .sheet-head"),n=$("#sheet .subnav");sh.scrollTo({top:el.offsetTop-((h?h.offsetHeight:0)+(n?n.offsetHeight:0)+8),behavior:"smooth"})}return}
   if(t.dataset.pdel){if(draft&&draft.photos){draft.photos.splice(+t.dataset.pdel,1);renderPhotoStrip()}return}
   if(t.dataset.pedit){const ph=draft&&draft.photos&&draft.photos[+t.dataset.pedit];if(ph)editPhotoMeta(ph);return}
   if(t.dataset.pview){openPhotoViewer(t.dataset.pview);return}
@@ -1168,7 +1176,7 @@ function openLightEdit(id){
     <div class="split" style="margin-top:6px"><button type="button" class="btn ghost sm" id="leGps">현재 위치로</button><button type="button" class="btn ghost sm" id="leReset" data-id="${esc(l.id)}">원래 좌표로</button><span class="muted" id="leAcc" style="align-self:center">지도의 핀을 끌어서 옮길 수도 있어요.</span></div>
     <div class="gmap" id="leMapBox" style="height:220px;margin-top:8px"></div>
     <label class="f" for="leNote">비고</label><textarea class="f-in" id="leNote" placeholder="예: 2025.9 LED 교체, 전주 이설로 위치 변경">${esc(l.note||"")}</textarea>
-    <div style="margin-top:16px"><button class="btn sodium block" id="leSave" data-id="${esc(l.id)}">변경 내용 저장</button></div>
+    <div class="sheet-foot"><button class="btn sodium block" id="leSave" data-id="${esc(l.id)}">변경 내용 저장</button></div>
     ${l.edits&&l.edits.length?`<div class="split" style="margin-top:8px"><button class="btn ghost sm" id="leUndo" data-id="${esc(l.id)}">마지막 변경 되돌리기</button></div><h2>정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
   if(leMap){try{leMap.remove()}catch(e){}leMap=null;leMarker=null}
   if(!window.L){$("#leMapBox").innerHTML=`<div class="empty">지도 라이브러리를 불러오지 못했어요. 좌표를 직접 입력하세요.</div>`;return}
@@ -1783,8 +1791,8 @@ function ptSummary(){
     ${pt.spots.length?`<h2>어두운 지점 <span class="muted">${pt.spots.length}</span></h2><div class="list">${pt.spots.map((sp,i)=>`<div class="panel" style="border-left:5px solid #5B4B9E"><div><b>${sp.lat.toFixed(5)}, ${sp.lng.toFixed(5)}</b> <span class="muted">±${sp.acc}m · ${fmtT(sp.at)}</span></div><div class="muted">${sp.near?`가장 가까운 등 ${esc(sp.near)} ${sp.nearD}m`:"80m 안에 등록된 등 없음 — 미등록 등이거나 조명 공백"}</div><div class="split">${S.canWrite&&can("inspect")?`<button class="btn ghost sm" data-ptspotform="${i}">미등록 양식에</button>`:""}<button class="btn ghost sm" data-ptspotdel="${i}" style="color:var(--bad)">빼기</button></div></div>`).join("")}</div>`:""}
     <h2>점등 확인 <span class="muted">${passedOnly.length}</span></h2><div class="muted">${passedOnly.slice(0,40).map(id=>(byId(id)||{}).code).filter(Boolean).map(esc).join(", ")}${passedOnly.length>40?` 외 ${passedOnly.length-40}개`:""}${passedOnly.length?"":"지나간 등이 없어요."}</div>
     ${pt.track.length>1&&window.L?`<div class="split"><button class="btn ghost sm" data-ptmap="live">경로 지도</button></div>`:""}
-    <div style="margin-top:16px"><button class="btn sodium block" id="ptSave" ${S.canWrite&&(pt.passed.size||pt.marks.length)?"":"disabled"}>순찰 결과 저장</button></div>
-    <div class="split"><button class="btn ghost sm" id="ptDiscard">저장하지 않고 닫기</button>${navigator.share?`<button class="btn ghost sm" id="ptShare">일지 공유</button>`:""}</div>`;
+    <div class="split"><button class="btn ghost sm" id="ptDiscard">저장하지 않고 닫기</button>${navigator.share?`<button class="btn ghost sm" id="ptShare">일지 공유</button>`:""}</div>
+    <div class="sheet-foot"><button class="btn sodium block" id="ptSave" ${S.canWrite&&(pt.passed.size||pt.marks.length)?"":"disabled"}>순찰 결과 저장</button></div>`;
 }
 function ptReportText(p){
   const marks=p.marks||[],spots=p.spots||[];const mins=Math.max(1,Math.round(((p.end||Date.now())-p.start)/60000));
