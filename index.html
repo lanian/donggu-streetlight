@@ -473,7 +473,8 @@ const CHECKS=[
 ];
 const DUE_DAYS=90;
 const FEATURES={reports:false}; // 주민용 탭은 끔: 주민 신고는 별도 페이지(report/)로 분리
-const REPORT_URL="https://lanian.github.io/donggu-streetlight/report/"; // 표찰 QR이 여는 주민 신고 페이지
+// 표찰 QR이 여는 주민 신고 페이지: 앱이 올라간 곳의 report/ (구청 서버·Pages 어디든). 아티팩트 안에서는 Pages 주소를 씀
+const REPORT_URL=(window.claude&&window.claude.use)||!/^https?:$/.test(location.protocol)?"https://lanian.github.io/donggu-streetlight/report/":new URL("report/",location.href.replace(/[?#].*$/,"")).href;
 const INBOX_VIA=["전화","문자","이메일","방문","QR 신고 페이지","기타"]; // 주민 신고: 유지관리 부담으로 보류 (true로 바꾸면 탭·관리 섹션이 다시 켜짐)
 
 const S={lights:[],insp:[],reports:[],patrols:[],roles:[],demoRole:null,tab:"inspect",q:"",dong:"전체",stat:null,kind:"전체",limit:60,near:false,pos:null,posWatch:null,me:null,canWrite:true,live:false,names:{}};
