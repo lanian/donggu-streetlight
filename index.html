@@ -1359,7 +1359,7 @@ async function backupImport(){
   BK.busy=false;BK.file=null;render();
 }
 /* ---------- period report: one printable page the office can file ---------- */
-const REP={period:"month",from:"",to:"",dong:"전체",photos:false,data:null,loading:false,err:""};
+const REP={period:"month",from:"",to:"",dong:"전체",photos:true,inlinePh:true,data:null,loading:false,err:""};
 function repRange(){const now=new Date();let a,b=now.getTime();
   if(REP.period==="month"){a=new Date(now.getFullYear(),now.getMonth(),1).getTime()}
   else if(REP.period==="last"){a=new Date(now.getFullYear(),now.getMonth()-1,1).getTime();b=new Date(now.getFullYear(),now.getMonth(),1).getTime()-1}
@@ -1421,15 +1421,15 @@ function reportSection(){
 /* photo appendix: full-size photos of the period's inspections, before/after pairs side by side, loaded on demand */
 const REP_PH={want:[],docs:{},loading:false,scope:"bad",size:"m"};
 function repPhotoAppendix(ins){
-  const src=(REP_PH.scope==="all"?ins:ins.filter(i=>i.result!=="정상")).filter(i=>i.thumbs&&i.thumbs.length);
-  const items=src.flatMap(i=>i.thumbs.map(t=>({id:t.id,label:t.label||"",code:i.code,lightId:i.lightId,date:i.date,result:i.result,by:i.inspector,t:t.t}))).slice(0,REP_PH.size==="l"?24:48);
-  const missing=items.filter(x=>!REP_PH.docs[x.id]).map(x=>x.id);
+  const src=(REP_PH.scope==="all"?ins:ins.filter(i=>i.result!=="정상")).filter(i=>(i.thumbs&&i.thumbs.length)||i.photo);
+  const items=src.flatMap(i=>(i.thumbs&&i.thumbs.length?i.thumbs.map(t=>({id:t.id,label:t.label||"",code:i.code,lightId:i.lightId,date:i.date,result:i.result,by:i.inspector,t:t.t})):[{id:null,label:"현장 사진",code:i.code,lightId:i.lightId,date:i.date,result:i.result,by:i.inspector,t:i.photo,full:i.photo}])).slice(0,REP_PH.size==="l"?24:48);
+  const missing=items.filter(x=>x.id&&!REP_PH.docs[x.id]).map(x=>x.id);
   if(missing.length&&!REP_PH.loading){REP_PH.loading=true;(async()=>{for(const id of missing){const d=await getPhoto(id);REP_PH.docs[id]=d||{missing:true}}REP_PH.loading=false;render()})()}
   const ctl=`<div class="split noprint" style="margin:0 0 8px"><div class="seg">${[["bad","이상 건만"],["all","기간 내 전부"]].map(([v,t])=>`<button type="button" data-repph="scope" data-v="${v}" aria-pressed="${REP_PH.scope===v}">${t}</button>`).join("")}</div><div class="seg">${[["s","작게"],["m","보통"],["l","크게"]].map(([v,t])=>`<button type="button" data-repph="size" data-v="${v}" aria-pressed="${REP_PH.size===v}">${t}</button>`).join("")}</div>${REP_PH.loading?`<span class="muted" style="align-self:center;font-size:12px">원본 사진 불러오는 중…</span>`:""}</div>`;
-  if(!items.length)return `<h3>부록 · 사진</h3>${ctl}<p class="muted">${REP_PH.scope==="bad"?"기간 내 이상 건에 사진이 없어요.":"기간 내 점검에 사진이 없어요."}</p>`;
+  if(!items.length){const anyPh=ins.filter(i=>(i.thumbs&&i.thumbs.length)||i.photo).length;return `<h3>부록 · 사진</h3>${ctl}<p class="muted">${REP_PH.scope==="bad"?`기간(${fmtD(repRange().a)}~${fmtD(repRange().b)}) 안의 고장·점검필요 건에 붙은 사진이 없어요.${anyPh?` 정상 건에는 ${anyPh}건 있어요 → "기간 내 전부"를 누르세요.`:" 점검 결과 저장 때 붙인 사진만 여기 와요."}`:`기간 안의 점검 ${ins.length}건에 붙은 사진이 없어요. 점검 결과 저장 때 붙인 사진만 여기 와요.`}</p>`}
   // group by light: 조치 전·후가 같이 있으면 나란히
   const byLight={};items.forEach(x=>{(byLight[x.lightId||x.code]=byLight[x.lightId||x.code]||[]).push(x)});
-  const fig=x=>{const d=REP_PH.docs[x.id];const src=d&&d.data?d.data:x.t;return `<figure><img src="${esc(src)}" alt="${esc(x.label)}" loading="eager"><figcaption><b>${esc(x.code)}</b> · ${esc(x.label)}${x.result!=="정상"?` · <span class="chip st-${esc(x.result)}" style="font-size:11px;padding:0 6px">${esc(x.result)}</span>`:""}<br>${fmtDT(x.date)} · ${esc(S.names[x.by]||"점검자")}${d&&d.note?` · ${esc(d.note)}`:""}</figcaption></figure>`};
+  const fig=x=>{const d=x.id?REP_PH.docs[x.id]:null;const src=x.full||(d&&d.data?d.data:x.t);return `<figure><img src="${esc(src)}" alt="${esc(x.label)}" loading="eager"><figcaption><b>${esc(x.code)}</b> · ${esc(x.label)}${x.result!=="정상"?` · <span class="chip st-${esc(x.result)}" style="font-size:11px;padding:0 6px">${esc(x.result)}</span>`:""}<br>${fmtDT(x.date)} · ${esc(S.names[x.by]||"점검자")}${d&&d.note?` · ${esc(d.note)}`:""}</figcaption></figure>`};
   const blocks=Object.values(byLight).map(arr=>{const b=arr.find(x=>x.label==="조치 전"),a=arr.find(x=>x.label==="조치 후");const rest=arr.filter(x=>x!==b&&x!==a);
     return (b&&a?`<div class="pair-ba"><div class="pl">조치 전 · 후</div>${fig(b)}${fig(a)}</div>`:"")+rest.map(fig).join("")+(b&&!a?fig(b):"")+(a&&!b?fig(a):"")}).join("");
   return `<h3>부록 · 사진 <span class="muted">${items.length}장</span></h3>${ctl}<div class="psheet ph-${REP_PH.size}">${blocks}</div>`;
