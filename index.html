@@ -172,6 +172,13 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ptbtns button{min-height:76px;border-radius:14px;border:0;font-size:19px;font-weight:800;color:#fff}
 .ptbtns .bad{background:#C2372B}.ptbtns .warn{background:#B8740A}.ptcam{height:34vh;min-height:200px;margin-bottom:8px}.ptcam[hidden]{display:none}
 .ptmap{height:34vh;min-height:200px;margin-bottom:8px;border-radius:12px;overflow:hidden}.ptmap[hidden]{display:none}
+.meicon{background:none;border:0}.meicon .dot{position:absolute;left:23px;top:23px;width:14px;height:14px;border-radius:50%;background:#2F5DA8;border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+.meicon .pulse{position:absolute;left:18px;top:18px;width:24px;height:24px;border-radius:50%;background:rgba(47,93,168,.35);animation:mepulse 2s ease-out infinite}
+.meicon .cone{position:absolute;left:0;top:0;width:60px;height:60px;transform-origin:50% 50%;background:conic-gradient(from -28deg at 50% 50%,rgba(47,93,168,.45) 0deg,rgba(47,93,168,.45) 56deg,transparent 56deg);border-radius:50%;clip-path:polygon(50% 50%,0 0,100% 0)}.meicon .cone[hidden]{display:none}
+.meicon.stale .dot{background:#8A98B3}.meicon.stale .pulse{animation:none;opacity:.3}
+@keyframes mepulse{0%{transform:scale(.6);opacity:.9}100%{transform:scale(2.2);opacity:0}}
+@media(prefers-reduced-motion:reduce){.meicon .pulse{animation:none}}
+.locbtn[aria-pressed="true"]{background:var(--sodium);color:#1B1300}
 .ptme{background:none;border:0}.ptme .car{width:0;height:0;border-left:11px solid transparent;border-right:11px solid transparent;border-bottom:26px solid #2F5DA8;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 1px 3px rgba(0,0,0,.5));transform-origin:50% 65%}.ptme .dot{position:absolute;left:7px;top:7px;width:8px;height:8px;border-radius:50%;background:#2F5DA8;border:2px solid #fff}
 .ptfull{position:fixed;inset:0;z-index:55;background:#0F1726;color:#E6ECF7;display:flex;flex-direction:column}.ptfull[hidden]{display:none}
 .ptfull .top{display:flex;gap:8px;align-items:center;padding:8px 12px 4px;padding-top:max(8px,env(safe-area-inset-top))}.ptfull .top b{font-size:16px;white-space:nowrap}
@@ -1916,14 +1923,14 @@ function openReviewMap(idx){
   const center=idx==="all"?null:cs[0].mid;const roads=rv.mode==="roads";
   const pts=S.lights.filter(l=>typeof l.lat==="number"&&(idx==="all"?(rv.dong==="전체"||l.dong===rv.dong):distM(center,l)<=Math.max(160,(cs[0].len||0))));
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">밝기 검토 지도 <span class="muted">${cs.length}곳</span></h3><div class="muted">노란 원은 예상 조명 범위, ⚠ 는 중간이 어두운 구간이에요. 원을 누르면 등 정보가 떠요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
-    <div class="gmap" id="gmap"><button class="btn sm locbtn" id="mapLoc">내 위치</button></div>
+    <div class="gmap" id="gmap"><button class="btn sm locbtn" id="mapLoc" aria-pressed="false">내 위치</button></div>
     <div class="maplegend"><span><i style="background:#F5C542;border-color:#F5C542"></i>예상 조명 범위</span><span><i style="background:#C2372B;border-color:#C2372B"></i>고장·수리중(꺼짐)</span><span>${roads?"굵은 선 = 어두운 구간":"⚠ 검토 구간"}</span><span id="mapNote" style="margin-left:auto"></span></div>${roads?`<p class="muted" style="margin:6px 0 0">도로 데이터 © OpenStreetMap contributors</p>`:""}`);
   if(!window.L){$("#mapNote").textContent="지도 라이브러리를 불러오지 못했어요.";return}
   if(gmap){gmap.remove();gmap=null}
   gmap=L.map("gmap",{zoomControl:true,attributionControl:true,tap:true,preferCanvas:true});
   const tiles=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(gmap);
   let errs=0;tiles.on("tileerror",()=>{if(++errs===4)$("#mapNote").textContent="지도 배경을 불러올 수 없어요."});
-  gmapLayer=L.layerGroup().addTo(gmap);gmapPts=[];
+  gmapLayer=L.layerGroup().addTo(gmap);gmapPts=[];meStop();setTimeout(()=>{if(gmap&&$("#mapLoc"))meStart(false)},300);
   pts.forEach(l=>{const on=onOf(l),r=reachOf(l);
     L.circle([l.lat,l.lng],{radius:on?r:r*.5,stroke:false,fillColor:on?"#F5C542":"#C2372B",fillOpacity:on?.22*on:.18}).addTo(gmapLayer);
     const m=L.circleMarker([l.lat,l.lng],{radius:4,color:"#fff",weight:1.5,fillColor:on?"#8a6a00":"#C2372B",fillOpacity:1});
@@ -1977,7 +1984,7 @@ function openMap(scope,one){
   gmapKind="전체";
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted" id="mapCount">${pts.length.toLocaleString()}개</span></h3><div class="muted">마커 속은 상태, 테두리는 종류예요. 고장·수리중은 위에 그려져요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     ${kindChips("전체","mapKind",kindCounts(pts))}
-    <div class="gmap" id="gmap"><button class="btn sm locbtn" id="mapLoc">내 위치</button></div>
+    <div class="gmap" id="gmap"><button class="btn sm locbtn" id="mapLoc" aria-pressed="false">내 위치</button></div>
     <div class="maplegend">${LSTAT.map(s=>`<span class="st-${s}"><i></i>${s}</span>`).join("")}<span style="margin-left:6px;border-left:1px solid var(--line);padding-left:8px">${KINDS.slice(0,2).map(k=>`<i style="background:transparent;border-color:${KIND_COL[k]}"></i>${k}`).join(" ")}</span><span id="mapNote" style="margin-left:auto"></span></div>
     ${pts.length?"":`<div class="empty" style="margin-top:10px">위치 정보가 있는 등이 없어요.</div>`}`);
   if(!window.L){$("#mapNote").textContent="지도 라이브러리를 불러오지 못했어요.";return}
@@ -1986,20 +1993,41 @@ function openMap(scope,one){
   const tiles=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(gmap);
   let errs=0;tiles.on("tileerror",()=>{if(++errs===4)$("#mapNote").textContent="지도 배경을 불러올 수 없어요. 마커 위치만 표시돼요."});
   gmapLayer=L.layerGroup().addTo(gmap);gmapPts=pts;drawMapMarkers();drawGu(gmap);
+  meStop();setTimeout(()=>{if(gmap)meStart(false)},300);
   if(scope==="one"&&one)gmap.setView([one.lat,one.lng],18);
   else if(pts.length)gmap.fitBounds(L.latLngBounds(pts.map(l=>[l.lat,l.lng])).pad(.15),{maxZoom:17});
   else gmap.setView([35.146,126.923],13);
   setTimeout(()=>gmap&&gmap.invalidateSize(),250);
 }
-function mapLocate(){
-  if(!gmap||!navigator.geolocation){toast("위치를 가져올 수 없어요.");return}
-  navigator.geolocation.getCurrentPosition(p=>{
-    const ll=[p.coords.latitude,p.coords.longitude];
-    if(gmapMe)gmapMe.remove();
-    gmapMe=L.layerGroup([L.circle(ll,{radius:p.coords.accuracy,color:"#2F5DA8",weight:1,fillOpacity:.08}),L.circleMarker(ll,{radius:7,color:"#fff",weight:2,fillColor:"#2F5DA8",fillOpacity:1})]).addTo(gmap);
-    gmap.setView(ll,Math.max(gmap.getZoom(),16));
-  },()=>toast("위치 권한이 없어요."),{enableHighAccuracy:true,timeout:10000});
+/* live position on any map: pulsing dot, accuracy ring, heading cone (compass, or GPS course when moving), follow toggle */
+const ME={watch:null,marker:null,ring:null,follow:false,heading:null,pos:null,hOn:false,last:null};
+function meIcon(){return L.divIcon({className:"meicon",html:'<div class="cone"></div><div class="pulse"></div><div class="dot"></div>',iconSize:[60,60],iconAnchor:[30,30]})}
+function meHeading(e){
+  let h=null;if(typeof e.webkitCompassHeading==="number")h=e.webkitCompassHeading;else if(typeof e.alpha==="number"&&(e.type==="deviceorientationabsolute"||e.absolute))h=(360-e.alpha)%360;
+  if(h==null)return;const so=(screen.orientation&&typeof screen.orientation.angle==="number")?screen.orientation.angle:(window.orientation||0);h=(h+so+360)%360;
+  if(ME.heading==null||Math.abs(angDiff(ME.heading,h))>4){ME.heading=h;meDraw()}
 }
+function meDraw(){
+  if(!gmap||!ME.pos)return;const ll=[ME.pos.lat,ME.pos.lng];
+  if(!ME.marker){ME.marker=L.marker(ll,{icon:meIcon(),interactive:false,zIndexOffset:900}).addTo(gmap);ME.ring=L.circle(ll,{radius:ME.pos.acc||20,color:"#2F5DA8",weight:1,fillColor:"#2F5DA8",fillOpacity:.08,interactive:false}).addTo(gmap)}
+  else{ME.marker.setLatLng(ll);ME.ring.setLatLng(ll);ME.ring.setRadius(ME.pos.acc||20)}
+  const el=ME.marker.getElement();if(el){const cone=el.querySelector(".cone");if(cone){cone.hidden=ME.heading==null;cone.style.transform=`rotate(${Math.round(ME.heading||0)}deg)`}el.classList.toggle("stale",ME.last&&Date.now()-ME.last>20000)}
+  if(ME.follow)gmap.panTo(ll,{animate:true,duration:.5});
+}
+function meStart(center){
+  if(!gmap||!navigator.geolocation){toast("위치를 가져올 수 없어요.");return}
+  ME.follow=center!==false;const b=$("#mapLoc");if(b){b.setAttribute("aria-pressed",String(ME.follow));b.textContent=ME.follow?"따라가는 중":"내 위치"}
+  if(ME.follow&&ME.pos){gmap.setView([ME.pos.lat,ME.pos.lng],Math.max(gmap.getZoom(),17));meDraw()}
+  if(ME.watch==null){ME.watch=navigator.geolocation.watchPosition(p=>{const np={lat:p.coords.latitude,lng:p.coords.longitude,acc:Math.round(p.coords.accuracy)};const first=!ME.pos;
+      if(typeof p.coords.heading==="number"&&!isNaN(p.coords.heading)&&p.coords.speed>1.2&&!ME.hOn)ME.heading=p.coords.heading;
+      ME.pos=np;ME.last=Date.now();if(first&&ME.follow)gmap.setView([np.lat,np.lng],Math.max(gmap.getZoom(),17));meDraw();const acc=$("#mapNote");if(acc&&np.acc>30)acc.textContent=`GPS 오차 ±${np.acc}m`},
+    err=>{if(!ME.pos){toast(err&&err.code===1?"위치 권한이 없어요.":"위치를 아직 못 잡았어요.");if(err&&err.code===1)meStop()}else{ME.last=0;meDraw()}},{enableHighAccuracy:true,maximumAge:2000,timeout:15000})}
+  if(!ME.hOn&&window.DeviceOrientationEvent){const on=()=>{ME.hOn=true;if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",meHeading);window.addEventListener("deviceorientation",meHeading)};
+    if(typeof DeviceOrientationEvent.requestPermission==="function")DeviceOrientationEvent.requestPermission().then(r=>{if(r==="granted")on()}).catch(()=>{});else on()}
+  if(gmap&&!gmap._meDrag){gmap._meDrag=true;gmap.on("dragstart",()=>{if(ME.follow){ME.follow=false;const b=$("#mapLoc");if(b){b.setAttribute("aria-pressed","false");b.textContent="내 위치"}}})}
+}
+function meStop(){if(ME.watch!=null)navigator.geolocation.clearWatch(ME.watch);ME.watch=null;if(ME.hOn){window.removeEventListener("deviceorientationabsolute",meHeading);window.removeEventListener("deviceorientation",meHeading);ME.hOn=false}ME.marker=null;ME.ring=null;ME.follow=false;ME.heading=null;ME.pos=null}
+function mapLocate(){if(ME.follow&&ME.pos){ME.follow=false;const b=$("#mapLoc");if(b){b.setAttribute("aria-pressed","false");b.textContent="내 위치"}return}meStart(true)}
 
 /* ---------- AR finder: lights around you, over the camera view ---------- */
 const AR_FOV=62,AR_RANGES=[50,100,200,500];
@@ -2260,7 +2288,7 @@ function openPatrolMap(id){
   if(gmap){gmap.remove();gmap=null}
   gmap=L.map("gmap",{zoomControl:true,attributionControl:true,tap:true,preferCanvas:true});
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(gmap);
-  gmapLayer=L.layerGroup().addTo(gmap);gmapPts=[];
+  gmapLayer=L.layerGroup().addTo(gmap);gmapPts=[];meStop();setTimeout(()=>{if(gmap&&$("#mapLoc"))meStart(false)},300);
   const line=L.polyline(p.track,{color:"#2F5DA8",weight:5,opacity:.8}).addTo(gmapLayer);
   for(const id of passed){const l=byId(id);if(l&&typeof l.lat==="number"&&!marks.some(m=>m.id===id))L.circleMarker([l.lat,l.lng],{radius:4,color:"#fff",weight:1,fillColor:"#2E8B57",fillOpacity:.9}).bindTooltip(l.code).addTo(gmapLayer)}
   for(const sp of (p.spots||[]))L.circleMarker([sp.lat,sp.lng],{radius:8,color:"#fff",weight:2,fillColor:"#5B4B9E",fillOpacity:1}).bindPopup(`<b>어두운 지점</b><br>${sp.lat.toFixed(5)}, ${sp.lng.toFixed(5)}${sp.near?"<br>"+esc(sp.near)+" 근처":""}`).addTo(gmapLayer);
@@ -2774,7 +2802,7 @@ async function readLabelPhoto(file){
   }finally{scan.busy=false}
 }
 document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"||e.target.id==="scanPhotoLib"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
-const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
+const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){meStop();gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
 
 render();
 try{if(localStorage.getItem("dg-near")==="1"){S.near=false;nearToggle()}}catch(e){}
