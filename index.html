@@ -114,6 +114,7 @@ h3{font-size:15px;margin:0 0 6px}
 .iconbtn[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}.iconbtn .secnum{position:absolute;top:-6px;right:-6px;margin:0;background:var(--sodium);color:#1B1300}
 .filterbox{margin:0 0 10px;padding:10px 12px}.frow{display:flex;gap:10px;align-items:center;padding:6px 0}.frow .fl{flex:none;width:34px;font-size:12px;color:var(--ink-2);font-weight:600}.frow .f-in{flex:1;padding:8px 10px}
 .frow .chips{display:flex;gap:6px;flex-wrap:wrap}.frow .chips button{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:6px 11px;font-size:13px}.frow .chips button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}.chip-t{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:6px 11px;font:inherit;font-size:13px;min-height:36px}.chip-t[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .chipbar.active{margin-top:-2px}
 
 .list{display:flex;flex-direction:column;gap:8px}
@@ -654,6 +655,10 @@ function rolesReady(){return S.roles.some(r=>r.role==="admin")}
 function myRole(){if(S.me==="local")return S.demoRole||"admin";if(!rolesReady())return "admin";const r=S.roles.find(r=>r.id===S.me);return r?r.role:"resident"}
 function can(p){const r=myRole();if(p==="admin")return r==="admin";if(p==="inspect")return r==="admin"||r==="inspector";return true}
 function need(p){if(can(p))return true;toast(p==="admin"?"관리자만 할 수 있어요.":"점검자 이상만 할 수 있어요.");return false}
+function myDongs(){const r=S.roles.find(x=>x.id===S.me);return (r&&Array.isArray(r.dongs)?r.dongs:[])}
+function inMyDongs(l){const ds=myDongs();if(!ds.length)return true;const a=adongOf(l);return ds.some(d=>a===d||(a.endsWith("(1·2)")&&adongGroup(a)===adongGroup(d)))}
+function roleDongChips(r){const ds=Array.isArray(r.dongs)?r.dongs:[];return `<div class="chips" style="margin-top:6px;gap:5px">${ADONGS.map(a=>`<button type="button" class="chip-t" data-rdtoggle="${esc(r.id)}" data-v="${a}" aria-pressed="${ds.includes(a)}">${a}</button>`).join("")}<button type="button" class="chip-t" data-rdtoggle="${esc(r.id)}" data-v="*" aria-pressed="false">전체 해제</button></div>`}
+async function setRoleDongs(id,dongs){await write(()=>db.doc("roles/"+id).update({dongs,at:Date.now(),by:S.me||null}),"")}
 function roleSection(){
   const me=S.me;const rows=S.roles.slice().sort((a,b)=>(a.role==="admin"?0:a.role==="inspector"?1:2)-(b.role==="admin"?0:b.role==="inspector"?1:2));
   const known=new Set(rows.map(r=>r.id));
@@ -662,8 +667,9 @@ function roleSection(){
   const nm=id=>esc(S.names[id]||(rows.find(r=>r.id===id)||{}).name||id.slice(0,10)+"…");
   const sel=(id,cur)=>`<select data-rolesel="${esc(id)}" aria-label="역할">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${cur===k?"selected":""}>${v}</option>`).join("")}</select>`;
   const admins=rows.filter(r=>r.role==="admin").length;
-  return `<div class="panel roles">${rows.map(r=>`<div class="row"><b>${nm(r.id)}</b>${r.id===me?`<span class="muted">(나)</span>`:""}<span style="margin-left:auto"></span>${sel(r.id,r.role)}<button class="btn ghost sm" data-roledel="${esc(r.id)}" ${r.role==="admin"&&admins<=1?"disabled title=\"마지막 관리자는 뺄 수 없어요\"":""}>빼기</button></div>`).join("")}</div>
-  ${seen.size?`<h3 style="margin-top:14px">최근 활동했지만 역할이 없는 사용자 <span class="muted">${seen.size}</span></h3><p class="muted" style="margin:-4px 0 8px">역할이 없으면 주민으로 취급돼 신고만 할 수 있어요. 점검자로 올리면 현장 점검·순찰·현장 등록을 할 수 있어요.</p><div class="panel roles">${[...seen].map(([id,what])=>`<div class="row"><b>${nm(id)}</b><span class="muted">${what}</span><span style="margin-left:auto"></span>${sel(id,"resident")}</div>`).join("")}</div>`:""}
+  return `<div class="panel roles">${rows.map(r=>`<div class="row" style="flex-direction:column;align-items:stretch"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${nm(r.id)}</b>${r.id===me?`<span class="muted">(나)</span>`:""}<span style="margin-left:auto"></span>${sel(r.id,r.role)}<button class="btn ghost sm" data-roledel="${esc(r.id)}" ${r.role==="admin"&&admins<=1?"disabled title=\"마지막 관리자는 뺄 수 없어요\"":""}>빼기</button></div>
+    ${r.role!=="resident"?`<div style="display:flex;gap:8px;align-items:center;margin-top:4px"><span class="muted" style="font-size:12px">담당 ${Array.isArray(r.dongs)&&r.dongs.length?esc(r.dongs.join(" · ")):"전체(미지정)"}</span><button type="button" class="btn ghost sm" data-roledong="${esc(r.id)}" style="margin-left:auto">${S.roleDongEdit===r.id?"닫기":"담당 동"}</button></div>${S.roleDongEdit===r.id?roleDongChips(r):""}`:""}</div>`).join("")}</div>
+  ${seen.size?`<h3 style="margin-top:14px">최근 활동했지만 역할이 없는 사용자 <span class="muted">${seen.size}</span></h3><p class="muted" style="margin:-4px 0 8px">역할이 없으면 아무것도 쓸 수 없어요. 점검자로 올리고 "담당 동"을 지정하면 그 점검자의 현장 점검 목록이 담당 행정동으로 좁혀져요.</p><div class="panel roles">${[...seen].map(([id,what])=>`<div class="row"><b>${nm(id)}</b><span class="muted">${what}</span><span style="margin-left:auto"></span>${sel(id,"resident")}</div>`).join("")}</div>`:""}
   <p class="muted" style="margin:10px 0 0">내 사용자 ID: <code>${esc(me||"")}</code> · 새 사용자는 이 링크를 열고 한 번이라도 신고·점검을 하면 위 목록에 떠요. 공유 설정에서 "참여자"로 초대해야 저장이 돼요.</p>
   ${FB?`<p class="muted" style="margin:8px 0 0">Firebase 모드 · 역할은 서버 규칙(firestore.rules)으로 강제돼요. 로그인 계정: ${esc((FB.auth.currentUser||{}).email||"")} <button class="btn ghost sm" id="fbSignOut">로그아웃</button></p>`:""}
   <div class="split"><input class="f-in" id="roleAddId" placeholder="사용자 ID 직접 입력" style="flex:1;min-width:160px"><select class="f-in" id="roleAddRole" style="flex:0 0 auto">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select><button class="btn ghost sm" id="roleAdd">추가</button></div>
@@ -734,7 +740,8 @@ function lightRow(l){
 function filtered(){
   const q=S.q.trim().toLowerCase();
   const rank={"고장":0,"수리중":1,"점검필요":2,"정상":3};
-  return S.lights.filter(l=>inDong(l,S.dong)&&(S.kind==="전체"||(l.kind||"가로등")===S.kind)&&(!S.stat||(S.stat==="__open"?l.status!=="정상":l.status===S.stat))&&(!q||(l.code+" "+(l.label||"")+" "+l.dong+" "+l.address+" "+(l.poleNo||"")+" "+(l.lampId||"")).toLowerCase().replace(/\s+/g,"").includes(q.replace(/\s+/g,""))))
+  if(S.mine==null){try{S.mine=localStorage.getItem("dg-mine")!=="0"}catch(e){S.mine=true}}
+  return S.lights.filter(l=>inDong(l,S.dong)&&(!S.mine||inMyDongs(l))&&(S.kind==="전체"||(l.kind||"가로등")===S.kind)&&(!S.stat||(S.stat==="__open"?l.status!=="정상":l.status===S.stat))&&(!q||(l.code+" "+(l.label||"")+" "+l.dong+" "+l.address+" "+(l.poleNo||"")+" "+(l.lampId||"")).toLowerCase().replace(/\s+/g,"").includes(q.replace(/\s+/g,""))))
     .sort((a,b)=>S.near&&S.pos?(distM(S.pos,a)||1e9)-(distM(S.pos,b)||1e9):(rank[a.status]-rank[b.status])||((a.lastInspected||0)-(b.lastInspected||0)));
 }
 function nearToggle(){
@@ -760,11 +767,12 @@ function vInspect(){
     <button id="arBtn">${ICONS.near}<span>주변 찾기<small>카메라 방향 안내</small></span></button>
     <button id="mapBtn" data-mapscope="filtered">${ICONS.map}<span>지도<small>현재 목록</small></span></button>
   </div>
-  ${(()=>{const act=[S.dong!=="전체"?["dong",dongLabel(S.dong)]:null,S.kind!=="전체"?["kind",S.kind]:null,S.stat?["stat",S.stat==="__open"?"조치 필요":S.stat]:null].filter(Boolean);const kc=kindCounts(S.lights);
+  ${(()=>{const act=[myDongs().length&&S.mine!==false?["mine","내 담당 동"]:null,S.dong!=="전체"?["dong",dongLabel(S.dong)]:null,S.kind!=="전체"?["kind",S.kind]:null,S.stat?["stat",S.stat==="__open"?"조치 필요":S.stat]:null].filter(Boolean);const kc=kindCounts(S.lights);
   return `<div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색" enterkeyhint="search">
     <button type="button" class="iconbtn" id="nearSort" aria-pressed="${S.near}" title="내 주변 순으로">${ICONS.pin}</button>
     <button type="button" class="iconbtn" id="filterBtn" aria-pressed="${!!S.filterOpen}" title="필터">${ICONS.filter}${act.length?`<span class="secnum">${act.length}</span>`:""}</button></div>
   ${S.filterOpen?`<div class="panel filterbox" id="kindFilter">
+    ${myDongs().length?`<div class="frow"><span class="fl">담당</span><div class="chips"><button type="button" id="mineBtn" aria-pressed="${S.mine!==false}">내 담당 동만 <span class="muted" style="font-size:11px">${esc(myDongs().join("·"))}</span></button></div></div>`:""}
     <div class="frow"><span class="fl">동</span><select class="f-in" id="dong" aria-label="동">${dongOptions(S.dong,"모든 동")}</select></div>
     <div class="frow"><span class="fl">종류</span><div class="chips">${["전체",...KINDS].map(k=>{if(k!=="전체"&&!kc[k])return"";return `<button type="button" data-kind="${k}" aria-pressed="${k===S.kind}">${k==="전체"?"모두":`<i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${KIND_COL[k]};margin-right:5px"></i>${k}`}</button>`}).join("")}</div></div>
     <div class="frow"><span class="fl">상태</span><div class="chips"><button type="button" id="openOnly" aria-pressed="${S.stat==="__open"}">조치 필요만${open?` <span class="muted" style="font-size:11px">${open}</span>`:""}</button>${LSTAT.map(st=>`<button type="button" data-stat="${st}" aria-pressed="${S.stat===st}">${st}</button>`).join("")}</div></div>
@@ -853,6 +861,7 @@ const ADMIN_SECTIONS={
   report:{t:"보고서",d:"기간별 점검 보고서 · 인쇄/PDF",n:null,body:()=>reportSection()},
   inbox:{t:"신고함",d:"전화·문자·QR로 들어온 신고",n:()=>S.reports.filter(r=>r.status!=="완료").length||null,write:true,body:()=>inboxSection()},
   qr:{t:"QR 라벨",d:"표찰용 신고 QR 인쇄",n:null,admin:true,body:()=>qrSection()},
+  backup:{t:"백업·이전",d:"전체 기록 JSON 내보내기·가져오기",n:null,admin:true,body:()=>backupSection()},
   roles:{t:"사용자·권한",d:"관리자·점검자 지정",n:()=>S.roles.length||null,admin:true,body:()=>roleSection()}
 };
 function adminKeys(){return Object.keys(ADMIN_SECTIONS).filter(k=>{const x=ADMIN_SECTIONS[k];if(x.admin&&!can("admin"))return false;if(x.write&&!S.canWrite)return false;return true})}
@@ -988,8 +997,8 @@ document.addEventListener("click",async e=>{
   if(t.id==="nearSort"){nearToggle();return}
   if(t.id==="filterBtn"){S.filterOpen=!S.filterOpen;render();return}
   if(t.id==="filterDone"){S.filterOpen=false;render();return}
-  if(t.id==="filterReset"){S.dong="전체";S.kind="전체";S.stat=null;S.limit=60;render();return}
-  if(t.dataset.fclear){const k=t.dataset.fclear;if(k==="dong")S.dong="전체";else if(k==="kind")S.kind="전체";else S.stat=null;S.limit=60;render();return}
+  if(t.id==="filterReset"){S.dong="전체";S.kind="전체";S.stat=null;S.mine=false;S.limit=60;render();return}
+  if(t.dataset.fclear){const k=t.dataset.fclear;if(k==="dong")S.dong="전체";else if(k==="kind")S.kind="전체";else if(k==="mine"){S.mine=false;try{localStorage.setItem("dg-mine","0")}catch(e){}}else S.stat=null;S.limit=60;render();return}
   if(t.id==="rvRun"){const dong=$("#rvDong").value,kind=$("#rvKind").value;const mode=S.rvMode||(ROADS?"roads":"pairs");t.disabled=true;t.textContent="계산 중…";setTimeout(()=>{const cands=mode==="roads"&&ROADS?roadReview(dong,kind):lightReview(dong,kind);S.review={mode:mode==="roads"&&ROADS?"roads":"pairs",dong,kind,cands,show:20,n:S.lights.filter(l=>inDong(l,dong)&&(kind==="전체"||l.kind===kind)).length};render();const el=document.getElementById("sec-light");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64})},30);return}
   if(t.dataset.rvmode){S.rvMode=t.dataset.rvmode;render();return}
   if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");if(t.dataset.refetch){ROADS=null;idbSet("roads",null)}roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
@@ -1013,6 +1022,9 @@ document.addEventListener("click",async e=>{
   if(t.id==="pwaReload"){if(PWA.waiting)PWA.waiting.postMessage("skipWaiting");location.reload();return}
   if(t.id==="themeBtn"){const cur=document.documentElement.dataset.theme||"auto";const next=cur==="auto"?"dark":cur==="dark"?"light":"auto";try{localStorage.setItem("dg-theme",next)}catch(e){}applyTheme(next);toast(`화면을 ${next==="auto"?"자동":next==="dark"?"야간":"주간"}으로 바꿨어요.`);return}
   if(t.id==="claimAdmin"){if(rolesReady()){toast("이미 관리자가 있어요.");render();return}setRole(S.me,"admin").then(()=>{if(FB)db.collection("meta").doc("setup").set({at:Date.now(),by:S.me}).catch(()=>{})});return}
+  if(t.dataset.roledong){S.roleDongEdit=S.roleDongEdit===t.dataset.roledong?null:t.dataset.roledong;render();return}
+  if(t.dataset.rdtoggle){if(!need("admin"))return;const r=S.roles.find(x=>x.id===t.dataset.rdtoggle);if(!r)return;const cur=Array.isArray(r.dongs)?r.dongs.slice():[];let next;if(t.dataset.v==="*")next=[];else next=cur.includes(t.dataset.v)?cur.filter(x=>x!==t.dataset.v):[...cur,t.dataset.v];r.dongs=next;setRoleDongs(r.id,next);render();return}
+  if(t.id==="mineBtn"){S.mine=!S.mine;try{localStorage.setItem("dg-mine",S.mine?"1":"0")}catch(e){}S.limit=60;render();return}
   if(t.dataset.roledel){if(!need("admin"))return;const r=S.roles.find(x=>x.id===t.dataset.roledel);if(r&&r.role==="admin"&&S.roles.filter(x=>x.role==="admin").length<=1){toast("마지막 관리자는 뺄 수 없어요.");return}if(!confirm("이 사용자의 역할을 빼면 주민으로 취급돼요. 계속할까요?"))return;write(()=>db.doc("roles/"+t.dataset.roledel).delete(),"역할을 뺐어요.");return}
   if(t.id==="roleAdd"){if(!need("admin"))return;const id=$("#roleAddId").value.trim();if(!id){toast("사용자 ID를 넣어 주세요.");return}setRole(id,$("#roleAddRole").value);return}
   if(t.id==="tiltBtn"){startTilt();return}
@@ -1042,6 +1054,8 @@ document.addEventListener("click",async e=>{
   if(t.id==="psPrint"||t.id==="repPrint"){window.print();return}
   if(t.dataset.rep){REP[t.dataset.rep]=t.dataset.v;render();return}
   if(t.id==="csv7"){exportReportCSV();return}
+  if(t.id==="bkExport"){if(need("admin"))backupExport();return}
+  if(t.id==="bkImport"){if(need("admin"))backupImport();return}
   if(t.id==="csv8"){exportReportsCSV();return}
   if(t.id==="ibAdd"){if(need("inspect"))addInboxReport(t);return}
   if(t.id==="ibMore"){IB.show+=30;render();return}
@@ -1118,6 +1132,9 @@ document.addEventListener("change",async e=>{
   if(e.target.id==="ibOnly"){IB.only=e.target.checked;render();return}
   if(e.target.id==="qrDong"){QR.dong=e.target.value;render();return}
   if(e.target.id==="qrKind"){QR.kind=e.target.value;render();return}
+  if(e.target.id==="bkPhotos"){BK.photos=e.target.checked;return}
+  if(e.target.id==="bkOver"){BK.overwrite=e.target.checked;return}
+  if(e.target.id==="bkFile"){BK.file=e.target.files&&e.target.files[0]||null;render();return}
   if(e.target.id==="repDong"){REP.dong=e.target.value;render();return}
   if(e.target.id==="repPhotos"){REP.photos=e.target.checked;render();return}
   if(e.target.id==="repFrom"||e.target.id==="repTo"){REP[e.target.id==="repFrom"?"from":"to"]=e.target.value;render();return}
@@ -1289,6 +1306,45 @@ function qrSection(){
     <div class="grid2" style="margin-top:8px"><input class="f-in" id="qrQ" placeholder="번호 검색 (예: 지호로 65)" value="${esc(QR.q)}"><div class="seg">${[["s","작게"],["m","보통"],["l","크게"]].map(([v,t])=>`<button type="button" data-qrsize="${v}" aria-pressed="${QR.size===v}">${t}</button>`).join("")}</div></div>
     <div class="split"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button><span class="muted" style="align-self:center">${ls.length.toLocaleString()}개 중 ${show.length}개 표시</span></div></div>
   <div class="qrgrid" style="--mm:${mm}mm">${show.map(l=>`<div class="qrl"><div class="qrimg">${qrSvg(qrUrl(l),200)}</div><div class="qrt"><b>${esc(l.code)}</b><span>${esc(l.kind)} · 고장 신고는 QR을 찍어 주세요</span></div></div>`).join("")}</div>`;
+}
+/* ---------- backup: every collection as one JSON, and the reverse — for moving between the artifact, Firebase and other backends ---------- */
+const BK={busy:false,msg:"",photos:true,overwrite:false,file:null};
+const BK_COLS=["lights","inspections","reports","patrols","roles","photos"];
+function backupSection(){
+  return `<details class="help"><summary>언제 쓰나요</summary><p>아티팩트에 쌓인 기록을 Firebase나 다른 서버로 옮길 때, 또는 정기 백업으로 씁니다. 내보내기는 대장(data/lights.json)은 빼고 현장에서 생긴 기록만 담아요. 가져오기는 같은 ID면 건너뛰고(덮어쓰기 선택 가능) 새 것만 넣습니다. 관리자만 할 수 있어요.</p></details>
+  <div class="panel">
+    <h3 style="margin:0 0 6px">내보내기</h3>
+    <label class="muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="bkPhotos" ${BK.photos?"checked":""}> 사진 포함 (용량이 커져요)</label>
+    <div class="split"><button class="btn sm" id="bkExport" ${BK.busy?"disabled":""}>JSON 내려받기</button></div>
+    <h3 style="margin:16px 0 6px">가져오기</h3>
+    <input type="file" id="bkFile" accept="application/json,.json" class="f-in">
+    <label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="bkOver" ${BK.overwrite?"checked":""}> 같은 ID가 있으면 덮어쓰기</label>
+    <div class="split"><button class="btn sodium sm" id="bkImport" ${BK.busy||!BK.file?"disabled":""}>가져오기 시작</button><span class="muted" style="align-self:center;font-size:12px">${BK.msg||""}</span></div>
+  </div>`;
+}
+async function backupExport(){
+  if(BK.busy)return;BK.busy=true;BK.msg="모으는 중…";render();
+  try{const out={app:"donggu-streetlight",version:1,at:Date.now(),by:S.me||null,mode:FB?"firebase":(window.claude&&window.claude.use)?"artifact":"local",collections:{}};
+    for(const c of BK_COLS){if(c==="photos"&&!BK.photos)continue;const snap=await db.collection(c).limit(20000).get();out.collections[c]=snap.docs.map(d=>({id:d.id,...d.data()}));BK.msg=`${c} ${out.collections[c].length}건…`;render()}
+    const data=JSON.stringify(out);await dl.save({filename:`동구가로등_백업_${fmtD(Date.now()).replace(/\./g,"")}.json`,data:new Blob([data],{type:"application/json"})});
+    BK.msg=`내보냈어요 (${Math.round(data.length/1024/1024*10)/10}MB).`}
+  catch(e){BK.msg="내보내지 못했어요: "+(e&&(e.code||e.message)||"")}
+  BK.busy=false;render();
+}
+async function backupImport(){
+  if(BK.busy||!BK.file)return;let j;try{j=JSON.parse(await BK.file.text())}catch(e){toast("JSON 파일이 아니에요.");return}
+  if(!j||!j.collections){toast("이 앱의 백업 파일이 아니에요.");return}
+  const counts=Object.entries(j.collections).map(([c,arr])=>`${c} ${arr.length}`).join(", ");
+  if(!confirm(`가져올 내용: ${counts}\n${BK.overwrite?"같은 ID는 덮어써요.":"같은 ID는 건너뛰어요."} 계속할까요?`))return;
+  BK.busy=true;let n=0,skip=0,fail=0;
+  try{for(const c of BK_COLS){const arr=j.collections[c];if(!Array.isArray(arr))continue;
+      const have=new Set((await db.collection(c).limit(20000).get()).docs.map(d=>d.id));
+      for(const rec of arr){const {id,...data}=rec;if(!id)continue;if(have.has(id)&&!BK.overwrite){skip++;continue}
+        try{await db.doc(c+"/"+id).set(data);n++}catch(e){fail++}
+        if((n+skip+fail)%25===0){BK.msg=`${c} 진행 중 ${n}건…`;render()}}}
+    BK.msg=`가져왔어요: ${n}건 저장, ${skip}건 건너뜀${fail?`, ${fail}건 실패(권한 확인)`:""}.`;toast(BK.msg)}
+  catch(e){BK.msg="가져오기 중 오류: "+(e&&(e.code||e.message)||"")}
+  BK.busy=false;BK.file=null;render();
 }
 /* ---------- period report: one printable page the office can file ---------- */
 const REP={period:"month",from:"",to:"",dong:"전체",photos:false,data:null,loading:false,err:""};
@@ -1970,7 +2026,7 @@ function ptCoverage(dong){
 }
 function ptSay(t){if(!pt.voice||!window.speechSynthesis)return;try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang="ko-KR";u.rate=1.05;speechSynthesis.speak(u)}catch(e){}}
 function openPatrol(dong){
-  ptReset();pt.on=true;pt.start=Date.now();pt.dong=dong||S.dong||"전체";pt.total=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&inDong(l,pt.dong)).length;
+  ptReset();pt.on=true;pt.start=Date.now();pt.dong=dong||(myDongs().length===1?"a:"+myDongs()[0]:S.dong)||"전체";pt.total=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&inDong(l,pt.dong)).length;
   const full=$("#ptFull");full.hidden=false;document.body.style.overflow="hidden";
   full.innerHTML=`<div class="top"><b>야간 순찰</b><select id="ptDong" aria-label="순찰 대상 동">${dongOptions(pt.dong)}</select><div class="bar"><i id="ptBar" style="width:0%"></i></div><span id="ptPct" class="muted" style="color:#A9B6CC;font-size:12px">0%</span><button class="x" id="ptEnd" aria-label="순찰 끝내기" title="순찰 끝내기">끝</button></div>
     <div class="pthud"><span><b id="ptSpd">–</b> km/h</span><span id="ptRoad"></span><span id="ptAcc"></span><span>지나간 <b id="ptN">0</b></span><span>표시 <b id="ptM">0</b></span></div>
