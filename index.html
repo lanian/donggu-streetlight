@@ -253,14 +253,16 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ovl .cap{padding:6px 12px;font-size:13px;color:#A9B6CC;text-align:center}
 .ovl .cap button{background:#1A2538;color:#fff;border:1px solid #2F3B52;min-height:38px}.ovl .cap button[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
 .cmp{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%;height:100%;align-items:center}.cmp div{text-align:center;font-size:12px;color:#A9B6CC}.cmp img{max-width:100%;max-height:70vh;display:block;margin:0 auto}
-@media print{.wrap,nav.tabs,.sheet-bg,.toast,.ovl,.noprint,.subnav,.sheet-foot{display:none!important}.sheet{display:block!important;position:static;max-height:none;overflow:visible;border-radius:0;background:#fff;color:#000}.sheet-in{max-width:none;padding:0}.psheet img{page-break-inside:avoid}}
+@media print{html,body{overflow:visible!important;height:auto!important}.wrap,nav.tabs,.sheet-bg,.toast,.ovl,.noprint,.subnav,.sheet-foot,.sheet-head,#ptFull{display:none!important}.sheet{height:auto!important;inset:auto!important;width:auto!important;box-shadow:none!important}.sheet{display:block!important;position:static!important;max-height:none!important;overflow:visible!important;border-radius:0;background:#fff;color:#000}.sheet-in{max-width:none;padding:0}.psheet img{page-break-inside:avoid}}
 .rep h3{margin:18px 0 8px;font-size:15px}.rep table{width:100%;border-collapse:collapse;font-size:13px}.rep th,.rep td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.rep th{color:var(--ink-2);font-weight:600;font-size:12px}.rep td.n,.rep th.n{text-align:right;font-variant-numeric:tabular-nums}
 .rep .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.rep .kpi div{border:1px solid var(--line);border-radius:10px;padding:10px 12px}.rep .kpi b{display:block;font-size:22px;line-height:1.1}.rep .kpi span{font-size:12px;color:var(--ink-2)}
 .rep .cover{border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:12px}.rep .cover h2{margin:0 0 4px;font-size:20px}.rep .cover .muted{font-size:13px}
 .rep .legend{display:flex;gap:12px;font-size:12px;color:var(--ink-2);margin-top:4px}.rep .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .rep .trend{display:flex;gap:8px;align-items:flex-end;height:120px;padding:4px 0 0}.rep .trend .m{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end}.rep .trend .bar{width:100%;max-width:44px;display:flex;flex-direction:column-reverse;gap:2px}.rep .trend .bar i{display:block;border-radius:2px}.rep .trend .bar i:last-child{border-radius:4px 4px 2px 2px}.rep .trend small{font-size:11px;color:var(--ink-2);white-space:nowrap}.rep .trend b{font-size:12px}
 .rep .pgrid img{aspect-ratio:4/3}
-@media print{.rep{color:#000}.rep .kpi div,.rep th,.rep td{border-color:#bbb}.rep .trend .bar i{-webkit-print-color-adjust:exact;print-color-adjust:exact}.status .bar i,.kind,.chip{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+@page{margin:12mm}
+.rep .phcell{white-space:nowrap}.rep .phcell img{width:64px;height:48px;object-fit:cover;border-radius:4px;margin-right:4px;vertical-align:middle}
+@media print{.rep tr{break-inside:avoid}.rep figure{break-inside:avoid}.rep h3{break-after:avoid}.psheet img{max-height:120mm;object-fit:contain}.rep{color:#000}.rep .kpi div,.rep th,.rep td{border-color:#bbb}.rep .trend .bar i{-webkit-print-color-adjust:exact;print-color-adjust:exact}.status .bar i,.kind,.chip{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 .qrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(calc(var(--mm) + 56mm),1fr));gap:6mm}.qrl{display:flex;gap:4mm;align-items:center;border:1px dashed var(--line);border-radius:6px;padding:4mm;background:#fff;color:#000;break-inside:avoid}.qrimg{width:var(--mm);height:var(--mm);flex:none}.qrimg svg{width:100%;height:100%;display:block}.qrt b{display:block;font-size:15px;font-variant-numeric:tabular-nums}.qrt span{font-size:10px;color:#444}
 @media print{.qrgrid{gap:4mm}.qrl{border-color:#999}}
 .psheet.ph-s{grid-template-columns:repeat(3,1fr)}.psheet.ph-l{grid-template-columns:1fr}.pair-ba{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:12px;position:relative;padding-top:18px;break-inside:avoid}.pair-ba .pl{position:absolute;top:0;left:0;font-size:12px;font-weight:700;color:var(--ink-2)}.psheet.ph-s .pair-ba{grid-template-columns:1fr 1fr}
@@ -1059,7 +1061,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.pview){openPhotoViewer(t.dataset.pview);return}
   if(t.dataset.pcmp){openPhotoCompare(t.dataset.pcmp);return}
   if(t.dataset.psheet){openPhotoSheet(t.dataset.psheet);return}
-  if(t.id==="psPrint"||t.id==="repPrint"){window.print();return}
+  if(t.id==="psPrint"||t.id==="repPrint"){printSheet(t);return}
   if(t.dataset.rep){REP[t.dataset.rep]=t.dataset.v;render();return}
   if(t.dataset.repph){REP_PH[t.dataset.repph]=t.dataset.v;render();return}
   if(t.id==="csv7"){exportReportCSV();return}
@@ -1146,6 +1148,7 @@ document.addEventListener("change",async e=>{
   if(e.target.id==="bkFile"){BK.file=e.target.files&&e.target.files[0]||null;render();return}
   if(e.target.id==="repDong"){REP.dong=e.target.value;render();return}
   if(e.target.id==="repPhotos"){REP.photos=e.target.checked;render();return}
+  if(e.target.id==="repInline"){REP.inlinePh=e.target.checked;render();return}
   if(e.target.id==="repFrom"||e.target.id==="repTo"){REP[e.target.id==="repFrom"?"from":"to"]=e.target.value;render();return}
   if(e.target.id==="irWho"){IR.who=e.target.value;IR.show=30;render();return}
   if(e.target.id==="irOnly"){IR.only=e.target.checked;IR.show=30;render();return}
@@ -1393,6 +1396,7 @@ function reportSection(){
     ${seg("period",[["month","이번 달"],["last","지난 달"],["7","최근 7일"],["30","최근 30일"],["custom","직접"]],REP.period)}
     ${REP.period==="custom"?`<div class="grid2" style="margin-top:8px"><input class="f-in" type="date" id="repFrom" value="${esc(REP.from)}"><input class="f-in" type="date" id="repTo" value="${esc(REP.to)}"></div>`:""}
     <div class="grid2" style="margin-top:8px"><select class="f-in" id="repDong">${dongOptions(REP.dong)}</select><label class="muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="repPhotos" ${REP.photos?"checked":""}> 사진 부록</label></div>
+    <label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="repInline" ${REP.inlinePh?"checked":""}> 이상 발견 표에 사진 칸</label>
     <div class="split"><button class="btn sm" id="repPrint">인쇄 / PDF 저장</button>${dl?`<button class="btn ghost sm" id="csv7">표 CSV</button>`:""}${navigator.share?`<button class="btn ghost sm" id="repShare">요약 공유</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${REP.loading?"기록 불러오는 중…":REP.data?`최근 ${REP.data.insp.length}건 기준`:REP.err||""}</span></div></div>`;
   const photoAppendix=REP.photos?repPhotoAppendix(ins):"";
   return controls+`<div class="rep" id="repBody">
@@ -1407,7 +1411,7 @@ function reportSection(){
     ${faultTop.length?`<h3>불량 항목</h3><table><tbody>${faultTop.map(([f,n])=>`<tr><td>${esc(f)}</td><td class="n">${n}</td></tr>`).join("")}</tbody></table>`:""}
     <h3>순찰·등록·수정</h3><table><tbody><tr><td>야간 순찰</td><td class="n">${pats.length}회 · ${(pats.reduce((s,p)=>s+(p.dist||0),0)/1000).toFixed(1)}km · 지나간 등 ${pats.reduce((s,p)=>s+(p.passed||[]).length,0)}개 · 표시 ${pats.reduce((s,p)=>s+(p.marks||[]).length,0)}건</td></tr><tr><td>현장 등록(미등록)</td><td class="n">${pend.length}건 (대장반영 ${pend.filter(l=>l.reg==="대장반영").length} · 반려 ${pend.filter(l=>l.reg==="반려").length})</td></tr><tr><td>등 정보 수정</td><td class="n">${edits.length}건</td></tr></tbody></table>
     <h3>이상 발견 내역 <span class="muted">${found.length}${ins.filter(i=>i.result!=="정상").length>100?" / "+ins.filter(i=>i.result!=="정상").length:""}건</span></h3>
-    ${found.length?`<table><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th></tr></thead><tbody>${found.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${(i.faults||[]).map(esc).join(", ")}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">기간 내 이상 발견이 없어요.</p>`}
+    ${found.length?`<table><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th>${REP.inlinePh?`<th>사진</th>`:""}</tr></thead><tbody>${found.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${(i.faults||[]).map(esc).join(", ")}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td>${REP.inlinePh?`<td class="phcell">${(i.thumbs||[]).slice(0,2).map(t=>`<img src="${esc(t.t)}" alt="${esc(t.label||"")}" title="${esc(t.label||"")}">`).join("")||(i.photo?`<img src="${esc(i.photo)}" alt="">`:"")}</td>`:""}</tr>`).join("")}</tbody></table>`:`<p class="muted">기간 내 이상 발견이 없어요.</p>`}
     <h3>현재 조치 필요 등 <span class="muted">${open.length}</span></h3>
     ${open.length?`<table><thead><tr><th>등</th><th>상태</th><th>마지막 점검</th><th>위치</th></tr></thead><tbody>${open.slice(0,150).map(l=>`<tr><td><b>${esc(l.code)}</b><br><span class="muted">${esc(l.dong)}</span></td><td><span class="chip st-${esc(l.status)}">${esc(l.status)}</span></td><td style="white-space:nowrap">${fmtD(l.lastInspected)}</td><td class="muted">${esc(l.address||"")}</td></tr>`).join("")}</tbody></table>${open.length>150?`<p class="muted">외 ${open.length-150}개</p>`:""}`:`<p class="muted">모든 등이 정상이에요.</p>`}
     ${photoAppendix}
@@ -1425,10 +1429,20 @@ function repPhotoAppendix(ins){
   if(!items.length)return `<h3>부록 · 사진</h3>${ctl}<p class="muted">${REP_PH.scope==="bad"?"기간 내 이상 건에 사진이 없어요.":"기간 내 점검에 사진이 없어요."}</p>`;
   // group by light: 조치 전·후가 같이 있으면 나란히
   const byLight={};items.forEach(x=>{(byLight[x.lightId||x.code]=byLight[x.lightId||x.code]||[]).push(x)});
-  const fig=x=>{const d=REP_PH.docs[x.id];const src=d&&d.data?d.data:x.t;return `<figure><img src="${esc(src)}" alt="${esc(x.label)}" loading="lazy"><figcaption><b>${esc(x.code)}</b> · ${esc(x.label)}${x.result!=="정상"?` · <span class="chip st-${esc(x.result)}" style="font-size:11px;padding:0 6px">${esc(x.result)}</span>`:""}<br>${fmtDT(x.date)} · ${esc(S.names[x.by]||"점검자")}${d&&d.note?` · ${esc(d.note)}`:""}</figcaption></figure>`};
+  const fig=x=>{const d=REP_PH.docs[x.id];const src=d&&d.data?d.data:x.t;return `<figure><img src="${esc(src)}" alt="${esc(x.label)}" loading="eager"><figcaption><b>${esc(x.code)}</b> · ${esc(x.label)}${x.result!=="정상"?` · <span class="chip st-${esc(x.result)}" style="font-size:11px;padding:0 6px">${esc(x.result)}</span>`:""}<br>${fmtDT(x.date)} · ${esc(S.names[x.by]||"점검자")}${d&&d.note?` · ${esc(d.note)}`:""}</figcaption></figure>`};
   const blocks=Object.values(byLight).map(arr=>{const b=arr.find(x=>x.label==="조치 전"),a=arr.find(x=>x.label==="조치 후");const rest=arr.filter(x=>x!==b&&x!==a);
     return (b&&a?`<div class="pair-ba"><div class="pl">조치 전 · 후</div>${fig(b)}${fig(a)}</div>`:"")+rest.map(fig).join("")+(b&&!a?fig(b):"")+(a&&!b?fig(a):"")}).join("");
   return `<h3>부록 · 사진 <span class="muted">${items.length}장</span></h3>${ctl}<div class="psheet ph-${REP_PH.size}">${blocks}</div>`;
+}
+/* print only after every photo on the page has decoded — lazy or still-loading images print as blank boxes */
+async function printSheet(btn){
+  if(REP_PH.loading){toast("원본 사진을 아직 불러오는 중이에요. 잠시 후 다시 눌러 주세요.");return}
+  const imgs=[...document.querySelectorAll("#sheet img")];const t0=btn&&btn.textContent;if(btn){btn.disabled=true;btn.textContent="사진 준비 중…"}
+  imgs.forEach(i=>{i.loading="eager"});
+  await Promise.all(imgs.map(i=>i.complete&&i.naturalWidth?Promise.resolve():new Promise(res=>{i.addEventListener("load",res,{once:true});i.addEventListener("error",res,{once:true});setTimeout(res,8000)})));
+  try{await Promise.all(imgs.map(i=>i.decode().catch(()=>{})))}catch(e){}
+  if(btn){btn.disabled=false;btn.textContent=t0}
+  window.print();
 }
 function repSummaryText(){const {a,b}=repRange();const ins=(REP.data?REP.data.insp:S.insp).filter(i=>i.date>=a&&i.date<=b);const open=S.lights.filter(l=>!l.removed&&l.status!=="정상"&&inDong(l,REP.dong));
   return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${fmtD(a)}~${fmtD(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${S.patrols.filter(p=>p.start>=a&&p.start<=b).length}회`}
