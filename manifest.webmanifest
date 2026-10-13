@@ -1,0 +1,21 @@
+{
+  "name": "광주 동구 가로등 점검",
+  "short_name": "동구 가로등",
+  "description": "가로등·보안등 현장 점검, 야간 순찰, 고장 관리",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0F1726",
+  "theme_color": "#16233D",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "표찰 스캔", "url": "./?go=scan", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "야간 순찰", "url": "./?go=patrol", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

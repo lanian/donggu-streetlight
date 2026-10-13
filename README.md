@@ -135,6 +135,14 @@ roads/part-N          OpenStreetMap 조각 { ways:[{id,name,type,sv,priv,pts:[[l
 roads/meta            ver(ROADS_VER), at, parts, count, areas, attribution — ver가 다르면 다시 받음
 ```
 
+## 앱으로 설치 (PWA)
+
+GitHub Pages 주소를 열면 Android Chrome은 "앱으로 설치" 띠가, iPhone은 "공유 → 홈 화면에 추가" 안내가 뜹니다. 설치하면 전체 화면으로 열리고 홈 아이콘 길게 누르기에 "표찰 스캔"·"야간 순찰" 바로가기가 있습니다.
+
+- `manifest.webmanifest` — 이름·아이콘(`icons/`)·테마색·바로가기
+- `sw.js` — 서비스 워커. 앱 셸(index.html, 대장 JSON, 지도·QR 라이브러리, 아이콘)을 설치 시 캐시하고, 열 때마다 뒤에서 새로 받아 둡니다(다음에 열면 새 버전). 지도 타일(최대 600장)과 OCR·글꼴 CDN 파일은 쓴 것부터 캐시되어, 한 번 돌아본 구역은 통신 없이도 지도가 보입니다. `sw.js`의 `VERSION`을 올리면 오래된 캐시를 지우고 "새 버전이 있어요 → 지금 적용" 토스트가 뜹니다.
+- 오프라인에서는 화면과 대장은 열리지만 공유 저장은 되지 않습니다(체험 모드는 원래 기기 저장이라 그대로 동작). 아티팩트(claude.ai) 안에서는 서비스 워커를 등록하지 않습니다.
+
 ## 실행 환경에 대한 안내
 
 `index.html`은 Claude 아티팩트 런타임(`window.claude.use("db")`, `"sample"`, `"user"`, `"downloads"`)을 통해 저장·인식 기능을 사용합니다.

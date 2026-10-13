@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>광주 동구 가로등 점검</title>
+<meta name="theme-color" content="#16233D" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1726" media="(prefers-color-scheme: dark)">
+<meta name="application-name" content="동구 가로등">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="동구 가로등">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -550,6 +559,24 @@ async function boot(){
   sub(db.collection("roles"),"roles");
 }
 function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);const short={"실시간":"","이 기기에만 저장":"체험","연결 끊김":"오프라인","저장 불가":"저장 불가","연결 중":"연결 중"};const t=txt in short?short[txt]:txt;s.querySelector("span").textContent=t;s.classList.toggle("dot",!t);s.title=txt}
+/* PWA: service worker on real hosting (GitHub Pages); the artifact viewer runs in a frame without one */
+const PWA={prompt:null,canInstall:false,iosHint:false,waiting:null,standalone:matchMedia("(display-mode: standalone)").matches||navigator.standalone===true};
+(function(){
+  let dismissed=0;try{dismissed=+localStorage.getItem("dg-pwa-dismiss")||0}catch(e){}
+  const recently=Date.now()-dismissed<14*86400000;
+  window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();PWA.prompt=e;if(!recently&&!PWA.standalone){PWA.canInstall=true;render()}});
+  window.addEventListener("appinstalled",()=>{PWA.canInstall=false;PWA.prompt=null;toast("홈 화면에 설치했어요.");render()});
+  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
+  if(ios&&!PWA.standalone&&!recently&&!(window.claude&&window.claude.use))PWA.iosHint=true;
+  if("serviceWorker" in navigator&&!(window.claude&&window.claude.use)&&(location.protocol==="https:"||location.hostname==="localhost")){
+    window.addEventListener("load",()=>{navigator.serviceWorker.register("sw.js").then(reg=>{
+      const watch=w=>{if(!w)return;w.addEventListener("statechange",()=>{if(w.state==="installed"&&navigator.serviceWorker.controller){PWA.waiting=w;const t=$("#toast");t.innerHTML=`새 버전이 있어요. <button class="btn sm sodium" id="pwaReload" style="margin-left:8px">지금 적용</button>`;t.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("show"),12000)}})};
+      watch(reg.installing);reg.addEventListener("updatefound",()=>watch(reg.installing));
+    }).catch(()=>{})});
+  }
+  // shortcuts from the home-screen icon
+  const go=new URLSearchParams(location.search).get("go");if(go)window.addEventListener("load",()=>setTimeout(()=>{if(go==="scan")openScanner("inspect");else if(go==="patrol"&&can("inspect"))openPatrol()},900));
+})();
 /* theme: auto → dark → light; night crews want dark whatever the phone says */
 const THEME_ICON={auto:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',dark:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',light:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M1 12h2M21 12h2"/></svg>'};
 function applyTheme(t){if(t==="auto")delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t;const b=$("#themeBtn");if(b){b.innerHTML=THEME_ICON[t];b.title=`화면: ${t==="auto"?"자동":t==="dark"?"야간":"주간"}`}}
@@ -663,6 +690,7 @@ function vInspect(){
   return `${tally(true)}
   ${!S.canWrite?`<div class="notice slim"><b>보기 전용</b> 점검 결과를 저장하려면 참여자 권한이 필요해요.</div>`:""}
   ${S.me==="local"?`<div class="notice slim"><b>체험 모드</b> 기록은 이 휴대폰에만 남고 공유되지 않아요.</div>`:""}
+  ${PWA.canInstall||PWA.iosHint?`<div class="notice slim" id="pwaBar"><b>앱으로 설치</b> ${PWA.canInstall?`홈 화면에 두면 전체 화면으로 더 빠르게 열려요. <button class="btn sm" id="pwaInstall" style="margin-left:auto">설치</button>`:`공유 버튼 → <b>홈 화면에 추가</b>를 누르면 앱처럼 쓸 수 있어요.`}<button class="x" id="pwaDismiss" aria-label="닫기" style="border:0;background:none;font-size:18px;padding:0 4px">×</button></div>`:""}
   <div class="actions">
     <button class="primary" data-scan="inspect">${ICONS.scan}<span>표찰 스캔<small>QR·사진으로 등 찾기</small></span></button>
     <button id="ptBtn">${ICONS.car}<span>야간 순찰<small>차로 돌며 기록</small></span></button>
@@ -909,6 +937,9 @@ document.addEventListener("click",async e=>{
   if(t.id==="allOk"&&draft){CHECKS.forEach(([k])=>draft.checks[k]="ok");document.querySelectorAll("#checks .pair button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v==="ok"));draft.manual=false;suggestResult();return}
   if(t.dataset.res&&draft){draft.result=t.dataset.res;draft.manual=true;document.querySelectorAll("#resSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
   if(t.id==="saveInsp"){if(need("inspect"))saveInspection();return}
+  if(t.id==="pwaInstall"){if(PWA.prompt){PWA.prompt.prompt();PWA.prompt.userChoice.then(r=>{if(r.outcome==="accepted"){PWA.canInstall=false;PWA.prompt=null;render()}})}return}
+  if(t.id==="pwaDismiss"){PWA.canInstall=false;PWA.iosHint=false;try{localStorage.setItem("dg-pwa-dismiss",String(Date.now()))}catch(e){}render();return}
+  if(t.id==="pwaReload"){if(PWA.waiting)PWA.waiting.postMessage("skipWaiting");location.reload();return}
   if(t.id==="themeBtn"){const cur=document.documentElement.dataset.theme||"auto";const next=cur==="auto"?"dark":cur==="dark"?"light":"auto";try{localStorage.setItem("dg-theme",next)}catch(e){}applyTheme(next);toast(`화면을 ${next==="auto"?"자동":next==="dark"?"야간":"주간"}으로 바꿨어요.`);return}
   if(t.id==="claimAdmin"){if(rolesReady()){toast("이미 관리자가 있어요.");render();return}setRole(S.me,"admin");return}
   if(t.dataset.roledel){if(!need("admin"))return;const r=S.roles.find(x=>x.id===t.dataset.roledel);if(r&&r.role==="admin"&&S.roles.filter(x=>x.role==="admin").length<=1){toast("마지막 관리자는 뺄 수 없어요.");return}if(!confirm("이 사용자의 역할을 빼면 주민으로 취급돼요. 계속할까요?"))return;write(()=>db.doc("roles/"+t.dataset.roledel).delete(),"역할을 뺐어요.");return}
