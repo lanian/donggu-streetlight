@@ -55,15 +55,16 @@ button{cursor:pointer}
 
 /* app bar: one line, the lamp mark is the only decoration in the app */
 header.top{position:sticky;top:0;z-index:15;display:flex;align-items:center;gap:10px;margin:0 -16px 10px;padding:8px 16px;padding-top:max(8px,env(safe-area-inset-top));background:var(--bg)}
-header.top>div:first-of-type{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
+header.top>div:first-of-type{flex:1 1 0;min-width:0;display:flex;align-items:baseline;gap:8px;overflow:hidden}
 header.top>div:last-child{flex:none;display:flex;flex-direction:row!important;align-items:center!important;gap:6px!important}
 .lamp{width:26px;height:34px;flex:none}
 .lamp .glow{fill:var(--sodium)}
-header h1{font-size:17px;line-height:1.2;margin:0;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
+header h1{font-size:17px;line-height:1.2;margin:0;font-weight:800;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 header p{margin:0;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:380px){header p{display:none}}
 .sync{font-size:11px;color:var(--ink-2);white-space:nowrap;height:28px;display:flex;align-items:center;gap:5px;padding:0 9px 0 7px;border-radius:99px;border:1px solid var(--line);background:var(--card)}
-@media(max-width:360px){.sync span{display:none}.sync{padding:0 7px}}
+.sync.dot{padding:0;width:28px;justify-content:center}.sync.dot span{display:none}
+@media(max-width:360px){.sync span{display:none}.sync{padding:0;width:28px;justify-content:center}}
 .themebtn{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--card);display:flex;align-items:center;justify-content:center;padding:0}.themebtn svg{width:16px;height:16px}
 .sync i{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--line);margin:0}
 .sync.on i{background:var(--ok)}
@@ -267,7 +268,8 @@ textarea.f-in{min-height:84px;resize:vertical}
 .lepin{background:none;border:0}.lepin-dot{width:30px;height:30px;border-radius:50%;background:rgba(232,154,12,.35);border:2px solid #E89A0C;box-sizing:border-box;position:relative;cursor:grab}.lepin-dot::after{content:"";position:absolute;left:9px;top:9px;width:8px;height:8px;border-radius:50%;background:#E89A0C;border:2px solid #fff}
 .empty{padding:22px 14px;text-align:center;color:var(--ink-2);background:transparent;border:1px dashed var(--line);border-radius:var(--r-panel);font-size:14px}
 .notice{background:var(--sodium-soft);border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0}
-.rolechip{font-size:11px;color:var(--ink-2);display:flex;gap:4px;align-items:center;white-space:nowrap}.rolechip select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:2px 6px;background:var(--card);color:var(--ink)}
+.rolechip{font-size:11px;color:var(--ink-2);display:flex;gap:4px;align-items:center;white-space:nowrap;max-width:112px;overflow:hidden;text-overflow:ellipsis}.rolechip select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:4px 4px;background:var(--card);color:var(--ink);max-width:100%;min-height:28px}
+.rolechip b{font-weight:600;overflow:hidden;text-overflow:ellipsis}
 .rolechip b{color:var(--ink)}
 .roles .row{display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap}.roles .row:first-child{border-top:0}.roles select{font:inherit;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--card);color:var(--ink)}
 nav.tabs button[hidden]{display:none}
@@ -547,7 +549,7 @@ async function boot(){
   sub(db.collection("patrols").orderBy("start","desc").limit(30),"patrols",ptIndex);
   sub(db.collection("roles"),"roles");
 }
-function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);s.querySelector("span").textContent=txt;s.title=txt}
+function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);const short={"실시간":"","이 기기에만 저장":"체험","연결 끊김":"오프라인","저장 불가":"저장 불가","연결 중":"연결 중"};const t=txt in short?short[txt]:txt;s.querySelector("span").textContent=t;s.classList.toggle("dot",!t);s.title=txt}
 /* theme: auto → dark → light; night crews want dark whatever the phone says */
 const THEME_ICON={auto:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',dark:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',light:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M1 12h2M21 12h2"/></svg>'};
 function applyTheme(t){if(t==="auto")delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t;const b=$("#themeBtn");if(b){b.innerHTML=THEME_ICON[t];b.title=`화면: ${t==="auto"?"자동":t==="dark"?"야간":"주간"}`}}
@@ -617,7 +619,7 @@ function render(){
   if(!allowed[S.tab])S.tab=allowed.inspect?"inspect":allowed.report?"report":"none";
   document.querySelectorAll("nav.tabs button").forEach(b=>{b.hidden=!allowed[b.dataset.tab];b.setAttribute("aria-selected",b.dataset.tab===S.tab)});
   document.querySelector("nav.tabs").hidden=Object.values(allowed).filter(Boolean).length<2;
-  const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<span>체험 역할</span><select id="demoRole" aria-label="체험 역할">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v}</option>`).join("")}</select>`:S.me?`<span>내 역할</span><b>${ROLE_LABEL[myRole()]}${rolesReady()?"":" (설정 전)"}</b>`:"";
+  const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<select id="demoRole" aria-label="체험 역할" title="체험 역할 바꾸기">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v.replace(/\(.*\)/,"")}</option>`).join("")}</select>`:S.me?`<b title="${rolesReady()?"내 역할":"관리자를 아직 지정하지 않았어요"}">${rolesReady()?ROLE_LABEL[myRole()].replace(/\(.*\)/,""):"권한 설정 전"}</b>`:"";
   const v=$("#view");
   v.innerHTML=S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():S.tab==="report"?vReport():vNoAccess();
   refreshAdminSection();
