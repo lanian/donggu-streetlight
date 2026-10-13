@@ -6,7 +6,7 @@
 <title>광주 동구 가로등 점검</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <script>if(!window.jsQR){document.write('<script src="vendor/jsQR.js"><\/script>')}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -21,7 +21,8 @@
   --sodium:#E89A0C; --sodium-soft:#FFF1D6; --ok:#2C7A57; --ok-soft:#E1F2EA;
   --warn:#B86E00; --warn-soft:#FFF0D9; --bad:#C2372B; --bad-soft:#FBE4E1;
   --fix:#2F5DA8; --fix-soft:#E2EAF7;
-  --font:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --font:"Pretendard Variable",Pretendard,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --r-panel:12px; --r-ctl:10px; --r-tile:16px;
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top,0px);
   padding-bottom:env(safe-area-inset-bottom,0px);
@@ -42,49 +43,64 @@
 }
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *,*::before,*::after{box-sizing:inherit}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1,"ss05" 1}
+b,strong,.code{font-weight:700}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:3px solid var(--sodium);outline-offset:2px}
 .wrap{max-width:760px;margin:0 auto;padding:0 16px 110px}
 
-/* header: the lamp head is the one bold element */
-header.top{padding:22px 0 14px;display:flex;align-items:flex-end;gap:12px}
-header.top>div:first-of-type{flex:1;min-width:0}header.top>div:last-child{flex:none}
-header p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lamp{width:46px;height:58px;flex:none}
+/* app bar: one line, the lamp mark is the only decoration in the app */
+header.top{position:sticky;top:0;z-index:15;display:flex;align-items:center;gap:10px;margin:0 -16px 10px;padding:8px 16px;padding-top:max(8px,env(safe-area-inset-top));background:var(--bg)}
+header.top>div:first-of-type{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
+header.top>div:last-child{flex:none;display:flex;flex-direction:row!important;align-items:center!important;gap:6px!important}
+.lamp{width:26px;height:34px;flex:none}
 .lamp .glow{fill:var(--sodium)}
-header h1{font-size:22px;line-height:1.25;margin:0;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
-@media(max-width:420px){header h1{font-size:19px}header p{font-size:12px}}
-header p{margin:2px 0 0;color:var(--ink-2);font-size:13px}
-.sync{margin-left:auto;font-size:12px;color:var(--ink-2);white-space:nowrap}
-.sync i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--line);margin-right:5px;vertical-align:1px}
+header h1{font-size:17px;line-height:1.2;margin:0;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
+header p{margin:0;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:380px){header p{display:none}}
+.sync{font-size:0;color:var(--ink-2);white-space:nowrap;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--line);background:var(--card)}
+.sync span{display:none}
+.themebtn{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--card);display:flex;align-items:center;justify-content:center;padding:0}.themebtn svg{width:16px;height:16px}
+.sync i{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--line);margin:0}
 .sync.on i{background:var(--ok)}
 
+.menu{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.menu button{border:1px solid var(--line);background:var(--card);border-radius:var(--r-panel);padding:12px 12px 10px;text-align:left;display:flex;flex-direction:column;gap:3px;min-height:66px}
+.menu .mt{font-weight:700;font-size:15px;display:flex;align-items:center;gap:4px}.menu .md{font-size:12px;color:var(--ink-2)}
+h2 .btn.sm{font-weight:600;margin-top:-4px}
+.status{margin:2px 0 14px}
+.status .bar{display:flex;height:6px;border-radius:3px;overflow:hidden;gap:2px;background:var(--line)}.status .bar i{display:block;background:var(--c);min-width:3px}
+.status .counts{display:flex;gap:6px;margin-top:8px;align-items:stretch}
+.status .counts button{flex:1;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--card);padding:8px 10px;text-align:left;display:flex;flex-direction:column;gap:0;min-height:56px}
+.status .counts button b{font-size:22px;line-height:1.1;color:var(--c)}.status .counts button span{font-size:12px;color:var(--ink-2)}
+.status .counts button[aria-pressed="true"]{border-color:var(--c);box-shadow:inset 0 0 0 1px var(--c);background:var(--cs)}
+.status .rest{flex:1.2;padding:6px 2px 6px 8px;font-size:12px;color:var(--ink-2);line-height:1.35;align-self:center}.status .rest b{font-size:16px;color:var(--ink);margin-right:2px}
+@media(max-width:360px){.status .rest{display:none}}
 .tally{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 0 18px}
 .tally button{border:0;border-radius:10px;padding:10px 8px 8px;text-align:left;background:var(--card);border-top:4px solid var(--c)}
 .tally b{display:block;font-size:24px;line-height:1.1;font-variant-numeric:tabular-nums}
 .tally span{font-size:12px;color:var(--ink-2)}
 .tally button[aria-pressed="true"]{box-shadow:inset 0 0 0 2px var(--c)}
 
-h2{font-size:17px;margin:22px 0 10px;font-weight:700}
+h2{font-size:16px;margin:22px 0 10px;font-weight:800;letter-spacing:-.01em}
 h3{font-size:15px;margin:0 0 6px}
 .muted{color:var(--ink-2);font-size:13px}
-.panel{background:var(--card);border-radius:12px;padding:14px;border:1px solid var(--line)}
+.panel{background:var(--card);border-radius:var(--r-panel);padding:14px;border:1px solid var(--line)}
 
 .tools{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
-.tools input,.tools select{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card)}
+.tools input,.tools select{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--card)}
 .tools input{flex:1 1 150px}
 .tools select{flex:0 1 auto;max-width:40%}
 .tools .btn.sm{white-space:nowrap;flex:none}
 
 .list{display:flex;flex-direction:column;gap:8px}
-.row{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 12px;text-align:left;width:100%}
-.row .code{font-weight:700;font-variant-numeric:tabular-nums;font-size:15px}
+.row{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:var(--r-panel);padding:10px 12px 10px 10px;text-align:left;width:100%}
+.row .code{font-weight:800;font-variant-numeric:tabular-nums;font-size:17px;letter-spacing:-.01em}
 .row .addr{font-size:13px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .meta{margin-left:auto;text-align:right;flex:none}
 .row .body{min-width:0;flex:1}
-.pole{width:6px;align-self:stretch;border-radius:3px;background:var(--c);flex:none}
+.pole{width:5px;align-self:stretch;border-radius:3px;background:var(--c);flex:none}
 .chip{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--cs);color:var(--c);white-space:nowrap}
 .due{display:block;font-size:11px;color:var(--warn);margin-top:3px}
 /* kind badge: the colour of the plate on the pole — green 가로등, blue 보안등 */
@@ -112,9 +128,9 @@ h3{font-size:15px;margin:0 0 6px}
 
 /* forms */
 label.f{display:block;margin:12px 0 4px;font-size:13px;font-weight:600}
-.f-in{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card)}
+.f-in{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--card)}
 textarea.f-in{min-height:84px;resize:vertical}
-.btn{border:0;border-radius:10px;padding:12px 16px;font-weight:600;background:var(--ink);color:var(--bg)}
+.btn{border:0;border-radius:var(--r-ctl);padding:12px 16px;font-weight:600;background:var(--ink);color:var(--bg)}
 .btn.sodium{background:var(--sodium);color:#1B1300}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
 .btn.sm{padding:8px 12px;font-size:13px;border-radius:8px;min-height:36px}
@@ -160,8 +176,10 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ptbtns button small{display:block;font-size:12px;font-weight:500;opacity:.85;margin-top:2px}
 .ptlog{margin-top:10px;font-size:13px;color:#C9D2E3}.ptlog div{display:flex;gap:8px;align-items:center;padding:4px 0;border-top:1px solid #243049}
 .ptlog button{margin-left:auto;background:none;border:1px solid #3A4A66;color:#C9D2E3;border-radius:8px;padding:2px 8px}
-.actions button{border:0;border-radius:14px;padding:12px 8px 10px;display:flex;flex-direction:column;align-items:center;gap:6px;font-weight:700;font-size:14px;background:var(--card);border:1px solid var(--line);color:var(--ink);min-height:72px}
-.actions button svg{width:26px;height:26px}
+.actions button{border:0;border-radius:var(--r-tile);padding:12px 10px 10px;display:flex;flex-direction:row;align-items:center;gap:10px;font-weight:700;font-size:15px;background:var(--card);color:var(--ink);min-height:64px;text-align:left;box-shadow:inset 0 0 0 1px var(--line)}
+.actions button small{display:block}.actions button>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.actions button.primary{box-shadow:none}
+.actions button svg{width:24px;height:24px;flex:none}
 .actions button.primary{background:var(--sodium);border-color:var(--sodium);color:#1B1300}
 .actions button small{font-weight:500;font-size:11px;color:var(--ink-2)}
 .actions button.primary small{color:#5a4200}
@@ -237,7 +255,7 @@ textarea.f-in{min-height:84px;resize:vertical}
 .split{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .lepin{background:none;border:0}.lepin-dot{width:30px;height:30px;border-radius:50%;background:rgba(232,154,12,.35);border:2px solid #E89A0C;box-sizing:border-box;position:relative;cursor:grab}.lepin-dot::after{content:"";position:absolute;left:9px;top:9px;width:8px;height:8px;border-radius:50%;background:#E89A0C;border:2px solid #fff}
-.empty{padding:22px 14px;text-align:center;color:var(--ink-2);background:var(--card);border:1px dashed var(--line);border-radius:10px;font-size:14px}
+.empty{padding:22px 14px;text-align:center;color:var(--ink-2);background:transparent;border:1px dashed var(--line);border-radius:var(--r-panel);font-size:14px}
 .notice{background:var(--sodium-soft);border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0}
 .rolechip{font-size:11px;color:var(--ink-2);display:flex;gap:4px;align-items:center;white-space:nowrap}.rolechip select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:8px;padding:2px 6px;background:var(--card);color:var(--ink)}
 .rolechip b{color:var(--ink)}
@@ -248,7 +266,7 @@ nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card
 nav.tabs .in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr)}
 nav.tabs button{border:0;background:transparent;padding:10px 4px 12px;font-size:13px;font-weight:600;color:var(--ink-2);display:flex;flex-direction:column;align-items:center;gap:3px}
 nav.tabs button svg{width:22px;height:22px}
-nav.tabs button[aria-selected="true"]{color:var(--ink)}
+nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:800}
 nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50;display:none;max-width:90%}
@@ -319,10 +337,9 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
       <path d="M34 15l-9 30h18z" fill="var(--sodium)" opacity=".18"/>
     </svg>
     <div>
-      <h1>광주 동구 가로등 점검</h1>
-      <p>현장 점검과 고장 관리를 한곳에서</p>
+      <h1>동구 가로등</h1>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div class="sync" id="sync"><i></i><span>연결 중</span></div><div class="rolechip" id="roleChip"></div></div>
+    <div><div class="rolechip" id="roleChip"></div><div class="sync" id="sync" title="연결 중"><i></i><span>연결 중</span></div><button class="themebtn" id="themeBtn" aria-label="화면 밝기 전환" title="화면: 자동"></button></div>
   </header>
   <main id="view"></main>
 </div>
@@ -520,7 +537,11 @@ async function boot(){
   sub(db.collection("patrols").orderBy("start","desc").limit(30),"patrols",ptIndex);
   sub(db.collection("roles"),"roles");
 }
-function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);s.querySelector("span").textContent=txt}
+function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);s.querySelector("span").textContent=txt;s.title=txt}
+/* theme: auto → dark → light; night crews want dark whatever the phone says */
+const THEME_ICON={auto:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',dark:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',light:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M1 12h2M21 12h2"/></svg>'};
+function applyTheme(t){if(t==="auto")delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t;const b=$("#themeBtn");if(b){b.innerHTML=THEME_ICON[t];b.title=`화면: ${t==="auto"?"자동":t==="dark"?"야간":"주간"}`}}
+(function(){let t="auto";try{t=localStorage.getItem("dg-theme")||"auto"}catch(e){}applyTheme(t)})();
 async function resolveNames(){
   if(!user)return;
   const ids=[...new Set([...S.insp.map(i=>i.inspector),...S.lights.flatMap(l=>[l.foundBy,...(l.edits||[]).map(e=>e.by)]),...S.patrols.map(p=>p.by),...S.roles.map(r=>r.id),...S.reports.map(r=>r.reporterId)].filter(Boolean))].filter(id=>!(id in S.names));
@@ -589,14 +610,18 @@ function render(){
   const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<span>체험 역할</span><select id="demoRole" aria-label="체험 역할">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v}</option>`).join("")}</select>`:S.me?`<span>내 역할</span><b>${ROLE_LABEL[myRole()]}${rolesReady()?"":" (설정 전)"}</b>`:"";
   const v=$("#view");
   v.innerHTML=S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():S.tab==="report"?vReport():vNoAccess();
+  refreshAdminSection();
 }
 function vNoAccess(){
   return `<div class="panel" style="margin-top:12px"><h3>점검자·관리자용 화면이에요</h3><p class="muted">이 계정에는 아직 역할이 없어요. 관리자에게 아래 사용자 ID를 알려 주고 점검자로 등록해 달라고 하세요. 등록되면 화면을 새로 고치면 돼요.</p>
     <p>내 사용자 ID: <code>${esc(S.me||"")}</code></p>${!S.canWrite?`<p class="muted">공유 설정에서 "참여자" 권한도 필요해요.</p>`:""}</div>`;
 }
 function tally(clickable){
-  const n=s=>S.lights.filter(l=>l.status===s).length;
-  return `<div class="tally">${LSTAT.map(s=>`<button class="st-${s}" ${clickable?`data-stat="${s}" aria-pressed="${S.stat===s||(S.stat==="__open"&&s!=="정상")}"`:"tabindex=-1"}><b>${n(s)}</b><span>${s}</span></button>`).join("")}</div>`;
+  const n=s=>S.lights.filter(l=>l.status===s).length;const tot=S.lights.length||1;const open=LSTAT.slice(1).reduce((a,s)=>a+n(s),0);
+  return `<div class="status">
+    <div class="bar" aria-hidden="true">${LSTAT.map(s=>{const k=n(s);return k?`<i class="st-${s}" style="flex:${k}"></i>`:""}).join("")}</div>
+    <div class="counts">${LSTAT.slice(1).map(s=>`<button class="st-${s}" ${clickable?`data-stat="${s}" aria-pressed="${S.stat===s||(S.stat==="__open"&&s!=="정상")}"`:"tabindex=-1"}><b>${n(s)}</b><span>${s}</span></button>`).join("")}
+      <div class="rest"><b>${n("정상").toLocaleString()}</b> 정상<br><span>전체 ${S.lights.length.toLocaleString()}${open?` · 조치 필요 ${open}`:""}</span></div></div></div>`;
 }
 function lightRow(l){
   return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>
@@ -627,10 +652,10 @@ function vInspect(){
   ${!S.canWrite?`<div class="notice slim"><b>보기 전용</b> 점검 결과를 저장하려면 참여자 권한이 필요해요.</div>`:""}
   ${S.me==="local"?`<div class="notice slim"><b>체험 모드</b> 기록은 이 휴대폰에만 남고 공유되지 않아요.</div>`:""}
   <div class="actions">
-    <button class="primary" data-scan="inspect">${ICONS.scan}표찰 스캔<small>QR·사진으로 등 찾기</small></button>
-    <button id="ptBtn">${ICONS.car}야간 순찰<small>차량 이동 중 기록</small></button>
-    <button id="arBtn">${ICONS.near}주변 찾기<small>카메라 방향 안내</small></button>
-    <button id="mapBtn" data-mapscope="filtered">${ICONS.map}지도<small>현재 목록</small></button>
+    <button class="primary" data-scan="inspect">${ICONS.scan}<span>표찰 스캔<small>QR·사진으로 등 찾기</small></span></button>
+    <button id="ptBtn">${ICONS.car}<span>야간 순찰<small>차로 돌며 기록</small></span></button>
+    <button id="arBtn">${ICONS.near}<span>주변 찾기<small>카메라 방향 안내</small></span></button>
+    <button id="mapBtn" data-mapscope="filtered">${ICONS.map}<span>지도<small>현재 목록</small></span></button>
   </div>
   <div class="tools"><input id="q" type="search" placeholder="번호·주소·전주번호 검색" value="${esc(S.q)}" aria-label="검색" enterkeyhint="search">
   <select id="dong" aria-label="법정동">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===S.dong?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select></div>
@@ -681,32 +706,16 @@ function reportCard(r,admin){
       ${l&&l.status!=="고장"&&l.status!=="수리중"&&r.status!=="완료"?`<button class="btn sm" data-tofault="${esc(r.id)}">${esc(l.code)} 고장 등록</button>`:""}</div>`:""}
   </div>`;
 }
-function vAdmin(){
-  const open=S.lights.filter(l=>l.status!=="정상").sort((a,b)=>({"고장":0,"수리중":1,"점검필요":2}[a.status]-{"고장":0,"수리중":1,"점검필요":2}[b.status]));
-  const rOpen=S.reports.filter(r=>r.status!=="완료");
-  const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;
-  const pend=pendingList().filter(l=>l.reg==="미등록").length,np=S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length;
-  const nav=[["sec-open","조치 필요",open.length],...(FEATURES.reports?[["sec-rep","신고",rOpen.length]]:[]),["sec-kind","종류별",null],["sec-dong","동별",null],["sec-light","밝기 검토",S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null],["sec-hist","결과 확인",inspList().filter(i=>!i.reviewedAt).length||null]].concat(S.canWrite?[["sec-reg","현장 등록",null],["sec-patrol","순찰",S.patrols.length||null]].concat(can("admin")?[["sec-roles","권한",S.roles.length||null]]:[]).concat([["sec-edit","정보 수정",editedList().length||null],["sec-pend","미등록",pend],["sec-np","표찰 없음",np]]):[]);
-  const setupNotice=S.me&&S.me!=="local"&&!rolesReady()?`<div class="notice"><b>권한 설정 전이에요.</b> 지금은 참여자 모두가 미등록 처리·등 정보 수정까지 할 수 있어요. 관리자를 지정하면 그때부터 관리자만 그 일을 하고, 나머지는 점검자·주민으로 나뉘어요.${S.canWrite?` <button class="btn sm" id="claimAdmin" style="margin-left:6px">내가 관리자 되기</button>`:""}</div>`:"";
-  return `${setupNotice}${tally(false)}
-  <div class="chipbar quicknav">${nav.map(([id,t,n])=>`<button type="button" data-jump="${id}">${t}${n!=null?`<span class="secnum ${n?"":"zero"}">${n}</span>`:""}</button>`).join("")}</div>
-  <div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length.toLocaleString()}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건${FEATURES.reports?` · 미처리 신고 ${rOpen.length}건`:""}</span></div>${mapSVG()}<div class="split"><button class="btn sm" data-mapscope="all">지도에서 보기</button><button class="btn ghost sm" data-mapscope="open">조치 필요만 지도에서</button></div></div>
-  <h2 id="sec-open">조치가 필요한 등 <span class="muted">${open.length}</span></h2>
-  <div class="list">${open.length?open.slice(0,50).map(lightRow).join("")+(open.length>50?`<div class="muted">외 ${open.length-50}개 · 현장 점검 탭에서 상태로 걸러 보세요</div>`:""):`<div class="empty">모든 가로등이 정상이에요.</div>`}</div>
-  ${FEATURES.reports?`<h2 id="sec-rep">주민 신고 <span class="muted">미처리 ${rOpen.length}</span></h2>
-  <div class="list">${S.reports.length?S.reports.slice(0,20).map(r=>reportCard(r,can("admin"))).join(""):`<div class="empty">접수된 신고가 없어요.</div>`}</div>`:""}
-  <h2 id="sec-kind">종류별 현황</h2>
-  <div class="panel"><div class="kindtab"><span class="h">종류</span><span class="h">전체</span><span class="h">점검필요</span><span class="h">고장</span><span class="h">수리중</span>
+const ADMIN_SECTIONS={
+  open:{t:"조치가 필요한 등",d:"고장·수리중·점검필요 순",n:()=>S.lights.filter(l=>l.status!=="정상").length,body:()=>{const open=S.lights.filter(l=>l.status!=="정상").sort((a,b)=>({"고장":0,"수리중":1,"점검필요":2}[a.status]-{"고장":0,"수리중":1,"점검필요":2}[b.status]));return `<div class="list">${open.length?open.slice(0,100).map(lightRow).join("")+(open.length>100?`<div class="muted">외 ${open.length-100}개 · 현장 점검 탭에서 상태로 걸러 보세요</div>`:""):`<div class="empty">모든 가로등이 정상이에요.</div>`}</div>`}},
+  map:{t:"위치 분포",d:"동별 분포도와 지도",n:null,body:()=>{const thisMonth=S.insp.filter(i=>{const d=new Date(i.date),n=new Date();return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear()}).length;const rOpen=S.reports.filter(r=>r.status!=="완료");return `<div class="panel"><div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px"><h3>위치 분포</h3><span class="muted">전체 ${S.lights.length.toLocaleString()}개 · 최근 이력 중 이번 달 점검 ${thisMonth}건${FEATURES.reports?` · 미처리 신고 ${rOpen.length}건`:""}</span></div>${mapSVG()}<div class="split"><button class="btn sm" data-mapscope="all">지도에서 보기</button><button class="btn ghost sm" data-mapscope="open">조치 필요만 지도에서</button></div></div>`}},
+  kind:{t:"종류별 현황",d:"가로등·보안등·공원등·특이등",n:null,body:()=>`<div class="panel"><div class="kindtab"><span class="h">종류</span><span class="h">전체</span><span class="h">점검필요</span><span class="h">고장</span><span class="h">수리중</span>
     ${KINDS.map(k=>{const ls=S.lights.filter(l=>(l.kind||"가로등")===k);if(!ls.length)return"";const n=s=>ls.filter(l=>l.status===s).length;return `<span>${kindBadge(k)}</span><b>${ls.length.toLocaleString()}</b><b class="st-점검필요" style="color:${n("점검필요")?"var(--warn)":"var(--ink-2)"}">${n("점검필요")}</b><b style="color:${n("고장")?"var(--bad)":"var(--ink-2)"}">${n("고장")}</b><b style="color:${n("수리중")?"var(--fix)":"var(--ink-2)"}">${n("수리중")}</b>`}).join("")}</div>
-    <p class="muted" style="margin:10px 0 0">표찰 색과 같아요. 초록은 가로등(도로명+번호), 파랑은 보안등(동 이름+번호).</p></div>
-  <h2 id="sec-dong">법정동별 현황</h2>
-  <div class="panel">${S.lights.length?dongBars():`<span class="muted">데이터 없음</span>`}</div>
-  <h2 id="sec-light">밝기 예측·보완 검토 ${S.review?`<span class="muted">${S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length}</span>`:""}</h2>
-  ${reviewSection()}
-  <h2 id="sec-hist">점검 결과 확인 <span class="muted">${(()=>{const u=inspList().filter(i=>!i.reviewedAt).length;return u?`미확인 ${u}`:""})()}</span></h2>
-  ${inspReviewSection()}
-  ${S.canWrite?`<h2 id="sec-reg">현장 등록 (대장에 없는 등)</h2>
-  <p class="muted" style="margin:-6px 0 10px">대장에 없는 등이나 표찰이 없는 등주를 발견하면 여기에 남겨요. 저장되면 '미등록'으로 표시되고, 아래 미등록 관리에서 대장 반영 여부를 추적해요.</p>
+    <p class="muted" style="margin:10px 0 0">표찰 색과 같아요. 초록은 가로등(도로명+번호), 파랑은 보안등(동 이름+번호).</p></div>`},
+  dong:{t:"법정동별 현황",d:"동별 등 수와 상태",n:null,body:()=>`<div class="panel">${S.lights.length?dongBars():`<span class="muted">데이터 없음</span>`}</div>`},
+  light:{t:"밝기 예측·보완 검토",d:"어두운 구간 찾기",n:()=>S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null,body:()=>reviewSection()},
+  hist:{t:"점검 결과 확인",d:"검수·재점검 요청·CSV",n:()=>inspList().filter(i=>!i.reviewedAt).length||null,body:()=>inspReviewSection()},
+  reg:{t:"현장 등록",d:"대장에 없는 등 올리기",n:null,write:true,body:()=>`<p class="muted" style="margin:-6px 0 10px">대장에 없는 등이나 표찰이 없는 등주를 발견하면 여기에 남겨요. 저장되면 '미등록'으로 표시되고, 아래 미등록 관리에서 대장 반영 여부를 추적해요.</p>
   <div class="panel">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
       <div><label class="f" for="nKind">종류</label><select class="f-in" id="nKind">${KINDS.map(d=>`<option>${d}</option>`).join("")}</select></div>
@@ -727,16 +736,32 @@ function vAdmin(){
     <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="nPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="nPhotoLib">앨범에서 선택</button><input type="file" id="nPhoto" accept="image/*" capture="environment" hidden><input type="file" id="nPhotoLib" accept="image/*" hidden><img id="nPrev" alt="" hidden></div>
     <label class="f" for="nNote">메모 (선택)</label><input class="f-in" id="nNote" placeholder="예: 표찰 탈락, 신설 등, 전주 이설">
     <div class="split"><button class="btn" id="addLight">미등록으로 저장</button><button class="btn ghost" data-scan="admin" type="button">표찰 스캔</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button></div>
-  </div>
-  ${can("admin")?`<h2 id="sec-roles">사용자·권한 <span class="muted">${S.roles.length}</span></h2>${roleSection()}`:""}
-  <h2 id="sec-patrol">야간 순찰 기록 <span class="muted">${S.patrols.length}</span></h2>
-  ${patrolSection()}
-  <h2 id="sec-edit">정보 수정된 등 <span class="muted">${editedList().length}</span></h2>
-  ${editedSection()}
-  <h2 id="sec-pend">미등록 관리 <span class="muted">${pendingList().length}</span></h2>
-  ${pendingSection()}
-  <h2 id="sec-np">표찰 없는 등 (대장 기준) <span class="muted">${S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length}</span></h2>
-  ${noPlateSection()}`:""}`;
+  </div>`},
+  pend:{t:"미등록 관리",d:"대장 반영·반려·연결",n:()=>pendingList().filter(l=>l.reg==="미등록").length||null,write:true,body:()=>pendingSection()},
+  np:{t:"표찰 없는 등",d:"대장 기준 · 새 표찰 기록",n:()=>S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length||null,write:true,body:()=>noPlateSection()},
+  patrol:{t:"야간 순찰 기록",d:"순찰 범위·경로·일지",n:()=>S.patrols.length||null,write:true,body:()=>patrolSection()},
+  edit:{t:"정보 수정된 등",d:"변경 내역·CSV",n:()=>editedList().length||null,write:true,body:()=>editedSection()},
+  roles:{t:"사용자·권한",d:"관리자·점검자 지정",n:()=>S.roles.length||null,admin:true,body:()=>roleSection()}
+};
+function adminKeys(){return Object.keys(ADMIN_SECTIONS).filter(k=>{const x=ADMIN_SECTIONS[k];if(x.admin&&!can("admin"))return false;if(x.write&&!S.canWrite)return false;return true})}
+function openAdminSection(key){
+  const x=ADMIN_SECTIONS[key];if(!x)return;S.asec=key;
+  openSheet(`<div class="sheet-head"><div><h3>${esc(x.t)}</h3><div class="muted">${esc(x.d)}</div></div><button class="x" aria-label="뒤로" data-close>×</button></div><div id="asecBody">${x.body()}</div>`);
+}
+function refreshAdminSection(){
+  const key=S.asec;if(!key||!$("#sheet").classList.contains("open"))return;const x=ADMIN_SECTIONS[key];const body=$("#asecBody");if(!x||!body)return;
+  if(key==="reg"&&document.activeElement&&body.contains(document.activeElement))return; // don't wipe a form someone is typing in
+  const sh=$("#sheet");const st=sh.scrollTop;body.innerHTML=x.body();sh.scrollTop=st;
+}
+function vAdmin(){
+  const open=S.lights.filter(l=>l.status!=="정상").sort((a,b)=>({"고장":0,"수리중":1,"점검필요":2}[a.status]-{"고장":0,"수리중":1,"점검필요":2}[b.status]));
+  const setupNotice=S.me&&S.me!=="local"&&!rolesReady()?`<div class="notice"><b>권한 설정 전이에요.</b> 지금은 참여자 모두가 미등록 처리·등 정보 수정까지 할 수 있어요. 관리자를 지정하면 그때부터 관리자만 그 일을 하고, 나머지는 점검자·주민으로 나뉘어요.${S.canWrite?` <button class="btn sm" id="claimAdmin" style="margin-left:6px">내가 관리자 되기</button>`:""}</div>`:"";
+  const keys=adminKeys().filter(k=>k!=="open");
+  return `${setupNotice}${tally(false)}
+  <h2 style="margin-top:6px">조치가 필요한 등 <span class="muted">${open.length}</span>${open.length>6?`<button class="btn ghost sm" data-asec="open" style="float:right">전체 보기</button>`:""}</h2>
+  <div class="list">${open.length?open.slice(0,6).map(lightRow).join(""):`<div class="empty">모든 가로등이 정상이에요.</div>`}</div>
+  <h2>관리 메뉴</h2>
+  <div class="menu">${keys.map(k=>{const x=ADMIN_SECTIONS[k];const n=x.n?x.n():null;return `<button type="button" data-asec="${k}"><span class="mt">${esc(x.t)}${n!=null?`<span class="secnum">${n}</span>`:""}</span><span class="md">${esc(x.d)}</span></button>`}).join("")}</div>`;
 }
 function vReport(){
   const mine=S.me?S.reports.filter(r=>r.reporterId===S.me):[];
@@ -849,7 +874,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.rvmap){openReviewMap(t.dataset.rvmap);return}
   if(t.dataset.rvreg){reviewToForm(t.dataset.rvreg);return}
   if(t.id==="csv4"){exportReviewCSV();return}
-  if(t.dataset.jump){const el=document.getElementById(t.dataset.jump);if(el){const y=el.getBoundingClientRect().top+window.scrollY-64;window.scrollTo({top:y,behavior:"smooth"})}return}
+  if(t.dataset.asec){openAdminSection(t.dataset.asec);return}
   if(t.id==="openOnly"){S.stat=S.stat&&S.stat!=="정상"?null:"__open";S.limit=60;render();return}
   if(t.dataset.kind&&t.closest("#kindFilter")){S.kind=t.dataset.kind;S.limit=60;render();return}
   if(t.dataset.kind&&t.closest("#mapKind")){gmapKind=t.dataset.kind;document.querySelectorAll("#mapKind button").forEach(b=>b.setAttribute("aria-pressed",b===t));drawMapMarkers();return}
@@ -858,6 +883,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="allOk"&&draft){CHECKS.forEach(([k])=>draft.checks[k]="ok");document.querySelectorAll("#checks .pair button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v==="ok"));draft.manual=false;suggestResult();return}
   if(t.dataset.res&&draft){draft.result=t.dataset.res;draft.manual=true;document.querySelectorAll("#resSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
   if(t.id==="saveInsp"){if(need("inspect"))saveInspection();return}
+  if(t.id==="themeBtn"){const cur=document.documentElement.dataset.theme||"auto";const next=cur==="auto"?"dark":cur==="dark"?"light":"auto";try{localStorage.setItem("dg-theme",next)}catch(e){}applyTheme(next);toast(`화면을 ${next==="auto"?"자동":next==="dark"?"야간":"주간"}으로 바꿨어요.`);return}
   if(t.id==="claimAdmin"){if(rolesReady()){toast("이미 관리자가 있어요.");render();return}setRole(S.me,"admin");return}
   if(t.dataset.roledel){if(!need("admin"))return;const r=S.roles.find(x=>x.id===t.dataset.roledel);if(r&&r.role==="admin"&&S.roles.filter(x=>x.role==="admin").length<=1){toast("마지막 관리자는 뺄 수 없어요.");return}if(!confirm("이 사용자의 역할을 빼면 주민으로 취급돼요. 계속할까요?"))return;write(()=>db.doc("roles/"+t.dataset.roledel).delete(),"역할을 뺐어요.");return}
   if(t.id==="roleAdd"){if(!need("admin"))return;const id=$("#roleAddId").value.trim();if(!id){toast("사용자 ID를 넣어 주세요.");return}setRole(id,$("#roleAddRole").value);return}
@@ -912,7 +938,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.ptmap){openPatrolMap(t.dataset.ptmap);return}
   if(t.dataset.ptspot){ptSpot();return}
   if(t.dataset.ptspotdel){pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
-  if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;closeSheet();S.tab="admin";render();const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
+  if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;closeSheet();S.tab="admin";render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
   if(t.id==="ptListen"){ptListen(!pt.listen);return}
   if(t.dataset.ptview){ptView(t.dataset.ptview);return}
   if(t.id==="ptMapFollow"){pt.mapFollow=true;t.setAttribute("aria-pressed","true");if(pt.map&&pt.pos)pt.map.setView([pt.pos.lat,pt.pos.lng],Math.max(pt.map.getZoom(),17));return}
@@ -1523,7 +1549,7 @@ function openReviewMap(idx){
 }
 function reviewToForm(idx){
   const rv0=S.review;const c=rv0&&(rv0.mode==="roads"?rvList(rv0):rv0.cands)[+idx];if(!c)return;
-  closeSheet();S.tab="admin";render();const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
+  closeSheet();S.tab="admin";render();openAdminSection("reg");const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
   $("#nNoPlate").checked=true;["nNum","nRoad"].forEach(x=>{const el=$("#"+x);if(el)el.disabled=true});
   if(S.review.mode==="roads"){const k=c.near[0]?c.near[0].kind:(/primary|secondary|tertiary/.test(c.type)?"가로등":"보안등");$("#nKind").value=k;if(DONGS.includes(c.dong))d.value=c.dong;
     $("#nAddr").value=`${c.name} 어두운 구간 ${c.len}m 중간`;$("#nNote").value=`도로 검토: ${c.typeLabel}, 평균 밝기 ${Math.round(c.E*100)}%${c.dark?", 고장 등 영향":""}${c.nolight?", 근처 등 없음":""}`}
@@ -2272,10 +2298,10 @@ function applyScan(what){
   if(what==="quick"){if(!scan.pos){toast("위치를 아직 못 잡았어요.");return}const id=newIdFor(p);if(byId(id)){toast("이미 저장된 번호예요.");return}
     const rec={code:txt,dong:p.dong||(DONGS.includes(p.road)?p.road:""),kind:p.kind,num:p.num||null,road:p.road||null,main:p.main||null,sub:p.sub||null,poleNo:r.pole||null,address:"",lampType:"",status:"정상",lastInspected:null,reg:"미등록",lat:scan.pos.lat,lng:scan.pos.lng,acc:Math.round(scan.pos.acc||0),photo:r.plate||null,foundAt:Date.now(),foundBy:S.me||null,updatedAt:Date.now(),note:"표찰 스캔에서 바로 저장"};
     if(!rec.dong){const near=S.lights.filter(x=>typeof x.lat==="number").map(x=>({x,d:distM(scan.pos,x)})).sort((a,b)=>a.d-b.d)[0];if(near)rec.dong=near.x.dong}
-    write(()=>db.doc("lights/"+id).set(rec),`${txt}을(를) 미등록으로 저장했어요. 관리 현황에서 확인하세요.`).then(ok=>{if(ok){closeSheet();S.tab="admin";render()}});return}
+    write(()=>db.doc("lights/"+id).set(rec),`${txt}을(를) 미등록으로 저장했어요. 관리 현황에서 확인하세요.`).then(ok=>{if(ok){closeSheet();S.tab="admin";render();openAdminSection("pend")}});return}
   stopCam(false);closeSheet();
   if(what==="report"){S.tab="report";render();$("#rNum").value=p.kind==="가로등"?txt:p.num;if(p.dong)$("#rDong").value=p.dong;else if(l)$("#rDong").value=l.dong;$("#rLoc").focus();toast(`${txt} 번호를 넣었어요.`);return}
-  if(what==="register"){S.tab="admin";render();const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
+  if(what==="register"){S.tab="admin";render();openAdminSection("reg");const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
     $("#nNoPlate").checked=false;["nNum","nRoad"].forEach(x=>{const el=$("#"+x);if(el)el.disabled=false});
     $("#nKind").value=p.kind;$("#nNum").value=p.kind==="가로등"?`${p.main}-${p.sub}`:p.num;$("#nNum").placeholder=p.kind==="가로등"?"65-5":"642";$("#nRoadBox").hidden=p.kind!=="가로등";if(p.road)$("#nRoad").value=p.road;if(p.dong)d.value=p.dong;if(r.pole)$("#nPole").value=r.pole;
     $("#nAddr").scrollIntoView({behavior:"smooth",block:"center"});$("#nAddr").focus();toast(`${txt} 번호를 넣었어요. ${p.kind==="가로등"?"행정동과 ":""}위치를 적고 등록하세요.`)}
@@ -2349,7 +2375,7 @@ async function readLabelPhoto(file){
   }finally{scan.busy=false}
 }
 document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"||e.target.id==="scanPhotoLib"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
-const _close=closeSheet;closeSheet=function(fromHistory){stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
+const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
 
 render();
 try{if(localStorage.getItem("dg-near")==="1"){S.near=false;nearToggle()}}catch(e){}
