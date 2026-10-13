@@ -231,7 +231,9 @@ textarea.f-in{min-height:84px;resize:vertical}
 /* sheet */
 .sheet-bg{display:none!important}
 .sheet{position:fixed;inset:0;z-index:31;background:var(--bg);overflow:auto;display:none;padding:0 0 env(safe-area-inset-bottom,0px);overscroll-behavior:contain}
-.sheet.open{display:block}
+.sheet.open{display:block}.sheet:focus{outline:none}
+.help{margin:0 0 10px;font-size:13px;color:var(--ink-2)}.help summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--ink-2);padding:4px 0}.help summary::-webkit-details-marker{display:none}.help summary::before{content:"?";display:inline-flex;width:18px;height:18px;border-radius:50%;border:1.5px solid currentColor;align-items:center;justify-content:center;font-size:11px}.help[open] summary::before{content:"–"}.help p{margin:6px 0 0;line-height:1.55}
+.sheet-head .hact{margin-left:auto;align-self:center;flex:none}
 .sheet-in{max-width:760px;margin:0 auto;padding:0 16px 28px}
 .sheet .grab{display:none}
 .sheet-head{position:sticky;top:0;z-index:6;display:flex;align-items:flex-start;gap:8px;margin:0 -16px 8px;padding:10px 12px 8px;padding-top:max(10px,env(safe-area-inset-top));background:var(--bg);border-bottom:1px solid var(--line);box-shadow:0 2px 8px rgba(10,16,30,.06)}
@@ -569,7 +571,7 @@ function roleSection(){
   ${seen.size?`<h3 style="margin-top:14px">최근 활동했지만 역할이 없는 사용자 <span class="muted">${seen.size}</span></h3><p class="muted" style="margin:-4px 0 8px">역할이 없으면 주민으로 취급돼 신고만 할 수 있어요. 점검자로 올리면 현장 점검·순찰·현장 등록을 할 수 있어요.</p><div class="panel roles">${[...seen].map(([id,what])=>`<div class="row"><b>${nm(id)}</b><span class="muted">${what}</span><span style="margin-left:auto"></span>${sel(id,"resident")}</div>`).join("")}</div>`:""}
   <p class="muted" style="margin:10px 0 0">내 사용자 ID: <code>${esc(me||"")}</code> · 새 사용자는 이 링크를 열고 한 번이라도 신고·점검을 하면 위 목록에 떠요. 공유 설정에서 "참여자"로 초대해야 저장이 돼요.</p>
   <div class="split"><input class="f-in" id="roleAddId" placeholder="사용자 ID 직접 입력" style="flex:1;min-width:160px"><select class="f-in" id="roleAddRole" style="flex:0 0 auto">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select><button class="btn ghost sm" id="roleAdd">추가</button></div>
-  <p class="muted" style="margin:8px 0 0">역할은 화면에서만 구분돼요. 공유 데이터베이스 자체는 "참여자는 쓰기 가능"만 알기 때문에, 기술적으로는 참여자가 화면을 우회해 기록을 바꿀 수 있어요. 신뢰하는 사람만 참여자로 초대하세요.</p>`;
+  <details class="help" style="margin-top:8px"><summary>한계</summary><p style="margin:6px 0 0">역할은 화면에서만 구분돼요. 공유 데이터베이스 자체는 "참여자는 쓰기 가능"만 알기 때문에, 기술적으로는 참여자가 화면을 우회해 기록을 바꿀 수 있어요. 신뢰하는 사람만 참여자로 초대하세요.</p></details>`;
 }
 async function setRole(id,role){
   const cur=S.roles.find(r=>r.id===id);
@@ -717,7 +719,7 @@ const ADMIN_SECTIONS={
   dong:{t:"법정동별 현황",d:"동별 등 수와 상태",n:null,body:()=>`<div class="panel">${S.lights.length?dongBars():`<span class="muted">데이터 없음</span>`}</div>`},
   light:{t:"밝기 예측·보완 검토",d:"어두운 구간 찾기",n:()=>S.review?(S.review.mode==="roads"?rvList(S.review).length:S.review.cands.length):null,body:()=>reviewSection()},
   hist:{t:"점검 결과 확인",d:"검수·재점검 요청·CSV",n:()=>inspList().filter(i=>!i.reviewedAt).length||null,body:()=>inspReviewSection()},
-  reg:{t:"현장 등록",d:"대장에 없는 등 올리기",n:null,write:true,body:()=>`<p class="muted" style="margin:-6px 0 10px">대장에 없는 등이나 표찰이 없는 등주를 발견하면 여기에 남겨요. 저장되면 '미등록'으로 표시되고, 아래 미등록 관리에서 대장 반영 여부를 추적해요.</p>
+  reg:{t:"현장 등록",d:"대장에 없는 등 올리기",n:null,write:true,body:()=>`<details class="help"><summary>언제 쓰나요</summary><p>대장에 없는 등이나 표찰이 없는 등주를 발견하면 여기에 남겨요. 저장되면 '미등록'으로 표시되고, 미등록 관리에서 대장 반영 여부를 추적해요.</p></details>
   <div class="panel">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
       <div><label class="f" for="nKind">종류</label><select class="f-in" id="nKind">${KINDS.map(d=>`<option>${d}</option>`).join("")}</select></div>
@@ -737,8 +739,9 @@ const ADMIN_SECTIONS={
     <label class="f">현장 사진 (선택)</label>
     <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="nPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="nPhotoLib">앨범에서 선택</button><input type="file" id="nPhoto" accept="image/*" capture="environment" hidden><input type="file" id="nPhotoLib" accept="image/*" hidden><img id="nPrev" alt="" hidden></div>
     <label class="f" for="nNote">메모 (선택)</label><input class="f-in" id="nNote" placeholder="예: 표찰 탈락, 신설 등, 전주 이설">
-    <div class="split"><button class="btn" id="addLight">미등록으로 저장</button><button class="btn ghost" data-scan="admin" type="button">표찰 스캔</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button></div>
-  </div>`},
+    <div class="split"><button class="btn ghost" data-scan="admin" type="button">표찰 스캔으로 채우기</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button></div>
+  </div>
+  <div class="sheet-foot"><button class="btn sodium block" id="addLight">미등록으로 저장</button></div>`},
   pend:{t:"미등록 관리",d:"대장 반영·반려·연결",n:()=>pendingList().filter(l=>l.reg==="미등록").length||null,write:true,body:()=>pendingSection()},
   np:{t:"표찰 없는 등",d:"대장 기준 · 새 표찰 기록",n:()=>S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length||null,write:true,body:()=>noPlateSection()},
   patrol:{t:"야간 순찰 기록",d:"순찰 범위·경로·일지",n:()=>S.patrols.length||null,write:true,body:()=>patrolSection()},
@@ -793,7 +796,7 @@ function vReport(){
 
 /* ---------- sheets ---------- */
 let sheetHist=false;
-function openSheet(html){$("#sheetIn").innerHTML=`<div class="grab"></div>`+html;$("#sheet").classList.add("open");$("#sheetBg").classList.add("open");$("#sheet").scrollTop=0;document.body.style.overflow="hidden";setTimeout(()=>{const f=$("#sheet .x");f&&f.focus();const h=$("#sheet .sheet-head"),n=$("#sheet .subnav");if(h&&n)n.style.top=h.offsetHeight+"px"},30);
+function openSheet(html){$("#sheetIn").innerHTML=`<div class="grab"></div>`+html;$("#sheet").classList.add("open");$("#sheetBg").classList.add("open");$("#sheet").scrollTop=0;document.body.style.overflow="hidden";setTimeout(()=>{const sh=$("#sheet");sh.tabIndex=-1;sh.focus({preventScroll:true});const h=$("#sheet .sheet-head"),n=$("#sheet .subnav");if(h&&n)n.style.top=h.offsetHeight+"px"},30);
   if(!sheetHist){try{history.pushState({sheet:1},"");sheetHist=true}catch(e){}}}
 // the phone's back button closes the sheet instead of leaving the app
 window.addEventListener("popstate",()=>{if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}if(sheetHist){sheetHist=false;if($("#sheet").classList.contains("open"))closeSheet(true)}});
@@ -804,11 +807,11 @@ async function openLight(id){
   draft={lightId:id,checks:{},photo:null,photos:[],result:null};
   openSheet(`<div class="sheet-head st-${esc(l.status)}"><div><h3 style="font-size:19px">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:""}${esc(l.code)} <span class="chip">${esc(l.status)}</span></h3>
     <div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address)}</div><div class="muted">${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.lampId?` · 관리ID ${esc(l.lampId)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}${PT_LAST[l.id]?` · 순찰 통과 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" 점등 확인"}`:""}</div></div>
-    <button class="x" aria-label="닫기" data-close>×</button></div>
+    ${can("admin")?`<button class="btn ghost sm hact" data-ledit="${esc(l.id)}">정보 수정</button>`:""}<button class="x" aria-label="닫기" data-close>×</button></div>
     ${(()=>{const li=lightInfo(l);if(!li)return"";return `<div class="muted" style="margin:2px 0 6px">💡 예상 조명 반경 ${li.reach}m${li.on===0?" · 현재 꺼짐":li.on<1?" · 점검필요로 감쇠":""}${li.n1?` · 가장 가까운 등 ${esc(li.n1.code)} ${li.n1.d}m`:""}${li.gapNow?` · <span style="color:var(--warn)">이웃 등과 간격이 넓어요</span>`:""}${li.riskIfOut?` · <span style="color:var(--bad)">꺼지면 ${li.riskIfOut}개 구간이 어두워져요</span>`:""}</div>`})()}
     ${l.redoNote&&l.status==="점검필요"?`<div class="notice slim"><b>재점검 요청</b> ${esc(l.redoNote)}</div>`:""}
     ${l.removed?`<div class="muted" style="margin:2px 0 6px;color:var(--bad)">철거된 등으로 기록돼 있어요${l.removedAt?` (${fmtD(l.removedAt)})`:""}.</div>`:""}${l.note?`<div class="muted" style="margin:2px 0 6px">📝 ${esc(l.note)}</div>`:""}
-    ${S.canWrite?`<div class="split" style="margin:6px 0 4px"><span class="muted" style="align-self:center">상태 바로 변경</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}${can("admin")?`<button class="btn ghost sm" data-ledit="${esc(l.id)}" style="margin-left:auto">등 정보 수정</button>`:""}</div>`:""}
+    ${S.canWrite?`<div class="split" style="margin:6px 0 4px;align-items:center"><span class="muted">상태 바꾸기</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}</div>`:""}
     <div class="subnav" id="lightNav"><button type="button" data-sjump="shCheck">점검표</button><button type="button" data-sjump="shRes">결과·사진</button><button type="button" data-sjump="shHist">이력</button><button type="button" data-sjump="shGal">사진 이력</button>${l.edits&&l.edits.length?`<button type="button" data-sjump="shEdit">변경 이력</button>`:""}</div>
     <h2 id="shCheck">점검표</h2>
     <div class="panel" id="checks">${CHECKS.map(([k,t,s])=>`<div class="check"><div class="q">${t}<small>${s}</small></div><div class="pair" role="group" aria-label="${t}"><button class="g" data-ck="${k}" data-v="ok" aria-pressed="false">양호</button><button class="b" data-ck="${k}" data-v="bad" aria-pressed="false">불량</button></div></div>`).join("")}
@@ -1049,11 +1052,11 @@ function pendingSection(){
 function noPlateSection(){
   const ls=S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed);
   if(!ls.length)return `<div class="empty">대장에 '표찰없음'으로 남은 등이 없어요.</div>`;
-  return `<p class="muted" style="margin:-4px 0 8px">관리시스템 대장에 표찰 번호 없이 올라 있는 등이에요. 현장에서 표찰을 달면 그 번호를 여기에 기록하세요.</p>
+  return `<details class="help"><summary>이 목록은</summary><p>관리시스템 대장에 표찰 번호 없이 올라 있는 등이에요. 현장에서 표찰을 달면 그 번호를 여기에 기록하세요.</p></details>
   <div class="list">${ls.slice(0,30).map(l=>`<div class="panel" style="border-left:5px solid var(--bad)">
     <div style="display:flex;gap:8px;align-items:center">${kindBadge(l.kind)}<b>${esc(l.code)}</b><span class="reg np">표찰없음</span><span class="muted" style="margin-left:auto">ID ${esc(l.lampId||"")}</span></div>
     <div class="muted">${esc(l.dong)} · ${esc(l.address||"")}</div>
-    <div class="split"><button class="btn sm" data-platefix="${esc(l.id)}">표찰 번호 기록</button><button class="btn ghost sm" data-light="${esc(l.id)}">열기</button>${typeof l.lat==="number"?`<button class="btn ghost sm" data-mapone="${esc(l.id)}">지도</button>`:""}</div></div>`).join("")}${ls.length>30?`<div class="muted">외 ${ls.length-30}개</div>`:""}</div>`;
+    <div class="split"><button class="btn sodium sm" data-platefix="${esc(l.id)}">표찰 번호 기록</button><button class="btn ghost sm" data-light="${esc(l.id)}">열기</button>${typeof l.lat==="number"?`<button class="btn ghost sm" data-mapone="${esc(l.id)}">지도</button>`:""}</div></div>`).join("")}${ls.length>30?`<div class="muted">외 ${ls.length-30}개</div>`:""}</div>`;
 }
 async function regLink(id){
   const l=byId(id);if(!l)return;
@@ -1073,7 +1076,7 @@ function inspReviewSection(){
   const byWho=who.map(w=>({w,n:ls.filter(i=>i.inspector===w).length})).filter(x=>x.n).sort((a,b)=>b.n-a.n);
   const cnt=r=>ls.filter(i=>i.result===r).length;
   const faultTop=(()=>{const m={};ls.forEach(i=>(i.faults||[]).forEach(f=>m[f]=(m[f]||0)+1));return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,4)})();
-  return `<p class="muted" style="margin:-6px 0 10px">현장에서 올라온 점검 결과를 기간·점검자·결과별로 훑어보고, 사진과 점검표를 확인한 뒤 "확인"을 눌러 검수 도장을 찍어요. 다시 봐야 하면 "재점검 요청"으로 돌려보내요.</p>
+  return `<details class="help"><summary>검수는 이렇게</summary><p>현장에서 올라온 점검 결과를 기간·점검자·결과별로 훑어보고, 사진과 점검표를 확인한 뒤 "확인"을 눌러 검수 도장을 찍어요. 다시 봐야 하면 "재점검 요청"으로 돌려보내요.</p></details>
   ${seg("period",[[7,"7일"],[30,"30일"],[90,"90일"],[0,"전체"]],IR.period)}
   ${seg("result",[["전체","모든 결과"],["정상","정상"],["점검필요","점검필요"],["고장","고장"]],IR.result)}
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px"><select class="f-in" id="irWho" style="flex:1"><option value="전체">모든 점검자</option>${who.map(w=>`<option value="${esc(w)}" ${IR.who===w?"selected":""}>${esc(S.names[w]||"점검자 "+w.slice(0,6))}</option>`).join("")}</select>
@@ -1479,8 +1482,8 @@ function reviewSection(){
   const roadLine=ROADS?`<span class="muted">도로 ${ROADS.ways.length.toLocaleString()}개${ROADS.areas&&ROADS.areas.length?` · 단지·산 ${ROADS.areas.length.toLocaleString()}곳`:""} (OpenStreetMap${ROADS.src==="db"?" · 공유 저장소":""})</span>${can("admin")?`<button class="btn ghost sm" id="rvRoads" data-refetch="1">도로망 다시 받기</button>`:""}<span class="muted" id="rvRoadsStat">${S.rvRoadsStat||""}</span>`:`<button class="btn ghost sm" id="rvRoads">도로망 불러오기</button><span class="muted" id="rvRoadsStat">${S.rvRoadsStat||"도로망을 받으면 도로를 따라 어두운 구간을 찾아요."}</span>`;
   const modeSeg=`<div class="seg" style="margin:0 0 8px"><button type="button" data-rvmode="roads" aria-pressed="${mode==="roads"}" ${ROADS?"":"disabled"}>도로 따라 검토</button><button type="button" data-rvmode="pairs" aria-pressed="${mode==="pairs"}">등 간격으로 검토</button></div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px">${roadLine}</div>`;
-  const dongSel=`<select class="f-in" id="rvDong" style="flex:1">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===(rv?rv.dong:"전체")?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select>`;
-  const kindSel=`<select class="f-in" id="rvKind" style="flex:0 0 auto">${["전체",...KINDS.slice(0,2)].map(k=>`<option value="${k}" ${k===(rv?rv.kind:"전체")?"selected":""}>${k==="전체"?"모든 종류":k}</option>`).join("")}</select>`;
+  const dongSel=`<select class="f-in" id="rvDong">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===(rv?rv.dong:"전체")?"selected":""}>${d==="전체"?"모든 동":d}</option>`).join("")}</select>`;
+  const kindSel=`<select class="f-in" id="rvKind">${["전체",...KINDS.slice(0,2)].map(k=>`<option value="${k}" ${k===(rv?rv.kind:"전체")?"selected":""}>${k==="전체"?"모든 종류":k}</option>`).join("")}</select>`;
   let body="";
   if(rv&&rv.mode==="roads"){
     const cs=rvList(rv);const dark=cs.filter(c=>c.dark).length,nol=rv.cands.filter(c=>c.nolight).length;const totalLen=cs.reduce((s,c)=>s+c.len,0);const sk=rv.cands.skip||{};
@@ -1507,8 +1510,8 @@ function reviewSection(){
     :`<div class="empty">이 범위에서는 모델상 어두운 구간이 안 잡혔어요.</div>`}`;
   }
   return `<div class="panel">
-    <p class="muted" style="margin:0 0 8px">${ROADS?"도로 중심선을 8m 간격으로 따라가며 주변 등의 합산 밝기를 계산해, 어둡게 남는 구간을 찾아요. ":""}동구 대장의 실제 설치 간격을 기준으로 삼아요${(()=>{const c=lightGrid()&&CALIB;return c&&c["가로등"]&&c["보안등"]?` (이웃 간격 중앙값 가로등 ${c["가로등"].p50}m·보안등 ${c["보안등"].p50}m, 상위 10% 기준 ${c["가로등"].p90}m·${c["보안등"].p90}m)`:""})()}. 두 등 사이가 그보다 넓거나 고장·수리중 등 때문에 중간이 어두워지는 곳을 찾고, 광원 종류(LED·CDM·삼파장 등)로 밝기를 보정해요. 도로 따라 검토는 아파트·학교 단지 안, 숲·산, 주차장 통로·사유지 진입로를 빼고 봐요. 실측 조도는 반영되지 않으니 <b>현장 확인 순서를 정하는 용도</b>로 보세요.</p>
-    ${modeSeg}<div class="split" style="margin:0">${dongSel}${kindSel}<button class="btn sm" id="rvRun">검토 실행</button></div>${body}</div>`;
+    <details class="help"><summary>어떻게 찾나요</summary><p>${ROADS?"도로 중심선을 8m 간격으로 따라가며 주변 등의 합산 밝기를 계산해, 어둡게 남는 구간을 찾아요. ":""}동구 대장의 실제 설치 간격을 기준으로 삼아요${(()=>{const c=lightGrid()&&CALIB;return c&&c["가로등"]&&c["보안등"]?` (이웃 간격 중앙값 가로등 ${c["가로등"].p50}m·보안등 ${c["보안등"].p50}m, 상위 10% 기준 ${c["가로등"].p90}m·${c["보안등"].p90}m)`:""})()}. 두 등 사이가 그보다 넓거나 고장·수리중 등 때문에 중간이 어두워지는 곳을 찾고, 광원 종류(LED·CDM·삼파장 등)로 밝기를 보정해요. 도로 따라 검토는 아파트·학교 단지 안, 숲·산, 주차장 통로·사유지 진입로를 빼고 봐요. 실측 조도는 반영되지 않으니 <b>현장 확인 순서를 정하는 용도</b>로 보세요.</p></details>
+    ${modeSeg}<div class="grid2" style="margin:0 0 8px">${dongSel}${kindSel}</div><button class="btn block" id="rvRun">검토 실행</button>${body}</div>`;
 }
 async function exportReviewCSV(){
   const rv=S.review;if(!rv)return;const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
