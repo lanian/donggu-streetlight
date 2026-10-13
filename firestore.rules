@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    // ---- 역할: roles/{uid} = {role: admin|inspector|resident, name, at, by}
+    function signedIn(){ return request.auth != null; }
+    function myRole(){ return signedIn() && exists(/databases/$(db)/documents/roles/$(request.auth.uid)) ? get(/databases/$(db)/documents/roles/$(request.auth.uid)).data.role : ""; }
+    function isAdmin(){ return myRole() == "admin"; }
+    function isStaff(){ return myRole() == "admin" || myRole() == "inspector"; }
+    function setupDone(){ return exists(/databases/$(db)/documents/meta/setup); }
+
+    // 처음 한 번: 아직 setup 문서가 없을 때 로그인한 사람이 자기 자신을 관리자로 등록할 수 있음 → 앱이 곧바로 meta/setup을 씀
+    match /roles/{uid} {
+      allow read: if signedIn();
+      allow create: if isAdmin() || (!setupDone() && request.auth.uid == uid && request.resource.data.role == "admin");
+      allow update, delete: if isAdmin();
+    }
+    match /meta/setup { allow read: if signedIn(); allow create: if isAdmin(); allow update, delete: if false; }
+
+    // 사용자 표시 이름: 본인만 쓰고, 직원은 읽음
+    match /users/{uid} { allow read: if isStaff(); allow write: if signedIn() && request.auth.uid == uid; }
+
+    // 대장 덮어쓰기(상태·표찰·미등록·정보 수정): 직원 쓰기, 삭제·정보 수정 이력은 관리자
+    match /lights/{id} {
+      allow read: if isStaff();
+      allow create, update: if isStaff() && (!("edits" in request.resource.data) || isAdmin() || request.resource.data.edits == resource.data.edits);
+      allow delete: if isAdmin();
+    }
+    match /inspections/{id} {
+      allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.inspector == request.auth.uid;
+      allow update: if isAdmin() || (isStaff() && resource.data.inspector == request.auth.uid && !("reviewedAt" in request.resource.data.diff(resource.data).affectedKeys()));
+      allow delete: if isAdmin();
+    }
+    match /reports/{id} { allow read, create: if isStaff(); allow update: if isAdmin(); allow delete: if isAdmin(); }
+    match /patrols/{id} { allow read: if isStaff(); allow create: if isStaff() && request.resource.data.by == request.auth.uid; allow update, delete: if isAdmin(); }
+    match /photos/{id} { allow read, create: if isStaff(); allow update: if isStaff(); allow delete: if isAdmin(); }
+    match /roads/{id} { allow read: if isStaff(); allow write: if isAdmin(); }
+
+    // ---- 주민 신고 페이지(report/): 누구나 새로 만들기만, 읽기·수정은 직원
+    match /citizen_reports/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['code','issue','desc','lat','lng','acc','photo','contact','consent','at','ua','receipt','imported'])
+        && request.resource.data.imported == false
+        && request.resource.data.issue is string && request.resource.data.issue.size() <= 40
+        && request.resource.data.desc is string && request.resource.data.desc.size() <= 500
+        && (!('code' in request.resource.data) || request.resource.data.code.size() <= 40)
+        && (!('photo' in request.resource.data) || request.resource.data.photo.size() <= 220000)
+        && (!('contact' in request.resource.data) || request.resource.data.contact.size() <= 40)
+        && request.resource.data.at is int;
+      allow read, update, delete: if isStaff();
+    }
+  }
+}

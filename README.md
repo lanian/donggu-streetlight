@@ -159,11 +159,26 @@ GitHub Pages 주소를 열면 Android Chrome은 "앱으로 설치" 띠가, iPhon
 - `sw.js` — 서비스 워커. 앱 셸(index.html, 대장 JSON, 지도·QR 라이브러리, 아이콘)을 설치 시 캐시하고, 열 때마다 뒤에서 새로 받아 둡니다(다음에 열면 새 버전). 지도 타일(최대 600장)과 OCR·글꼴 CDN 파일은 쓴 것부터 캐시되어, 한 번 돌아본 구역은 통신 없이도 지도가 보입니다. `sw.js`의 `VERSION`을 올리면 오래된 캐시를 지우고 "새 버전이 있어요 → 지금 적용" 토스트가 뜹니다.
 - 오프라인에서는 화면과 대장은 열리지만 공유 저장은 되지 않습니다(체험 모드는 원래 기기 저장이라 그대로 동작). 아티팩트(claude.ai) 안에서는 서비스 워커를 등록하지 않습니다.
 
+## Firebase 적용 (독립 운영)
+
+`firebase-config.js`에 프로젝트 값을 넣으면 GitHub Pages에서 열어도 체험 모드가 아니라 **공유 저장소 모드**로 동작합니다. 아티팩트(claude.ai) 안에서는 무시되고 기존 아티팩트 DB를 씁니다.
+
+- 로그인: Google 계정(구청 계정). 로그인 전에는 로그인 화면만 보입니다.
+- 저장소: Firestore, 컬렉션 구조는 아티팩트 DB와 같습니다(lights·inspections·reports·patrols·roles·photos·roads + users·meta). 오프라인에서 저장하면 SDK가 큐에 두었다가 연결되면 올립니다(앱바에 "오프라인" 표시).
+- 역할 강제: `firestore.rules`가 roles/{uid}를 읽어 관리자·점검자만 쓰기를 허용합니다. 역할이 없는 계정은 아무것도 쓰지 못합니다. 첫 관리자는 `meta/setup`이 없을 때 "내가 관리자 되기"로 한 번만 등록되고 그 뒤로 잠깁니다.
+- 주민 신고(`citizen_reports`)도 같은 규칙 파일에 있습니다.
+
+설정 순서(관리자, 15분):
+1. console.firebase.google.com → 프로젝트 만들기 → **Firestore 데이터베이스** 만들기(프로덕션 모드, asia-northeast3)
+2. Firestore → 규칙 탭에 저장소의 `firestore.rules` 전체를 붙여넣고 게시
+3. **Authentication** → 로그인 방법 → Google 사용 → 승인된 도메인에 `lanian.github.io` 추가
+4. 프로젝트 설정 → 내 앱 → 웹 앱 추가 → `apiKey`, `authDomain`, `projectId`를 `firebase-config.js`에 넣기(주석의 예 참고). 주민 신고 자동 접수를 쓰려면 `report/config.js`에도 같은 `apiKey`·`projectId`와 `backend:"firestore"`
+5. 커밋·푸시 → Pages 주소를 열어 Google 로그인 → 관리 현황 "내가 관리자 되기" → 사용자·권한에서 점검자 지정
+6. (선택) 아티팩트에 쌓인 기존 기록은 CSV로 내려받아 보관합니다. 자동 이전 도구는 없습니다.
+
 ## 실행 환경에 대한 안내
 
-`index.html`은 Claude 아티팩트 런타임(`window.claude.use("db")`, `"sample"`, `"user"`, `"downloads"`)을 통해 저장·인식 기능을 사용합니다.
-GitHub Pages 등 일반 호스팅에서 열면 화면은 표시되지만 **오프라인 미리보기** 상태가 되어 점검 결과가 저장되지 않습니다.
-독립 운영이 필요하면 `boot()` 함수의 `claude.use(...)` 부분을 Firebase/Supabase 등 다른 백엔드로 교체하면 됩니다.
+`index.html`은 세 가지 모드로 동작합니다: ① Claude 아티팩트(`window.claude.use`) ② Firebase(`firebase-config.js` 설정 시) ③ 체험 모드(둘 다 없을 때, 이 기기에만 저장). 모드는 `boot()`에서 정해집니다.
 
 이 저장소는 소스 관리·백업·협업 용도이며, 실제 운영은 공유된 아티팩트 링크에서 이루어집니다.
 

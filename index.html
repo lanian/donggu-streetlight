@@ -24,6 +24,7 @@
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script>if(typeof qrcode!=="function"){document.write('<script src="vendor/qrcode.js"><\/script>')}</script>
 <script src="report/config.js"></script>
+<script src="firebase-config.js"></script>
 <script>if(!window.L){document.write('<script src="vendor/leaflet.js"><\/script>')}</script>
 <style>
 /* Leaflet 1.9.4 core CSS (BSD-2), image refs removed */
@@ -540,8 +541,38 @@ function mergeLights(){
 function onLights(snap){OV={};snap.docs.forEach(d=>{OV[d.id]=d.data()});mergeLights()}
 // write field changes for one light without touching the registry fields
 function patchLight(id,patch){const cur={...(OV[id]||{})};delete cur.id;return db.doc("lights/"+id).set({...cur,...patch})}
+/* ---------- Firebase mode (GitHub Pages + firebase-config.js): Google sign-in, Firestore with the same collection
+   layout, roles enforced by firestore.rules, offline writes queued by the SDK ---------- */
+let FB=null;
+async function fbBoot(cfg){
+  const V="10.12.2";for(const m of ["app","auth","firestore"])await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-${m}-compat.js`);
+  if(!firebase.apps.length)firebase.initializeApp(cfg);
+  const fs=firebase.firestore();try{await fs.enablePersistence({synchronizeTabs:true})}catch(e){}
+  FB={auth:firebase.auth(),fs};
+  await new Promise(res=>{const un=FB.auth.onAuthStateChanged(()=>{un();res()})});
+  try{const r=await FB.auth.getRedirectResult();}catch(e){}
+  const u=FB.auth.currentUser;
+  if(!u){S.me=null;S.fbSignedOut=true;setSync(false,"로그인 필요");render();return}
+  S.me=u.uid;S.fbSignedOut=false;
+  try{await fs.collection("users").doc(u.uid).set({name:u.displayName||u.email||"직원",email:u.email||"",photo:u.photoURL||"",at:Date.now()},{merge:true})}catch(e){}
+  db=fs;
+  user={id:async()=>u.uid,can:async()=>true,profiles:async ids=>{const out={};await Promise.all(ids.map(async id=>{try{const d=await fs.collection("users").doc(id).get();if(d.exists)out[id]={name:d.data().name}}catch(e){}}));return out}};
+  dl={save:async({filename,data})=>{const a=document.createElement("a");a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data],{type:"text/csv"}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)}};
+  const sub=(q,key,map)=>q.onSnapshot(snap=>{if(key==="lights")onLights(snap);else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));if(map)map();S.live=true;setSync(!snap.metadata.fromCache,snap.metadata.fromCache?"오프라인":"실시간");render();resolveNames()},err=>{if(err&&err.code==="permission-denied"){setSync(false,"권한 없음")}else setSync(false,"연결 끊김")});
+  sub(fs.collection("lights"),"lights");
+  sub(fs.collection("inspections").orderBy("date","desc").limit(40),"insp");
+  sub(fs.collection("reports").orderBy("createdAt","desc").limit(100),"reports");
+  sub(fs.collection("patrols").orderBy("start","desc").limit(30),"patrols",ptIndex);
+  sub(fs.collection("roles"),"roles");
+}
+async function fbSignIn(){const prov=new firebase.auth.GoogleAuthProvider();try{await FB.auth.signInWithPopup(prov);location.reload()}catch(e){if(e&&/popup/.test(e.code||"")){await FB.auth.signInWithRedirect(prov)}else toast("로그인하지 못했어요: "+(e&&e.code||""))}}
+async function fbSignOut(){try{await FB.auth.signOut()}catch(e){}location.reload()}
+function vSignIn(){return `<div class="panel" style="margin-top:12px"><h3>직원 로그인</h3><p class="muted">구청 Google 계정으로 로그인하면 점검·순찰 기록이 공유 저장소에 저장돼요. 역할(관리자·점검자)은 관리자가 지정해요.</p><button class="btn sodium block" id="fbSignIn">Google로 로그인</button></div>`}
 async function boot(){
   await loadRegistry();
+  if((!window.claude||!window.claude.use)&&window.FIREBASE_CONFIG&&window.FIREBASE_CONFIG.projectId){
+    setSync(false,"연결 중");try{await fbBoot(window.FIREBASE_CONFIG);return}catch(e){toast("Firebase에 연결하지 못했어요. 체험 모드로 열어요.")}
+  }
   if(!window.claude||!window.claude.use){
     db=localDb();S.me="local";setSync(false,"이 기기에만 저장");
     const o=$("#sync");o.title="공유 서버 없이 이 브라우저에만 저장되는 체험 모드예요.";
@@ -619,6 +650,7 @@ function roleSection(){
   return `<div class="panel roles">${rows.map(r=>`<div class="row"><b>${nm(r.id)}</b>${r.id===me?`<span class="muted">(나)</span>`:""}<span style="margin-left:auto"></span>${sel(r.id,r.role)}<button class="btn ghost sm" data-roledel="${esc(r.id)}" ${r.role==="admin"&&admins<=1?"disabled title=\"마지막 관리자는 뺄 수 없어요\"":""}>빼기</button></div>`).join("")}</div>
   ${seen.size?`<h3 style="margin-top:14px">최근 활동했지만 역할이 없는 사용자 <span class="muted">${seen.size}</span></h3><p class="muted" style="margin:-4px 0 8px">역할이 없으면 주민으로 취급돼 신고만 할 수 있어요. 점검자로 올리면 현장 점검·순찰·현장 등록을 할 수 있어요.</p><div class="panel roles">${[...seen].map(([id,what])=>`<div class="row"><b>${nm(id)}</b><span class="muted">${what}</span><span style="margin-left:auto"></span>${sel(id,"resident")}</div>`).join("")}</div>`:""}
   <p class="muted" style="margin:10px 0 0">내 사용자 ID: <code>${esc(me||"")}</code> · 새 사용자는 이 링크를 열고 한 번이라도 신고·점검을 하면 위 목록에 떠요. 공유 설정에서 "참여자"로 초대해야 저장이 돼요.</p>
+  ${FB?`<p class="muted" style="margin:8px 0 0">Firebase 모드 · 역할은 서버 규칙(firestore.rules)으로 강제돼요. 로그인 계정: ${esc((FB.auth.currentUser||{}).email||"")} <button class="btn ghost sm" id="fbSignOut">로그아웃</button></p>`:""}
   <div class="split"><input class="f-in" id="roleAddId" placeholder="사용자 ID 직접 입력" style="flex:1;min-width:160px"><select class="f-in" id="roleAddRole" style="flex:0 0 auto">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select><button class="btn ghost sm" id="roleAdd">추가</button></div>
   <details class="help" style="margin-top:8px"><summary>한계</summary><p style="margin:6px 0 0">역할은 화면에서만 구분돼요. 공유 데이터베이스 자체는 "참여자는 쓰기 가능"만 알기 때문에, 기술적으로는 참여자가 화면을 우회해 기록을 바꿀 수 있어요. 신뢰하는 사람만 참여자로 초대하세요.</p></details>`;
 }
@@ -632,7 +664,8 @@ async function write(fn,okMsg){
   if(!db){toast("이 화면에서는 저장할 수 없어요.");return false}
   try{await fn();if(okMsg)toast(okMsg);return true}
   catch(e){
-    if(e&&e.code==="invalid_argument"){S.canWrite=false;toast("저장 권한이 없어요. 공유 설정에서 참여자 이상 권한이 필요해요.")}
+    if(e&&e.code==="permission-denied"){toast("권한이 없어요. 관리자에게 역할을 요청하세요.")}
+    else if(e&&e.code==="invalid_argument"){S.canWrite=false;toast("저장 권한이 없어요. 공유 설정에서 참여자 이상 권한이 필요해요.")}
     else if(e&&e.code==="quota_exceeded")toast("저장 공간이 가득 찼어요. 오래된 기록을 정리해 주세요.");
     else toast("저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
     render();return false;
@@ -662,12 +695,13 @@ function render(){
   document.querySelector("nav.tabs").hidden=Object.values(allowed).filter(Boolean).length<2;
   const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<select id="demoRole" aria-label="체험 역할" title="체험 역할 바꾸기">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v.replace(/\(.*\)/,"")}</option>`).join("")}</select>`:S.me?`<b title="${rolesReady()?"내 역할":"관리자를 아직 지정하지 않았어요"}">${rolesReady()?ROLE_LABEL[myRole()].replace(/\(.*\)/,""):"권한 설정 전"}</b>`:"";
   const v=$("#view");
-  v.innerHTML=S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():S.tab==="report"?vReport():vNoAccess();
+  v.innerHTML=S.fbSignedOut?vSignIn():S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():S.tab==="report"?vReport():vNoAccess();
+  if(S.fbSignedOut)document.querySelector("nav.tabs").hidden=true;
   refreshAdminSection();
 }
 function vNoAccess(){
   return `<div class="panel" style="margin-top:12px"><h3>점검자·관리자용 화면이에요</h3><p class="muted">이 계정에는 아직 역할이 없어요. 관리자에게 아래 사용자 ID를 알려 주고 점검자로 등록해 달라고 하세요. 등록되면 화면을 새로 고치면 돼요.</p>
-    <p>내 사용자 ID: <code>${esc(S.me||"")}</code></p>${!S.canWrite?`<p class="muted">공유 설정에서 "참여자" 권한도 필요해요.</p>`:""}</div>`;
+    <p>내 사용자 ID: <code>${esc(S.me||"")}</code></p>${!S.canWrite?`<p class="muted">공유 설정에서 "참여자" 권한도 필요해요.</p>`:""}${FB?`<button class="btn ghost sm" id="fbSignOut">다른 계정으로 로그인</button>`:""}</div>`;
 }
 function tally(clickable){
   const n=s=>S.lights.filter(l=>l.status===s).length;const tot=S.lights.length||1;const open=LSTAT.slice(1).reduce((a,s)=>a+n(s),0);
@@ -956,11 +990,13 @@ document.addEventListener("click",async e=>{
   if(t.id==="allOk"&&draft){CHECKS.forEach(([k])=>draft.checks[k]="ok");document.querySelectorAll("#checks .pair button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v==="ok"));draft.manual=false;suggestResult();return}
   if(t.dataset.res&&draft){draft.result=t.dataset.res;draft.manual=true;document.querySelectorAll("#resSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
   if(t.id==="saveInsp"){if(need("inspect"))saveInspection();return}
+  if(t.id==="fbSignIn"){fbSignIn();return}
+  if(t.id==="fbSignOut"){fbSignOut();return}
   if(t.id==="pwaInstall"){if(PWA.prompt){PWA.prompt.prompt();PWA.prompt.userChoice.then(r=>{if(r.outcome==="accepted"){PWA.canInstall=false;PWA.prompt=null;render()}})}return}
   if(t.id==="pwaDismiss"){PWA.canInstall=false;PWA.iosHint=false;try{localStorage.setItem("dg-pwa-dismiss",String(Date.now()))}catch(e){}render();return}
   if(t.id==="pwaReload"){if(PWA.waiting)PWA.waiting.postMessage("skipWaiting");location.reload();return}
   if(t.id==="themeBtn"){const cur=document.documentElement.dataset.theme||"auto";const next=cur==="auto"?"dark":cur==="dark"?"light":"auto";try{localStorage.setItem("dg-theme",next)}catch(e){}applyTheme(next);toast(`화면을 ${next==="auto"?"자동":next==="dark"?"야간":"주간"}으로 바꿨어요.`);return}
-  if(t.id==="claimAdmin"){if(rolesReady()){toast("이미 관리자가 있어요.");render();return}setRole(S.me,"admin");return}
+  if(t.id==="claimAdmin"){if(rolesReady()){toast("이미 관리자가 있어요.");render();return}setRole(S.me,"admin").then(()=>{if(FB)db.collection("meta").doc("setup").set({at:Date.now(),by:S.me}).catch(()=>{})});return}
   if(t.dataset.roledel){if(!need("admin"))return;const r=S.roles.find(x=>x.id===t.dataset.roledel);if(r&&r.role==="admin"&&S.roles.filter(x=>x.role==="admin").length<=1){toast("마지막 관리자는 뺄 수 없어요.");return}if(!confirm("이 사용자의 역할을 빼면 주민으로 취급돼요. 계속할까요?"))return;write(()=>db.doc("roles/"+t.dataset.roledel).delete(),"역할을 뺐어요.");return}
   if(t.id==="roleAdd"){if(!need("admin"))return;const id=$("#roleAddId").value.trim();if(!id){toast("사용자 ID를 넣어 주세요.");return}setRole(id,$("#roleAddRole").value);return}
   if(t.id==="tiltBtn"){startTilt();return}
@@ -1180,6 +1216,7 @@ function inboxSection(){
 function fsReady(){const c=window.REPORT_CONFIG;return !!(c&&c.backend==="firestore"&&c.firestore&&c.firestore.projectId&&c.firestore.apiKey)}
 function loadScript(src){return new Promise((res,rej)=>{if(document.querySelector(`script[src="${src}"]`))return res();const sc=document.createElement("script");sc.src=src;sc.onload=res;sc.onerror=()=>rej(new Error("load "+src));document.head.appendChild(sc)})}
 async function fsApp(){
+  if(FB&&FB.auth.currentUser)return FB.fs;
   const c=window.REPORT_CONFIG.firestore;const V="10.12.2";
   for(const m of ["app","auth","firestore"])await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-${m}-compat.js`);
   if(!firebase.apps.length)firebase.initializeApp({apiKey:c.apiKey,authDomain:c.authDomain||`${c.projectId}.firebaseapp.com`,projectId:c.projectId});
@@ -1191,8 +1228,8 @@ async function importCitizenReports(){
   const c=window.REPORT_CONFIG.firestore;let n=0,skipped=0;
   try{
     const fs=await fsApp();
-    const snap=await fs.collection(c.collection||"citizen_reports").where("imported","==",false).orderBy("at","desc").limit(100).get();
-    for(const d of snap.docs){const x=d.data();
+    const snap=await fs.collection(c.collection||"citizen_reports").where("imported","==",false).limit(100).get();
+    for(const d of [...snap.docs].sort((x,y)=>(y.data().at||0)-(x.data().at||0))){const x=d.data();
       if(S.reports.some(r=>r.ext===d.id)){skipped++;continue}
       let l=null,code=x.code||"";if(code){const p=parseCode(code);if(p){l=lookup(p);code=l?l.code:labelText(p)}}
       if(!l&&typeof x.lat==="number"){const G=lightGrid();const me=G.toXY({lat:x.lat,lng:x.lng});const nb=G.near(me.x,me.y,40).filter(o=>!o.it.l.removed).sort((a,b)=>a.d-b.d)[0];if(nb&&!code){l=nb.it.l}}

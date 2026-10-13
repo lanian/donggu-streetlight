@@ -27,11 +27,11 @@
 2. `report/config.js`: `backend:"firestore"`, `firestore.projectId`, `firestore.apiKey` 입력. 페이지는 Firestore REST로 바로 저장한다(SDK 없음).
 3. 직원 앱 **신고함 → "QR 신고 가져오기"**: `report/config.js`가 설정돼 있으면 버튼이 켜진다. 누르면 Firebase SDK를 그때 불러와 직원 Google 계정으로 로그인하고(규칙의 직원 도메인만 통과), `imported==false`인 신고를 최대 100건 받아 신고함에 접수한다. 등 번호가 있으면 대장 등에 연결하고, 번호가 없으면 신고 위치 40m 안의 가장 가까운 등에 연결한다. 가져온 뒤 서버 문서는 `imported:true`로 표시하고 연락처·사진을 서버에서 지운다(직원 앱에만 남김).
 4. 신고를 **완료** 처리하면 연락처가 지워진다. 신고 카드의 "신고 위치"로 주변 등과 함께 지도에서 볼 수 있다.
-5. 아직 서버가 강제하지 않는 것: 직원 앱 안의 역할 구분. 이것은 직원 앱 저장소 자체를 Firestore로 옮길 때 규칙으로 함께 강제한다(별도 과제).
+5. 직원 앱 자체도 `firebase-config.js`를 채우면 Firestore 모드로 동작하며(README "Firebase 적용"), 이때 역할이 `firestore.rules`로 서버에서 강제된다. 규칙 파일은 저장소 루트 `firestore.rules` 하나로 합쳤다(주민 신고 규칙 포함).
 
 ### Firebase 설정 순서 (관리자, 10분)
 1. console.firebase.google.com → 프로젝트 만들기 → Firestore 데이터베이스 만들기(프로덕션 모드, 리전 asia-northeast3).
-2. 규칙 탭에 `report/firestore.rules` 붙여넣기. `@donggu[.]kr`를 직원 이메일 도메인으로 바꾸고 게시.
+2. 규칙 탭에 루트 `firestore.rules` 붙여넣기(직원은 roles 문서로 판별되므로 도메인 설정은 없음).
 3. Authentication → 로그인 방법 → Google 사용 설정. 승인된 도메인에 `lanian.github.io` 추가.
 4. 프로젝트 설정 → 웹 앱 추가 → `apiKey`, `projectId` 복사 → `report/config.js`에 넣고 `backend:"firestore"`로 변경 → 커밋.
 5. 신고 페이지에서 테스트 신고 → 직원 앱 신고함 → "QR 신고 가져오기".
