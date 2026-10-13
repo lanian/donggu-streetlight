@@ -242,6 +242,13 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ovl .cap button{background:#1A2538;color:#fff;border:1px solid #2F3B52;min-height:38px}.ovl .cap button[aria-pressed="true"]{background:#E89A0C;color:#1B1300;border-color:#E89A0C}
 .cmp{display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%;height:100%;align-items:center}.cmp div{text-align:center;font-size:12px;color:#A9B6CC}.cmp img{max-width:100%;max-height:70vh;display:block;margin:0 auto}
 @media print{.wrap,nav.tabs,.sheet-bg,.toast,.ovl,.noprint,.subnav,.sheet-foot{display:none!important}.sheet{display:block!important;position:static;max-height:none;overflow:visible;border-radius:0;background:#fff;color:#000}.sheet-in{max-width:none;padding:0}.psheet img{page-break-inside:avoid}}
+.rep h3{margin:18px 0 8px;font-size:15px}.rep table{width:100%;border-collapse:collapse;font-size:13px}.rep th,.rep td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.rep th{color:var(--ink-2);font-weight:600;font-size:12px}.rep td.n,.rep th.n{text-align:right;font-variant-numeric:tabular-nums}
+.rep .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.rep .kpi div{border:1px solid var(--line);border-radius:10px;padding:10px 12px}.rep .kpi b{display:block;font-size:22px;line-height:1.1}.rep .kpi span{font-size:12px;color:var(--ink-2)}
+.rep .cover{border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:12px}.rep .cover h2{margin:0 0 4px;font-size:20px}.rep .cover .muted{font-size:13px}
+.rep .legend{display:flex;gap:12px;font-size:12px;color:var(--ink-2);margin-top:4px}.rep .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.rep .trend{display:flex;gap:8px;align-items:flex-end;height:120px;padding:4px 0 0}.rep .trend .m{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end}.rep .trend .bar{width:100%;max-width:44px;display:flex;flex-direction:column-reverse;gap:2px}.rep .trend .bar i{display:block;border-radius:2px}.rep .trend .bar i:last-child{border-radius:4px 4px 2px 2px}.rep .trend small{font-size:11px;color:var(--ink-2);white-space:nowrap}.rep .trend b{font-size:12px}
+.rep .pgrid img{aspect-ratio:4/3}
+@media print{.rep{color:#000}.rep .kpi div,.rep th,.rep td{border-color:#bbb}.rep .trend .bar i{-webkit-print-color-adjust:exact;print-color-adjust:exact}.status .bar i,.kind,.chip{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 .psheet{display:grid;grid-template-columns:1fr 1fr;gap:12px}.psheet figure{margin:0;page-break-inside:avoid}.psheet img{width:100%;border:1px solid #ccc;border-radius:4px}.psheet figcaption{font-size:12px;margin-top:4px}
 
 /* sheet */
@@ -785,6 +792,7 @@ const ADMIN_SECTIONS={
   np:{t:"표찰 없는 등",d:"대장 기준 · 새 표찰 기록",n:()=>S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length||null,write:true,body:()=>noPlateSection()},
   patrol:{t:"야간 순찰 기록",d:"순찰 범위·경로·일지",n:()=>S.patrols.length||null,write:true,body:()=>patrolSection()},
   edit:{t:"정보 수정된 등",d:"변경 내역·CSV",n:()=>editedList().length||null,write:true,body:()=>editedSection()},
+  report:{t:"보고서",d:"기간별 점검 보고서 · 인쇄/PDF",n:null,body:()=>reportSection()},
   roles:{t:"사용자·권한",d:"관리자·점검자 지정",n:()=>S.roles.length||null,admin:true,body:()=>roleSection()}
 };
 function adminKeys(){return Object.keys(ADMIN_SECTIONS).filter(k=>{const x=ADMIN_SECTIONS[k];if(x.admin&&!can("admin"))return false;if(x.write&&!S.canWrite)return false;return true})}
@@ -857,7 +865,7 @@ async function openLight(id){
     ${l.redoNote&&l.status==="점검필요"?`<div class="notice slim"><b>재점검 요청</b> ${esc(l.redoNote)}</div>`:""}
     ${l.removed?`<div class="muted" style="margin:2px 0 6px;color:var(--bad)">철거된 등으로 기록돼 있어요${l.removedAt?` (${fmtD(l.removedAt)})`:""}.</div>`:""}${l.note?`<div class="muted" style="margin:2px 0 6px">📝 ${esc(l.note)}</div>`:""}
     ${S.canWrite?`<div class="split" style="margin:6px 0 4px;align-items:center"><span class="muted">상태 바꾸기</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}</div>`:""}
-    <div class="subnav" id="lightNav"><button type="button" data-sjump="shCheck">점검표</button><button type="button" data-sjump="shRes">결과·사진</button><button type="button" data-sjump="shHist">이력</button><button type="button" data-sjump="shGal">사진 이력</button>${l.edits&&l.edits.length?`<button type="button" data-sjump="shEdit">변경 이력</button>`:""}</div>
+    <div class="subnav" id="lightNav"><button type="button" data-sjump="shCheck">점검표</button><button type="button" data-sjump="shRes">결과·사진</button><button type="button" data-sjump="shHist">이력</button><button type="button" data-sjump="shGal">사진 이력</button><button type="button" data-dossier="${esc(l.id)}" style="margin-left:auto;border-style:dashed">이력서 인쇄</button>${l.edits&&l.edits.length?`<button type="button" data-sjump="shEdit">변경 이력</button>`:""}</div>
     <h2 id="shCheck">점검표</h2>
     <div class="panel" id="checks">${CHECKS.map(([k,t,s])=>`<div class="check"><div class="q">${t}<small>${s}</small></div><div class="pair" role="group" aria-label="${t}"><button class="g" data-ck="${k}" data-v="ok" aria-pressed="false">양호</button><button class="b" data-ck="${k}" data-v="bad" aria-pressed="false">불량</button></div></div>`).join("")}
       <div class="split"><button class="btn ghost sm" id="allOk">모두 양호</button><button class="btn ghost sm" id="tiltBtn">등주 기울기 측정</button></div>
@@ -968,7 +976,11 @@ document.addEventListener("click",async e=>{
   if(t.dataset.pview){openPhotoViewer(t.dataset.pview);return}
   if(t.dataset.pcmp){openPhotoCompare(t.dataset.pcmp);return}
   if(t.dataset.psheet){openPhotoSheet(t.dataset.psheet);return}
-  if(t.id==="psPrint"){window.print();return}
+  if(t.id==="psPrint"||t.id==="repPrint"){window.print();return}
+  if(t.dataset.rep){REP[t.dataset.rep]=t.dataset.v;render();return}
+  if(t.id==="csv7"){exportReportCSV();return}
+  if(t.id==="repShare"){navigator.share({title:"가로등 점검 요약",text:repSummaryText()}).catch(()=>{});return}
+  if(t.dataset.dossier){openLightDossier(t.dataset.dossier);return}
   if(t.dataset.ledit){if(need("admin"))openLightEdit(t.dataset.ledit);return}
   if(t.id==="leGps"){t.disabled=true;t.textContent="측정 중…";navigator.geolocation.getCurrentPosition(p=>{$("#leLat").value=p.coords.latitude.toFixed(6);$("#leLng").value=p.coords.longitude.toFixed(6);$("#leAcc").textContent=`현재 위치로 바꿈 (±${Math.round(p.coords.accuracy)}m)`;leMoveMarker();t.disabled=false;t.textContent="현재 위치로"},()=>{toast("위치를 못 잡았어요. 위치 권한을 확인하세요.");t.disabled=false;t.textContent="현재 위치로"},{enableHighAccuracy:true,timeout:15000,maximumAge:0});return}
   if(t.id==="leReset"){const l=byId(t.dataset.id);if(!l)return;$("#leLat").value=typeof l.lat==="number"?l.lat.toFixed(6):"";$("#leLng").value=typeof l.lng==="number"?l.lng.toFixed(6):"";$("#leAcc").textContent="원래 좌표로 되돌림";leMoveMarker();return}
@@ -1032,6 +1044,9 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classLi
 document.addEventListener("input",e=>{if(e.target.id==="q"){S.q=e.target.value;S.limit=60;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
 document.addEventListener("change",async e=>{
   if(e.target.id==="rvNoLight"){S.rvNoLight=e.target.checked;render();return}
+  if(e.target.id==="repDong"){REP.dong=e.target.value;render();return}
+  if(e.target.id==="repPhotos"){REP.photos=e.target.checked;render();return}
+  if(e.target.id==="repFrom"||e.target.id==="repTo"){REP[e.target.id==="repFrom"?"from":"to"]=e.target.value;render();return}
   if(e.target.id==="irWho"){IR.who=e.target.value;IR.show=30;render();return}
   if(e.target.id==="irOnly"){IR.only=e.target.checked;IR.show=30;render();return}
   if(e.target.id==="ptDong"){pt.dong=e.target.value;pt.total=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&(pt.dong==="전체"||l.dong===pt.dong)).length;ptDraw(true);return}
@@ -1122,6 +1137,90 @@ async function regLink(id){
 const IR={period:7,result:"전체",who:"전체",only:false,show:30,more:null,loading:false};
 function inspList(){const base=IR.more||S.insp;const cut=IR.period?Date.now()-IR.period*86400000:0;return base.filter(i=>(!cut||i.date>=cut)&&(IR.result==="전체"||i.result===IR.result)&&(IR.who==="전체"||i.inspector===IR.who)&&(!IR.only||!i.reviewedAt))}
 async function inspLoadMore(){if(IR.loading||!db)return;IR.loading=true;try{const snap=await db.collection("inspections").orderBy("date","desc").limit(400).get();IR.more=snap.docs.map(d=>({id:d.id,...d.data()}))}catch(e){}IR.loading=false;render();resolveNames()}
+/* ---------- period report: one printable page the office can file ---------- */
+const REP={period:"month",from:"",to:"",dong:"전체",photos:false,data:null,loading:false,err:""};
+function repRange(){const now=new Date();let a,b=now.getTime();
+  if(REP.period==="month"){a=new Date(now.getFullYear(),now.getMonth(),1).getTime()}
+  else if(REP.period==="last"){a=new Date(now.getFullYear(),now.getMonth()-1,1).getTime();b=new Date(now.getFullYear(),now.getMonth(),1).getTime()-1}
+  else if(REP.period==="7"){a=b-7*86400000}
+  else if(REP.period==="30"){a=b-30*86400000}
+  else{a=REP.from?new Date(REP.from+"T00:00:00").getTime():b-30*86400000;b=REP.to?new Date(REP.to+"T23:59:59").getTime():b}
+  return{a,b};}
+async function repLoad(){if(REP.loading||!db)return;REP.loading=true;REP.err="";render();
+  try{const snap=await db.collection("inspections").orderBy("date","desc").limit(1000).get();REP.data={insp:snap.docs.map(d=>({id:d.id,...d.data()})),at:Date.now()}}catch(e){REP.err="점검 기록을 불러오지 못했어요."}
+  REP.loading=false;render();resolveNames();}
+function repMonthKey(t){const d=new Date(t);return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}`}
+function reportSection(){
+  if(!REP.data&&!REP.loading&&!REP.err)setTimeout(repLoad,0);
+  const {a,b}=repRange();const inDong=l=>REP.dong==="전체"||(l&&l.dong===REP.dong);
+  const lights=S.lights.filter(l=>!l.removed&&inDong(l));
+  const ins=(REP.data?REP.data.insp:S.insp).filter(i=>i.date>=a&&i.date<=b&&inDong(byId(i.lightId)||{dong:i.dong}));
+  const cnt=r=>ins.filter(i=>i.result===r).length;
+  const open=lights.filter(l=>l.status!=="정상");
+  const pats=S.patrols.filter(p=>p.start>=a&&p.start<=b&&(REP.dong==="전체"||p.dong===REP.dong||p.dong==="전체"));
+  const pend=S.lights.filter(l=>l.reg&&l.foundAt>=a&&l.foundAt<=b&&inDong(l));
+  const edits=S.lights.flatMap(l=>(l.edits||[]).filter(e=>e.at>=a&&e.at<=b&&!e.undone&&inDong(l)).map(e=>({l,e})));
+  const byDong=DONGS.map(d=>{const ls=S.lights.filter(l=>!l.removed&&l.dong===d);if(!ls.length)return null;const ii=ins.filter(i=>(byId(i.lightId)||{}).dong===d);return{d,n:ls.length,insp:ii.length,bad:ii.filter(i=>i.result==="고장").length,open:ls.filter(l=>l.status!=="정상").length}}).filter(Boolean).filter(r=>REP.dong==="전체"||r.d===REP.dong).sort((x,y)=>y.insp-x.insp||y.n-x.n);
+  const byWho=[...new Set(ins.map(i=>i.inspector).filter(Boolean))].map(w=>{const ii=ins.filter(i=>i.inspector===w);return{w,n:ii.length,bad:ii.filter(i=>i.result!=="정상").length,ph:ii.reduce((s,i)=>s+(i.photoN||(i.photo?1:0)),0),pt:ii.filter(i=>i.patrol).length}}).sort((x,y)=>y.n-x.n);
+  const faults={};ins.forEach(i=>(i.faults||[]).forEach(f=>faults[f]=(faults[f]||0)+1));const faultTop=Object.entries(faults).sort((x,y)=>y[1]-x[1]).slice(0,6);
+  // 6-month trend from everything loaded (not just the period)
+  const all=(REP.data?REP.data.insp:S.insp).filter(i=>inDong(byId(i.lightId)||{dong:i.dong}));const months=[];for(let k=5;k>=0;k--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-k);months.push(repMonthKey(d.getTime()))}
+  const trend=months.map(m=>{const ii=all.filter(i=>repMonthKey(i.date)===m);return{m,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length}});const tmax=Math.max(1,...trend.map(t=>t.ok+t.warn+t.bad));
+  const found=ins.filter(i=>i.result!=="정상").slice(0,100);
+  const title=`${REP.dong==="전체"?"동구 전체":REP.dong} 가로등·보안등 점검 보고서`;
+  const periodTxt=`${fmtD(a)} ~ ${fmtD(b)}`;
+  const seg=(key,opts,cur)=>`<div class="seg">${opts.map(([v,t])=>`<button type="button" data-rep="${key}" data-v="${v}" aria-pressed="${String(cur)===String(v)}">${t}</button>`).join("")}</div>`;
+  const controls=`<div class="panel noprint" style="margin-bottom:12px">
+    ${seg("period",[["month","이번 달"],["last","지난 달"],["7","최근 7일"],["30","최근 30일"],["custom","직접"]],REP.period)}
+    ${REP.period==="custom"?`<div class="grid2" style="margin-top:8px"><input class="f-in" type="date" id="repFrom" value="${esc(REP.from)}"><input class="f-in" type="date" id="repTo" value="${esc(REP.to)}"></div>`:""}
+    <div class="grid2" style="margin-top:8px"><select class="f-in" id="repDong">${["전체",...DONGS].map(d=>`<option value="${d}" ${d===REP.dong?"selected":""}>${d==="전체"?"동구 전체":d}</option>`).join("")}</select><label class="muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="repPhotos" ${REP.photos?"checked":""}> 고장 사진 부록</label></div>
+    <div class="split"><button class="btn sm" id="repPrint">인쇄 / PDF 저장</button>${dl?`<button class="btn ghost sm" id="csv7">표 CSV</button>`:""}${navigator.share?`<button class="btn ghost sm" id="repShare">요약 공유</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${REP.loading?"기록 불러오는 중…":REP.data?`최근 ${REP.data.insp.length}건 기준`:REP.err||""}</span></div></div>`;
+  const photoAppendix=REP.photos?(()=>{const ph=found.flatMap(i=>(i.thumbs||[]).map(t=>({...t,code:i.code,date:i.date,result:i.result}))).slice(0,40);return ph.length?`<h3>부록 · 고장·점검필요 사진 <span class="muted">${ph.length}장</span></h3><div class="pgrid">${ph.map(t=>`<button type="button" data-pview="${esc(t.id)}"><img src="${esc(t.t)}" alt="${esc(t.label||"")}" loading="lazy"><div class="lab">${esc(t.code)} · ${esc(t.label||"")} · ${fmtD(t.date)}</div></button>`).join("")}</div>`:`<h3>부록 · 사진</h3><p class="muted">기간 내 고장·점검필요 건에 사진이 없어요.</p>`})():"";
+  return controls+`<div class="rep" id="repBody">
+    <div class="cover"><h2>${esc(title)}</h2><div class="muted">기간 ${periodTxt} · 작성 ${fmtDT(Date.now())} · ${esc(S.names[S.me]||"담당자")}</div></div>
+    <div class="kpi"><div><b>${lights.length.toLocaleString()}</b><span>대상 등</span></div><div><b>${ins.length}</b><span>점검 건수</span></div><div><b>${open.length}</b><span>현재 조치 필요</span></div>
+      <div><b style="color:var(--ok)">${cnt("정상")}</b><span>정상</span></div><div><b style="color:var(--warn)">${cnt("점검필요")}</b><span>점검필요</span></div><div><b style="color:var(--bad)">${cnt("고장")}</b><span>고장</span></div></div>
+    <h3>월별 점검 추이 <span class="muted">최근 6개월</span></h3>
+    <div class="trend">${trend.map(t=>{const tot=t.ok+t.warn+t.bad;const h=v=>Math.round(v/tmax*84);return `<div class="m"><b>${tot||""}</b><div class="bar" style="height:${h(tot)}px">${t.ok?`<i style="height:${h(t.ok)}px;background:var(--ok)" title="정상 ${t.ok}"></i>`:""}${t.warn?`<i style="height:${h(t.warn)}px;background:var(--warn)" title="점검필요 ${t.warn}"></i>`:""}${t.bad?`<i style="height:${h(t.bad)}px;background:var(--bad)" title="고장 ${t.bad}"></i>`:""}</div><small>${t.m.slice(2)}</small></div>`}).join("")}</div>
+    <div class="legend"><span><i style="background:var(--ok)"></i>정상</span><span><i style="background:var(--warn)"></i>점검필요</span><span><i style="background:var(--bad)"></i>고장</span></div>
+    <h3>법정동별</h3><table><thead><tr><th>동</th><th class="n">등 수</th><th class="n">점검</th><th class="n">고장 발견</th><th class="n">현재 조치 필요</th></tr></thead><tbody>${byDong.slice(0,REP.dong==="전체"?40:1).map(r=>`<tr><td>${esc(r.d)}</td><td class="n">${r.n.toLocaleString()}</td><td class="n">${r.insp}</td><td class="n">${r.bad}</td><td class="n">${r.open}</td></tr>`).join("")}</tbody></table>
+    <h3>점검자별</h3>${byWho.length?`<table><thead><tr><th>점검자</th><th class="n">점검</th><th class="n">이상 발견</th><th class="n">순찰 표시</th><th class="n">사진</th></tr></thead><tbody>${byWho.map(r=>`<tr><td>${esc(S.names[r.w]||"점검자")}</td><td class="n">${r.n}</td><td class="n">${r.bad}</td><td class="n">${r.pt}</td><td class="n">${r.ph}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">기간 내 점검 기록이 없어요.</p>`}
+    ${faultTop.length?`<h3>불량 항목</h3><table><tbody>${faultTop.map(([f,n])=>`<tr><td>${esc(f)}</td><td class="n">${n}</td></tr>`).join("")}</tbody></table>`:""}
+    <h3>순찰·등록·수정</h3><table><tbody><tr><td>야간 순찰</td><td class="n">${pats.length}회 · ${(pats.reduce((s,p)=>s+(p.dist||0),0)/1000).toFixed(1)}km · 지나간 등 ${pats.reduce((s,p)=>s+(p.passed||[]).length,0)}개 · 표시 ${pats.reduce((s,p)=>s+(p.marks||[]).length,0)}건</td></tr><tr><td>현장 등록(미등록)</td><td class="n">${pend.length}건 (대장반영 ${pend.filter(l=>l.reg==="대장반영").length} · 반려 ${pend.filter(l=>l.reg==="반려").length})</td></tr><tr><td>등 정보 수정</td><td class="n">${edits.length}건</td></tr></tbody></table>
+    <h3>이상 발견 내역 <span class="muted">${found.length}${ins.filter(i=>i.result!=="정상").length>100?" / "+ins.filter(i=>i.result!=="정상").length:""}건</span></h3>
+    ${found.length?`<table><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th></tr></thead><tbody>${found.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${(i.faults||[]).map(esc).join(", ")}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">기간 내 이상 발견이 없어요.</p>`}
+    <h3>현재 조치 필요 등 <span class="muted">${open.length}</span></h3>
+    ${open.length?`<table><thead><tr><th>등</th><th>상태</th><th>마지막 점검</th><th>위치</th></tr></thead><tbody>${open.slice(0,150).map(l=>`<tr><td><b>${esc(l.code)}</b><br><span class="muted">${esc(l.dong)}</span></td><td><span class="chip st-${esc(l.status)}">${esc(l.status)}</span></td><td style="white-space:nowrap">${fmtD(l.lastInspected)}</td><td class="muted">${esc(l.address||"")}</td></tr>`).join("")}</tbody></table>${open.length>150?`<p class="muted">외 ${open.length-150}개</p>`:""}`:`<p class="muted">모든 등이 정상이에요.</p>`}
+    ${photoAppendix}
+    <p class="muted" style="margin-top:16px;font-size:11px">${REP.data?`점검 기록은 최근 ${REP.data.insp.length}건을 기준으로 집계했어요.`:""} 밝기·조명 범위는 모델 추정이며 실측값이 아니에요.</p>
+  </div>`;
+}
+function repSummaryText(){const {a,b}=repRange();const ins=(REP.data?REP.data.insp:S.insp).filter(i=>i.date>=a&&i.date<=b);const open=S.lights.filter(l=>!l.removed&&l.status!=="정상"&&(REP.dong==="전체"||l.dong===REP.dong));
+  return `[${REP.dong==="전체"?"동구":REP.dong} 가로등 점검 요약] ${fmtD(a)}~${fmtD(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${S.patrols.filter(p=>p.start>=a&&p.start<=b).length}회`}
+async function exportReportCSV(){
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;const {a,b}=repRange();const ins=(REP.data?REP.data.insp:S.insp).filter(i=>i.date>=a&&i.date<=b);
+  const rows=[["구분","항목","등 수","점검","정상","점검필요","고장","현재 조치 필요"]];
+  for(const d of DONGS){const ls=S.lights.filter(l=>!l.removed&&l.dong===d);if(!ls.length)continue;const ii=ins.filter(i=>(byId(i.lightId)||{}).dong===d);rows.push(["동",d,ls.length,ii.length,ii.filter(i=>i.result==="정상").length,ii.filter(i=>i.result==="점검필요").length,ii.filter(i=>i.result==="고장").length,ls.filter(l=>l.status!=="정상").length])}
+  for(const w of [...new Set(ins.map(i=>i.inspector).filter(Boolean))]){const ii=ins.filter(i=>i.inspector===w);rows.push(["점검자",S.names[w]||w,"",ii.length,ii.filter(i=>i.result==="정상").length,ii.filter(i=>i.result==="점검필요").length,ii.filter(i=>i.result==="고장").length,""])}
+  const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
+  try{await dl.save({filename:`동구가로등_보고서_${fmtD(a).replace(/\./g,"")}-${fmtD(b).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
+}
+/* per-light dossier: registry, status, inspections, photos — for a complaint file or a repair order */
+async function openLightDossier(id){
+  const l=byId(id);if(!l)return;
+  let rows=[];try{const snap=await db.collection("inspections").where("lightId","==",id).limit(50).get();rows=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.date-a.date)}catch(e){}
+  let photos=Object.values(GAL).filter(x=>x.lightId===id).sort((a,b)=>b.at-a.at);
+  if(!photos.length){try{const snap=await db.collection("photos").where("lightId","==",id).limit(20).get();photos=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.at-a.at)}catch(e){}}
+  openSheet(`<div class="sheet-head noprint"><div><h3>등 이력서</h3><div class="muted">${esc(l.code)} · 인쇄하거나 PDF로 저장</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+    <div class="split noprint" style="margin:0 0 10px"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button></div>
+    <div class="rep"><div class="cover"><h2>${kindBadge(l.kind)}${esc(l.code)} <span class="chip st-${esc(l.status)}">${esc(l.status)}</span></h2><div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address||"")} · 출력 ${fmtDT(Date.now())}</div></div>
+    <h3>대장 정보</h3><table><tbody><tr><td>관리ID</td><td>${esc(l.lampId||"")}</td><td>종류</td><td>${esc(l.kind||"")}</td></tr><tr><td>광원</td><td>${esc(l.lampType||"")}</td><td>등주</td><td>${esc(l.pole||"")}</td></tr><tr><td>점멸기</td><td>${esc(l.sw||"")}</td><td>전주번호</td><td>${esc(l.poleNo||"")}</td></tr><tr><td>좌표</td><td>${typeof l.lat==="number"?`${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}`:""}</td><td>마지막 점검</td><td>${fmtD(l.lastInspected)}</td></tr>${l.note?`<tr><td>비고</td><td colspan="3">${esc(l.note)}</td></tr>`:""}${l.redoNote?`<tr><td>재점검 요청</td><td colspan="3">${esc(l.redoNote)}</td></tr>`:""}</tbody></table>
+    <h3>점검 이력 <span class="muted">${rows.length}</span></h3>${rows.length?`<table><thead><tr><th>일시</th><th>결과</th><th>점검자</th><th>내용</th></tr></thead><tbody>${rows.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${esc(S.names[i.inspector]||"점검자")}</td><td>${(i.faults||[]).map(esc).join(", ")}${typeof i.tiltDeg==="number"?` · 기울기 ${i.tiltDeg.toFixed(1)}°`:""}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.reviewedAt?`<br><span class="muted">검수 ${fmtD(i.reviewedAt)}</span>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">점검 기록이 없어요.</p>`}
+    ${l.edits&&l.edits.length?`<h3>정보 변경 이력</h3><div class="panel">${editHistory(l)}</div>`:""}
+    ${PT_LAST[l.id]?`<h3>순찰</h3><p>마지막 순찰 통과 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" · 점등 확인"}</p>`:""}
+    ${photos.length?`<h3>사진 <span class="muted">${photos.length}</span></h3><div class="psheet">${photos.slice(0,12).map((r,i)=>`<figure><img src="${esc(r.data)}" alt=""><figcaption>${i+1}. ${esc(r.label||"")} · ${fmtDT(r.at)}${r.note?` · ${esc(r.note)}`:""}</figcaption></figure>`).join("")}</div>`:""}
+    </div>`);
+}
 function inspReviewSection(){
   const all=IR.more||S.insp;const ls=inspList();const who=[...new Set(all.map(i=>i.inspector).filter(Boolean))];
   const seg=(key,opts,cur)=>`<div class="seg" style="margin:0 0 8px">${opts.map(([v,t])=>`<button type="button" data-ir="${key}" data-v="${v}" aria-pressed="${String(cur)===String(v)}">${t}</button>`).join("")}</div>`;
