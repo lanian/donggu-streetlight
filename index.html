@@ -240,6 +240,14 @@ textarea.f-in{min-height:84px;resize:vertical}
 .pair button.b[aria-pressed="true"]{background:var(--bad);color:#fff}
 
 .photo-in{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row .rthumb{width:44px;height:44px;object-fit:cover;border-radius:8px;flex:none;border:1px solid var(--line)}
+.repbox{display:flex;gap:12px;align-items:center;margin:6px 0 10px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-panel);background:var(--card)}
+.repbox img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex:none;display:block}
+.repbox .ph{width:72px;height:72px;border-radius:8px;border:1px dashed var(--line);display:grid;place-items:center;color:var(--ink-2);font-size:22px;flex:none}
+.repbox .t{flex:1;min-width:0}.repbox .t b{display:block}.repbox .t .muted{font-size:12px}.repbox .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.ptcard .rthumb{width:36px;height:36px;object-fit:cover;border-radius:6px;flex:none}
+.rep .cover .repimg{width:150px;max-height:150px;object-fit:cover;border-radius:6px;border:1px solid #ccc;flex:none}
+.leaflet-popup-content .rthumb{width:100%;max-height:110px;object-fit:cover;border-radius:6px;display:block;margin:6px 0 2px}
 .photo-in img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
 .thumb{max-width:100%;border-radius:8px;margin-top:8px;display:block}
 .pstrip{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.pstrip .pt{position:relative;width:88px}.pstrip img{width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
@@ -748,7 +756,7 @@ function tally(clickable){
       <div class="rest"><b>${n("정상").toLocaleString()}</b> 정상<br><span>전체 ${S.lights.length.toLocaleString()}${open?` · 조치 필요 ${open}`:""}</span></div></div></div>`;
 }
 function lightRow(l){
-  return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>
+  return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>${repThumb(l)?`<img class="rthumb" src="${esc(repThumb(l))}" alt="" loading="lazy">`:""}
     <span class="body">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:l.noPlate&&!l.plateFixed?`<span class="reg np">표찰없음</span>`:""}<span class="code">${esc(l.code)}</span> <span class="muted">${esc(adongOf(l)||l.dong)}${l.lampType?` · ${esc(l.lampType)}`:""}</span>
     <span class="addr" style="display:block">${esc(l.address)}</span></span>
     <span class="meta">${S.near&&S.pos&&typeof l.lat==="number"?`<span class="dist">${fmtDist(distM(S.pos,l))}</span>`:""}<span class="chip">${esc(l.status)}</span>${DRAFTS[l.id]?`<span class="due" style="color:var(--fix)">작성 중</span>`:l.redoNote&&l.status==="점검필요"?`<span class="due">재점검 요청</span>`:isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${l.lastInspected?fmtD(l.lastInspected):"점검 기록 없음"}</span>`}</span></button>`;
@@ -946,6 +954,7 @@ async function openLight(id){
   openSheet(`<div class="sheet-head st-${esc(l.status)}"><div><h3 style="font-size:19px">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:""}${esc(l.code)} <span class="chip">${esc(l.status)}</span></h3>
     <div class="muted">${esc(adongOf(l)||"")}${adongOf(l)!==l.dong?` · ${esc(l.dong)}`:""}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address)}</div><div class="muted">${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.lampId?` · 관리ID ${esc(l.lampId)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}${PT_LAST[l.id]?` · 순찰 통과 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" 점등 확인"}`:""}</div></div>
     ${can("admin")?`<button class="btn ghost sm hact" data-ledit="${esc(l.id)}">정보 수정</button>`:""}<button class="x" aria-label="닫기" data-close>×</button></div>
+    ${repBox(l)}
     ${(()=>{const li=lightInfo(l);if(!li)return"";return `<div class="muted" style="margin:2px 0 6px">💡 예상 조명 반경 ${li.reach}m${li.on===0?" · 현재 꺼짐":li.on<1?" · 점검필요로 감쇠":""}${li.n1?` · 가장 가까운 등 ${esc(li.n1.code)} ${li.n1.d}m`:""}${li.gapNow?` · <span style="color:var(--warn)">이웃 등과 간격이 넓어요</span>`:""}${li.riskIfOut?` · <span style="color:var(--bad)">꺼지면 ${li.riskIfOut}개 구간이 어두워져요</span>`:""}</div>`})()}
     ${l.redoNote&&l.status==="점검필요"?`<div class="notice slim"><b>재점검 요청</b> ${esc(l.redoNote)}</div>`:""}
     ${(()=>{const rs=S.reports.filter(r=>r.lightId===l.id&&r.status!=="완료");return rs.length?`<div class="notice slim"><b>신고 ${rs.length}건</b> ${esc(rs[0].issue)}${rs[0].desc?` · ${esc(rs[0].desc.slice(0,40))}`:""} <span class="muted">${fmtD(rs[0].createdAt)}</span><button class="btn ghost sm" data-asec="inbox" style="margin-left:auto">신고함</button></div>`:""})()}
@@ -993,11 +1002,14 @@ async function saveInspection(){
   if(typeof draft.tilt==="number")rec.tiltDeg=draft.tilt;
   if(draft.photo)rec.photo=draft.photo;
   const photos=draft.photos||[];
+  // no 대표 사진 yet → the first 전경(or 표찰) shot of this inspection becomes it
+  const repPh=!repThumb(l)&&(photos.find(p=>p.label==="전경")||photos.find(p=>p.label==="표찰"))||null;let repPatch=null;
+  if(repPh){try{repPatch={photoT:thumbOf(await loadImg(repPh.data),112,.55),photoAt:now,photoBy:S.me||null}}catch(e){}}
   const ok=await write(async()=>{
-    if(photos.length){rec.thumbs=[];for(const ph of photos){const ref=await db.collection("photos").add({lightId:l.id,code:l.code,dong:l.dong,label:ph.label,note:ph.note||"",data:ph.data,w:ph.w,h:ph.h,at:now,by:S.me||null,kind:"inspection"});rec.thumbs.push({id:ref.id,label:ph.label,t:ph.thumb})}rec.photoN=photos.length}
+    if(photos.length){rec.thumbs=[];for(const ph of photos){const ref=await db.collection("photos").add({lightId:l.id,code:l.code,dong:l.dong,label:ph.label,note:ph.note||"",data:ph.data,w:ph.w,h:ph.h,at:now,by:S.me||null,kind:"inspection"});rec.thumbs.push({id:ref.id,label:ph.label,t:ph.thumb});if(repPatch&&ph===repPh)repPatch.photoId=ref.id}rec.photoN=photos.length}
     const iref=await db.collection("inspections").add(rec);
     if(rec.thumbs)for(const t of rec.thumbs)try{await db.doc("photos/"+t.id).update({inspId:iref.id})}catch(e){}
-    await patchLight(l.id,{status:draft.result,lastInspected:now,lastResult:draft.result,redoNote:null,updatedAt:now})},"점검 결과를 저장했어요.");
+    await patchLight(l.id,{status:draft.result,lastInspected:now,lastResult:draft.result,redoNote:null,updatedAt:now,...(repPatch&&repPatch.photoId?repPatch:{})})},repPatch?`점검 결과를 저장했어요. '${repPh.label}' 사진을 대표 사진으로 넣었어요.`:"점검 결과를 저장했어요.");
   if(ok){delete DRAFTS[l.id];draft=null;closeSheet()}else if(btn){btn.disabled=false;btn.textContent="점검 결과 저장"}
 }
 
@@ -1065,6 +1077,8 @@ document.addEventListener("click",async e=>{
   if(t.dataset.pdel){if(draft&&draft.photos){draft.photos.splice(+t.dataset.pdel,1);renderPhotoStrip()}return}
   if(t.dataset.pedit){const ph=draft&&draft.photos&&draft.photos[+t.dataset.pedit];if(ph)editPhotoMeta(ph);return}
   if(t.dataset.pview){openPhotoViewer(t.dataset.pview);return}
+  if(t.dataset.repview){openRepPhoto(t.dataset.repview);return}
+  if(t.dataset.repclear){if(!need("inspect"))return;clearRepPhoto(t.dataset.repclear).then(ok=>{if(ok)setTimeout(()=>refreshRepBox(t.dataset.repclear),60)});return}
   if(t.dataset.pcmp){openPhotoCompare(t.dataset.pcmp);return}
   if(t.dataset.psheet){openPhotoSheet(t.dataset.psheet);return}
   if(t.id==="psPrint"||t.id==="repPrint"){printSheet(t);return}
@@ -1172,6 +1186,7 @@ document.addEventListener("change",async e=>{
   if(pid0==="nPhoto"){const f=e.target.files&&e.target.files[0];if(!f)return;try{const d=await compress(f);const prev=$("#nPrev");prev.src=d;prev.hidden=false;window.__nPhoto=d}catch(err){toast("사진을 읽지 못했어요.")}return}
   if(e.target.id==="nKind"){const n=$("#nNum"),rb=$("#nRoadBox");if(n)n.placeholder=e.target.value==="가로등"?"65-5":"642";if(rb)rb.hidden=e.target.value!=="가로등";return}
   const pid=e.target.id.replace(/Lib$/,"");
+  if(pid==="repPhoto"){const f=e.target.files&&e.target.files[0];const box=$("#repBox");if(!f||!box)return;const id=box.dataset.id;box.querySelectorAll("button").forEach(b=>b.disabled=true);const ok=await setRepPhoto(id,f);if(ok)setTimeout(()=>refreshRepBox(id),60);else refreshRepBox(id);return}
   if(pid==="iPhoto"){const fs=[...(e.target.files||[])];if(!fs.length||!draft)return;for(const f of fs){if((draft.photos||[]).length>=PHOTO_MAX){toast(`사진은 ${PHOTO_MAX}장까지예요.`);break}await openPhotoEditor(f,{code:(byId(draft.lightId)||{}).code||"",onDone:ph=>{draft.photos.push(ph);renderPhotoStrip()}})}return}
   if(pid==="rPhoto"){
     const f=e.target.files&&e.target.files[0];if(!f)return;
@@ -1469,10 +1484,11 @@ async function openLightDossier(id){
   const l=byId(id);if(!l)return;
   let rows=[];try{const snap=await db.collection("inspections").where("lightId","==",id).limit(50).get();rows=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.date-a.date)}catch(e){}
   let photos=Object.values(GAL).filter(x=>x.lightId===id).sort((a,b)=>b.at-a.at);
-  if(!photos.length){try{const snap=await db.collection("photos").where("lightId","==",id).limit(20).get();photos=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.at-a.at)}catch(e){}}
+  if(!photos.length){try{const snap=await db.collection("photos").where("lightId","==",id).limit(20).get();photos=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.at-a.at);photos.forEach(r=>GAL[r.id]=r)}catch(e){}}
+  if(l.photoId)await getPhoto(l.photoId);
   openSheet(`<div class="sheet-head noprint"><div><h3>등 이력서</h3><div class="muted">${esc(l.code)} · 인쇄하거나 PDF로 저장</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="split noprint" style="margin:0 0 10px"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button></div>
-    <div class="rep"><div class="cover"><h2>${kindBadge(l.kind)}${esc(l.code)} <span class="chip st-${esc(l.status)}">${esc(l.status)}</span></h2><div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address||"")} · 출력 ${fmtDT(Date.now())}</div></div>
+    <div class="rep"><div class="cover" style="display:flex;gap:14px;align-items:flex-start"><div style="flex:1;min-width:0"><h2>${kindBadge(l.kind)}${esc(l.code)} <span class="chip st-${esc(l.status)}">${esc(l.status)}</span></h2><div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address||"")} · 출력 ${fmtDT(Date.now())}</div></div>${(()=>{const full=l.photoId&&GAL[l.photoId]?GAL[l.photoId].data:repThumb(l);return full?`<img class="repimg" src="${esc(full)}" alt="대표 사진">`:""})()}</div>
     <h3>대장 정보</h3><table><tbody><tr><td>관리ID</td><td>${esc(l.lampId||"")}</td><td>종류</td><td>${esc(l.kind||"")}</td></tr><tr><td>광원</td><td>${esc(l.lampType||"")}</td><td>등주</td><td>${esc(l.pole||"")}</td></tr><tr><td>점멸기</td><td>${esc(l.sw||"")}</td><td>전주번호</td><td>${esc(l.poleNo||"")}</td></tr><tr><td>좌표</td><td>${typeof l.lat==="number"?`${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}`:""}</td><td>마지막 점검</td><td>${fmtD(l.lastInspected)}</td></tr>${l.note?`<tr><td>비고</td><td colspan="3">${esc(l.note)}</td></tr>`:""}${l.redoNote?`<tr><td>재점검 요청</td><td colspan="3">${esc(l.redoNote)}</td></tr>`:""}</tbody></table>
     <h3>점검 이력 <span class="muted">${rows.length}</span></h3>${rows.length?`<table><thead><tr><th>일시</th><th>결과</th><th>점검자</th><th>내용</th></tr></thead><tbody>${rows.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${esc(S.names[i.inspector]||"점검자")}</td><td>${(i.faults||[]).map(esc).join(", ")}${typeof i.tiltDeg==="number"?` · 기울기 ${i.tiltDeg.toFixed(1)}°`:""}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.reviewedAt?`<br><span class="muted">검수 ${fmtD(i.reviewedAt)}</span>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">점검 기록이 없어요.</p>`}
     ${l.edits&&l.edits.length?`<h3>정보 변경 이력</h3><div class="panel">${editHistory(l)}</div>`:""}
@@ -1561,6 +1577,39 @@ async function loadGallery(id){
   }catch(e){box.textContent="사진을 불러오지 못했어요."}
 }
 async function getPhoto(id){if(GAL[id])return GAL[id];try{const d=await db.doc("photos/"+id).get();const v=d&&(typeof d.data==="function"?d.data():d);if(v&&v.data){const r={id,...v};GAL[id]=r;return r}}catch(e){}return null}
+/* ---------- 대표 사진: one reference photo per light — the full image is a "photos" doc, a ~3 KB thumb rides on the light
+   record itself so lists, patrol cards and map pop-ups can show it without another read ---------- */
+const repThumb=l=>(l&&(l.photoT||l.photo))||null; // l.photo = plate crop saved by older scan registrations
+function thumbOf(src,max,q){const w=src.width||src.naturalWidth,h=src.height||src.naturalHeight;const r=Math.min(1,max/Math.max(w,h));const c=document.createElement("canvas");c.width=Math.max(1,Math.round(w*r));c.height=Math.max(1,Math.round(h*r));c.getContext("2d").drawImage(src,0,0,c.width,c.height);return c.toDataURL("image/jpeg",q)}
+function loadImg(url){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error("img"));i.src=url})}
+async function makeRep(file){const img=await decodeFile(file);const w=img.width||img.naturalWidth,h=img.height||img.naturalHeight;const data=thumbOf(img,1000,.7),t=thumbOf(img,112,.55);if(img.close)img.close();const r=Math.min(1,1000/Math.max(w,h));return{data,t,w:Math.round(w*r),h:Math.round(h*r)}}
+async function setRepPhoto(id,file){
+  const l=byId(id);if(!l)return false;
+  let r;try{r=await makeRep(file)}catch(e){toast("사진을 읽지 못했어요.");return false}
+  const now=Date.now();
+  return write(async()=>{const ref=await db.collection("photos").add({lightId:l.id,code:l.code,dong:l.dong,label:"대표",note:"",data:r.data,w:r.w,h:r.h,at:now,by:S.me||null,kind:"rep"});GAL[ref.id]={id:ref.id,lightId:l.id,code:l.code,dong:l.dong,label:"대표",note:"",data:r.data,w:r.w,h:r.h,at:now,by:S.me||null,kind:"rep"};await patchLight(l.id,{photoId:ref.id,photoT:r.t,photoAt:now,photoBy:S.me||null,updatedAt:now})},"대표 사진을 넣었어요.");
+}
+async function setRepFromPhoto(id,photoId){
+  const l=byId(id),r=await getPhoto(photoId);if(!l||!r){toast("사진을 불러오지 못했어요.");return false}
+  let t;try{t=thumbOf(await loadImg(r.data),112,.55)}catch(e){toast("사진을 읽지 못했어요.");return false}
+  const now=Date.now();
+  return write(()=>patchLight(l.id,{photoId,photoT:t,photoAt:now,photoBy:S.me||null,updatedAt:now}),"이 사진을 대표 사진으로 정했어요.");
+}
+async function clearRepPhoto(id){if(!confirm("대표 사진을 뺄까요? 사진 이력에는 그대로 남아요."))return false;return write(()=>patchLight(id,{photoId:null,photoT:null,photoAt:null,photoBy:null,updatedAt:Date.now()}),"대표 사진을 뺐어요.")}
+async function openRepPhoto(id){
+  const l=byId(id);if(!l)return;
+  if(l.photoId&&await getPhoto(l.photoId)){openPhotoViewer(l.photoId);return}
+  const src=repThumb(l);if(!src)return;const ov=$("#ovl");ov.hidden=false;
+  ov.innerHTML=`<div class="bar"><b>${esc(l.code)}</b><span style="color:#A9B6CC">대표 사진</span><button class="x" id="pvX" aria-label="닫기">×</button></div><div class="stage"><img class="full" src="${esc(src)}" alt="대표 사진"></div>`;
+  ov.querySelector("#pvX").onclick=()=>{ov.hidden=true;ov.innerHTML=""};
+}
+function repBox(l){
+  const t=repThumb(l),w=S.canWrite&&can("inspect");
+  return `<div class="repbox" id="repBox" data-id="${esc(l.id)}">${t?`<button type="button" style="padding:0;border:0;background:none;flex:none" data-repview="${esc(l.id)}"><img src="${esc(t)}" alt="대표 사진"></button>`:`<div class="ph" aria-hidden="true">📷</div>`}
+    <div class="t"><b>대표 사진</b><span class="muted">${t?(l.photoAt?`${fmtD(l.photoAt)}${l.photoBy&&S.names[l.photoBy]?` · ${esc(S.names[l.photoBy])}`:""}`:"등록 때 찍은 표찰 사진"):"등주·표찰·주변이 함께 보이게 한 장 찍어 두면 현장에서 등을 찾기 쉬워요."}</span>
+    ${w?`<div class="btns"><button type="button" class="btn ghost sm" data-pick="repPhoto">${t?"다시 찍기":"사진 찍기"}</button><button type="button" class="btn ghost sm" data-pick="repPhotoLib">앨범에서</button>${t?`<button type="button" class="btn ghost sm" data-repclear="${esc(l.id)}">빼기</button>`:""}<input type="file" id="repPhoto" accept="image/*" capture="environment" hidden><input type="file" id="repPhotoLib" accept="image/*" hidden></div>`:""}</div></div>`;
+}
+function refreshRepBox(id){const b=$("#repBox"),l=byId(id);if(!b||!l||b.dataset.id!==id)return;b.outerHTML=repBox(l)}
 async function openPhotoViewer(id){
   const r=await getPhoto(id);if(!r){toast("사진을 불러오지 못했어요.");return}
   const sib=Object.values(GAL).filter(x=>x.lightId===r.lightId).sort((a,b)=>b.at-a.at);let i=Math.max(0,sib.findIndex(x=>x.id===id));
@@ -1568,8 +1617,9 @@ async function openPhotoViewer(id){
   const show=()=>{const x=sib[i]||r;ov.innerHTML=`<div class="bar"><b>${esc(x.code||"")}</b><span style="color:#A9B6CC">${esc(x.label||"")} · ${fmtDT(x.at)} · ${esc(S.names[x.by]||"점검자")}</span><button class="x" id="pvX" aria-label="닫기">×</button></div>
     <div class="stage"><img class="full" src="${esc(x.data)}" alt="${esc(x.label||"")}"></div>
     ${x.note?`<div class="cap">${esc(x.note)}</div>`:""}
-    <div class="tools"><button type="button" id="pvPrev" ${i<=0?"disabled":""}>‹ 이전</button><span style="color:#A9B6CC">${i+1} / ${sib.length||1}</span><button type="button" id="pvNext" ${i>=sib.length-1?"disabled":""}>다음 ›</button>${dl?`<button type="button" id="pvDl" style="margin-left:auto">내려받기</button>`:""}</div>`;
+    <div class="tools"><button type="button" id="pvPrev" ${i<=0?"disabled":""}>‹ 이전</button><span style="color:#A9B6CC">${i+1} / ${sib.length||1}</span><button type="button" id="pvNext" ${i>=sib.length-1?"disabled":""}>다음 ›</button>${S.canWrite&&can("inspect")&&x.lightId&&byId(x.lightId)?`<button type="button" id="pvRep" ${(byId(x.lightId)||{}).photoId===x.id?"disabled":""}>${(byId(x.lightId)||{}).photoId===x.id?"대표 사진":"대표 사진으로"}</button>`:""}${dl?`<button type="button" id="pvDl" style="margin-left:auto">내려받기</button>`:""}</div>`;
     ov.querySelector("#pvX").onclick=()=>{ov.hidden=true;ov.innerHTML=""};
+    const rp=ov.querySelector("#pvRep");if(rp)rp.onclick=async()=>{rp.disabled=true;const ok=await setRepFromPhoto(x.lightId,x.id);if(ok){setTimeout(()=>{refreshRepBox(x.lightId);show()},60)}else rp.disabled=false};
     ov.querySelector("#pvPrev").onclick=()=>{if(i>0){i--;show()}};ov.querySelector("#pvNext").onclick=()=>{if(i<sib.length-1){i++;show()}};
     const d=ov.querySelector("#pvDl");if(d)d.onclick=async()=>{try{const b=await (await fetch(x.data)).blob();await dl.save({filename:`${(x.code||"사진").replace(/\s+/g,"_")}_${fmtD(x.at).replace(/\./g,"")}_${x.label||""}.jpg`,data:b})}catch(e){}}};
   show();
@@ -1616,6 +1666,7 @@ function openLightEdit(id){
     <div class="grid2"><input class="f-in" id="leLat" inputmode="decimal" value="${typeof l.lat==="number"?l.lat.toFixed(6):""}" placeholder="위도"><input class="f-in" id="leLng" inputmode="decimal" value="${typeof l.lng==="number"?l.lng.toFixed(6):""}" placeholder="경도"></div>
     <div class="split" style="margin-top:6px"><button type="button" class="btn ghost sm" id="leGps">현재 위치로</button><button type="button" class="btn ghost sm" id="leReset" data-id="${esc(l.id)}">원래 좌표로</button><span class="muted" id="leAcc" style="align-self:center">지도의 핀을 끌어서 옮길 수도 있어요.</span></div>
     <div class="gmap" id="leMapBox" style="height:220px;margin-top:8px"></div>
+    <label class="f">대표 사진</label>${repBox(l)}
     <label class="f" for="leNote">비고</label><textarea class="f-in" id="leNote" placeholder="예: 2025.9 LED 교체, 전주 이설로 위치 변경">${esc(l.note||"")}</textarea>
     <div class="sheet-foot"><button class="btn sodium block" id="leSave" data-id="${esc(l.id)}">변경 내용 저장</button></div>
     ${l.edits&&l.edits.length?`<div class="split" style="margin-top:8px"><button class="btn ghost sm" id="leUndo" data-id="${esc(l.id)}">마지막 변경 되돌리기</button></div><h2>정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
@@ -1996,7 +2047,7 @@ function drawMapMarkers(){
   const order=[...pts].sort((a,b)=>({"정상":0,"점검필요":1,"수리중":2,"고장":3}[a.status]-{"정상":0,"점검필요":1,"수리중":2,"고장":3}[b.status]));
   order.forEach(l=>{
     const m=L.circleMarker([l.lat,l.lng],{radius:l.reg?9:l.status==="정상"?(many?4:6):8,color:l.reg?"#E89A0C":KIND_COL[l.kind]||"#fff",weight:l.reg?3:many&&l.status==="정상"?1.5:2.5,dashArray:l.reg?"3 3":null,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});
-    m.bindPopup(`${kindBadge(l.kind)}${l.reg?`<span class="reg">${esc(l.reg)}</span>`:""}<b style="font-size:14px">${esc(l.code)}</b> <span style="color:${STAT_COL[l.status]};font-weight:600">${esc(l.status)}</span><br>${esc(l.dong)} · ${esc(l.lampType||"")}<br>${esc(l.address)}<br><span style="color:#667">마지막 점검 ${fmtD(l.lastInspected)}${isDue(l)?" · 주기 경과":""}</span><br><button class="btn sm" style="margin-top:6px" data-map-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button>`);
+    m.bindPopup(`${kindBadge(l.kind)}${l.reg?`<span class="reg">${esc(l.reg)}</span>`:""}<b style="font-size:14px">${esc(l.code)}</b> <span style="color:${STAT_COL[l.status]};font-weight:600">${esc(l.status)}</span>${repThumb(l)?`<img class="rthumb" src="${esc(repThumb(l))}" alt="">`:"<br>"}${esc(l.dong)} · ${esc(l.lampType||"")}<br>${esc(l.address)}<br><span style="color:#667">마지막 점검 ${fmtD(l.lastInspected)}${isDue(l)?" · 주기 경과":""}</span><br><button class="btn sm" style="margin-top:6px" data-map-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button>`);
     m.addTo(gmapLayer);
   });
   const c=$("#mapCount");if(c)c.textContent=`${pts.length.toLocaleString()}개`;
@@ -2155,7 +2206,7 @@ function ptDraw(force){
   const key=pt.ahead.map(a=>a.l.id+":"+a.d+":"+a.side).join("|")+"#"+pt.sel+"#"+pt.marks.length+"#"+pt.spots.length;
   if(!force&&key===pt.key)return;pt.key=key;
   const marked=new Map(pt.marks.map(m=>[m.id,m.result]));
-  $("#ptAhead").innerHTML=pt.ahead.length?pt.ahead.map((a,i)=>`<button class="ptcard st-${esc(a.l.status)} ${(pt.sel?pt.sel===a.l.id:i===0)?"first":""}" data-ptsel="${esc(a.l.id)}"><span class="ptnum ${(pt.sel?pt.sel===a.l.id:i===0)?"sel":""}">${i+1}</span><span class="ptarrow" style="transform:rotate(${pt.heading==null?0:Math.round(angDiff(pt.heading,a.b))}deg)" aria-hidden="true">⬆</span>${kindBadge(a.l.kind)}<span><b>${esc(a.l.code)}</b><br><span class="side">${a.side}${a.l.status!=="정상"?` · ${esc(a.l.status)}`:""}${marked.has(a.l.id)?` · <b style="color:#FFB347">${esc(marked.get(a.l.id))} 표시됨</b>`:""}</span></span><span class="d">${a.fwd<0?"지남":a.d+"m"}</span></button>`).join(""):`<div class="muted" style="color:#A9B6CC">${pt.pos?"앞쪽 140m 안에 등록된 등이 없어요.":"GPS를 기다리는 중…"}</div>`;
+  $("#ptAhead").innerHTML=pt.ahead.length?pt.ahead.map((a,i)=>`<button class="ptcard st-${esc(a.l.status)} ${(pt.sel?pt.sel===a.l.id:i===0)?"first":""}" data-ptsel="${esc(a.l.id)}"><span class="ptnum ${(pt.sel?pt.sel===a.l.id:i===0)?"sel":""}">${i+1}</span><span class="ptarrow" style="transform:rotate(${pt.heading==null?0:Math.round(angDiff(pt.heading,a.b))}deg)" aria-hidden="true">⬆</span>${repThumb(a.l)?`<img class="rthumb" src="${esc(repThumb(a.l))}" alt="">`:""}${kindBadge(a.l.kind)}<span><b>${esc(a.l.code)}</b><br><span class="side">${a.side}${a.l.status!=="정상"?` · ${esc(a.l.status)}`:""}${marked.has(a.l.id)?` · <b style="color:#FFB347">${esc(marked.get(a.l.id))} 표시됨</b>`:""}</span></span><span class="d">${a.fwd<0?"지남":a.d+"m"}</span></button>`).join(""):`<div class="muted" style="color:#A9B6CC">${pt.pos?"앞쪽 140m 안에 등록된 등이 없어요.":"GPS를 기다리는 중…"}</div>`;
   const items=[...pt.marks.map(m=>({at:m.at,html:`<b>${esc(m.code)}</b> ${esc(m.result)} <span style="color:#8A98B3">${fmtT(m.at)}</span><button data-ptdrop="${esc(m.id)}">삭제</button>`})),...pt.spots.map((sp,i)=>({at:sp.at,html:`<b>어두운 지점</b> ${sp.near?esc(sp.near)+" 근처":""} <span style="color:#8A98B3">${fmtT(sp.at)}</span><button data-ptspotdel="${i}">삭제</button>`}))].sort((a,b)=>b.at-a.at).slice(0,5);
   $("#ptLog").innerHTML=items.map(i=>`<div>${i.html}</div>`).join("");
 }
