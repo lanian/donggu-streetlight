@@ -319,9 +319,11 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .ov{position:absolute;left:10px;right:10px;top:10px;background:rgba(16,24,40,.82);color:#fff;border-radius:12px;padding:10px 12px;backdrop-filter:blur(4px);border-left:5px solid var(--c);display:none}
 .ov.show{display:block}.ov{max-height:70%;overflow:auto}
 #plateOv{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-.ov .lrow{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:8px;padding:7px 9px;margin-top:6px;text-align:left;font:inherit}
-.ov .lrow b{font-size:15px}.ov .lrow small{color:#C9D3E3;display:block;font-size:11px}.ov .lrow .d{flex:none;font-size:12px;color:#C9D3E3}
+.ov .lrow,#liveRes .lrow{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:8px;padding:7px 9px;margin-top:6px;text-align:left;font:inherit}
+.ov .lrow b,#liveRes .lrow b{font-size:15px}.ov .lrow small,#liveRes .lrow small{color:#C9D3E3;display:block;font-size:11px}.ov .lrow .d,#liveRes .lrow .d{flex:none;font-size:12px;color:#C9D3E3}
 .ov .lrow.hot{background:rgba(232,154,12,.22);border-color:#E89A0C}
+#liveRes .lrow{background:transparent;border-color:var(--line);color:inherit;clear:both}#liveRes .lrow small,#liveRes .lrow .d{color:var(--ink-2)}#liveRes .lrow.hot{background:var(--sodium-soft);border-color:var(--sodium)}
+#liveRes .lres{margin-top:8px;border-left:5px solid var(--fix)}#liveRes .lres.one{border-left-color:var(--ok)}#liveRes .lres.none{border-left-color:var(--warn);display:flex;align-items:center;justify-content:space-between;gap:8px}#liveRes .lres img{width:56px;height:56px;object-fit:cover;border-radius:6px;float:right;margin-left:8px;border:1px solid var(--line)}
 .ov b{font-size:20px}.ov .muted{color:#C9D2E3}.ov .chip{background:var(--c);color:#fff}
 .ov .split .btn{background:#fff;color:#16233D}.ov .split .btn.ghost{background:transparent;color:#fff;border-color:#fff8}
 .arwrap{position:relative;background:#000;border-radius:12px;overflow:hidden;height:60vh;min-height:360px}
@@ -2630,9 +2632,10 @@ function livePlateStep(v){
   live.stable=same?live.stable+1:1;live.last=box;
   if(!big){liveHint("표찰이 보여요 — 조금 더 가까이");return}
   const ready=live.stable>=3&&performance.now()>live.cool;
-  if(LIVE_AUTO){if(ready)liveRead(box);else liveHint($("#camOv").classList.contains("show")?"읽었어요 · 다른 표찰로 옮기면 다시 읽어요":"표찰이 보여요 — 잠깐 멈춰 주세요")}
-  else{liveHint(live.stable>=2?"표찰이 보여요":null);if(live.stable>=2&&!$("#camOv").classList.contains("show")){live.snap=snapFrame();live.box=box;const ov=$("#camOv");ov.className="ov show st-점검필요";ov.innerHTML=`<b style="font-size:15px">표찰이 보여요</b><div class="muted">탭하면 사진을 보내 번호를 읽어요(처음엔 동의 창이 떠요).</div><div class="split" style="margin-top:8px"><button class="btn sm" data-livedetail="1">표찰 읽기</button></div>`}}
+  if(LIVE_AUTO){if(ready)liveRead(box);else liveHint(liveHas()?"읽었어요 · 다른 표찰로 옮기면 다시 읽어요":"표찰이 보여요 — 잠깐 멈춰 주세요")}
+  else{liveHint(live.stable>=2?"표찰이 보여요":null);if(live.stable>=2&&!liveHas()){live.snap=snapFrame();live.box=box;$("#liveRes").innerHTML=`<div class="panel lres none"><div><b>표찰이 보여요</b><div class="muted">탭하면 사진을 보내 번호를 읽어요(처음엔 동의 창이 떠요).</div></div><button class="btn sm" data-livedetail="1">표찰 읽기</button></div>`}}
 }
+function liveHas(){const b=$("#liveRes");return !!(b&&b.innerHTML)}
 function snapFrame(){const c=document.createElement("canvas");c.width=liveCv.width;c.height=liveCv.height;c.getContext("2d").drawImage(liveCv,0,0);return c}
 function liveHint(t){const h=$("#camHint");if(!h||!scan.stream)return;if(/엔진 준비|읽는 중/.test(h.textContent)&&!t)return;if(t){h.textContent=t;h.dataset.live="1"}else if(h.dataset.live){h.textContent=LIVE_AUTO?"QR이나 표찰을 비춰 주세요 · 표찰은 틀이 잡히면 자동으로 읽어요":"QR이나 표찰을 비춰 주세요 · 표찰이 잡히면 '읽기'를 눌러요";delete h.dataset.live}}
 function drawPlateOv(v,box){
@@ -2693,22 +2696,22 @@ function liveCands(tok,kind){
   return{cands,nearby};
 }
 function liveShow({num,kind,plate,cands,nearby}){
-  const ov=$("#camOv");if(!ov)return;
+  const ov=$("#liveRes");if(!ov)return;
   const key=`${kind}:${num}:${cands.map(c=>c.id).join(",")}`;
+  if(!num){ov.innerHTML=`<div class="panel lres none"><span class="muted">표찰 번호를 읽지 못했어요 — 정면에서 조금 더 가까이. 계속 다시 읽어요.</span><button class="btn ghost sm" data-livedetail="1">자세히 읽기</button></div>`;live.key=null;live.cool=performance.now()+2500;return}
   const row=(c,d,hot)=>`<button class="lrow${hot?" hot":""}" data-livecand="${esc(c.id)}"><span>${kindBadge(c.kind)}<b>${esc(c.code)}</b><small>${esc(c.address||c.dong||"")} · ${esc(c.status)}</small></span><span class="d">${typeof d==="number"?Math.round(d)+"m":""}</span></button>`;
   const dist=c=>scan.pos&&typeof c.lat==="number"?distM(scan.pos,c):null;
   const d0=cands.length?dist(cands[0]):null,d1=cands.length>1?dist(cands[1]):null;
   // confident when the number is unique, or the nearest match is right here and the next one is clearly elsewhere
   const one=cands.length===1?(d0==null||d0<=80):(d0!=null&&d0<=80&&(d1==null||d1>=200));
-  ov.className="ov show "+(one?`st-${cands[0].status}`:num?"st-수리중":"st-점검필요");
-  const thumb=plate?`<img src="${cropTo(plate,{x:0,y:0,w:plate.width,h:plate.height},160).toDataURL("image/jpeg",.6)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:6px;float:right;margin-left:8px;border:1px solid #fff4">`:"";
-  ov.innerHTML=thumb+(num?`<b style="font-size:16px">표찰 ${esc(num)}</b> <span class="chip">${esc(kind||"")} · 글자 인식</span>`:`<b style="font-size:15px">표찰 번호를 읽지 못했어요</b>`)
+  const thumb=plate?`<img src="${cropTo(plate,{x:0,y:0,w:plate.width,h:plate.height},160).toDataURL("image/jpeg",.6)}" alt="">`:"";
+  ov.innerHTML=`<div class="panel lres${one?" one":""}">`+thumb+(num?`<b style="font-size:16px">표찰 ${esc(num)}</b> <span class="chip">${esc(kind||"")} · 글자 인식</span>`:`<b style="font-size:15px">표찰 번호를 읽지 못했어요</b>`)
     +(one?`<div class="muted">${scan.pos?"근처에 이 번호는 하나뿐이에요":"대장에 이 번호는 하나예요"} · 표찰과 맞는지 확인하세요</div>`+row(cands[0],d0,true)+(cands.length>1?`<div class="muted" style="margin-top:6px">같은 번호의 다른 등</div>`+cands.slice(1,3).map(c=>row(c,dist(c))).join(""):"")
       :cands.length===1?`<div class="muted">대장의 이 번호는 현재 위치에서 ${Math.round(dist(cands[0]))}m 떨어져 있어요 — 표찰의 동 이름과 맞는지 확인하세요.</div>`+row(cands[0],dist(cands[0]))
       :cands.length?`<div class="muted">이 번호가 ${cands.length}곳에 있어요${scan.pos?" · 가까운 순":""}. 표찰의 동·도로명과 맞는 것을 고르세요.</div>`+cands.slice(0,3).map(c=>row(c,dist(c))).join("")+(cands.length>3?`<div class="muted">외 ${cands.length-3}곳 → 자세히 읽기</div>`:"")
       :num?`<div class="muted">${scan.pos?"근처 대장에 이 번호가 없어요.":"대장에 이 번호가 없어요."}${nearby.length?" 번호가 비슷한 근처 등:":""}</div>`:`<div class="muted">표찰을 정면에서 더 가까이 비추거나, 자세히 읽기를 눌러 주세요.</div>`)
     +(nearby.length?nearby.map(({x,d})=>row(x,d)).join(""):"")
-    +`<div class="split" style="margin-top:8px"><button class="btn ghost sm" data-livedetail="1">자세히 읽기 · 직접 입력</button>${num&&!cands.length&&!nearby.length&&S.canWrite&&scan.ctx!=="report"?`<button class="btn ghost sm" data-livenew="${esc(num)}" data-kind="${esc(kind||"보안등")}">미등록으로</button>`:""}</div>`;
+    +`<div class="split" style="margin-top:8px"><button class="btn ghost sm" data-livedetail="1">자세히 읽기 · 직접 입력</button>${num&&!cands.length&&!nearby.length&&S.canWrite&&scan.ctx!=="report"?`<button class="btn ghost sm" data-livenew="${esc(num)}" data-kind="${esc(kind||"보안등")}">미등록으로</button>`:""}</div></div>`;
   if(key!==live.key&&navigator.vibrate)navigator.vibrate(one?[30,40,30]:20);live.key=key;
   live.cool=performance.now()+(one?6000:4000);
 }
@@ -2721,7 +2724,7 @@ function onLiveCand(id){
 }
 async function liveDetail(){
   const src=live.snap,box=live.box;if(!src){toast("표찰이 잡힌 뒤에 눌러 주세요.");return}
-  stopCam(false);const ov=$("#camOv");if(ov)ov.className="ov";
+  stopCam(false);const lr=$("#liveRes");if(lr)lr.innerHTML="";
   if(LIVE_AUTO){ocrState.src=src;ocrState.box=box;await ocrLabel(null,null,box||undefined);return}
   // artifact: hand the frame to the photo path, where Claude reads the plate
   const blob=await new Promise(res=>src.toBlob(res,"image/jpeg",.92));
@@ -2737,6 +2740,7 @@ async function openScanner(ctx){
     <div id="camPanel"><div class="panel" style="padding:0;overflow:hidden;position:relative;background:#000"><video id="cam" playsinline muted style="width:100%;max-height:52vh;display:block;object-fit:cover"></video>
       <canvas id="plateOv"></canvas><div class="reticle"></div><div id="camOv" class="ov"></div>
       <div id="camHint" class="muted" style="position:absolute;left:0;right:0;bottom:0;padding:8px 12px;background:rgba(0,0,0,.55);color:#fff;font-size:13px">카메라 준비 중…</div></div>
+    <div id="liveRes"></div>
     <div class="split"><button class="btn ghost sm" id="scanStart">카메라 다시 켜기</button><button class="btn ghost sm" id="scanStop">카메라 끄기</button></div></div>
     <div id="photoStage" hidden><div class="stage"><canvas id="stageCanvas"></canvas></div><div id="stageStatus" class="muted stage-status" hidden></div>
       <div class="split"><button class="btn ghost sm" data-pick="scanPhotoLib">다른 사진 고르기</button><button class="btn ghost sm" data-pick="scanPhoto">다시 찍기</button><button class="btn ghost sm" id="camBack">카메라로 돌아가기</button></div></div>
@@ -2749,7 +2753,7 @@ async function openScanner(ctx){
   if(LIVE_AUTO)setTimeout(()=>{getOcr(m=>{const h=$("#camHint");if(!h||!scan.stream||ocrWorkers.eng||live.reading)return;if(m.status==="loading language traineddata"||m.status==="loading tesseract core")h.textContent=`표찰 인식 엔진 준비 중 ${Math.round((m.progress||0)*100)}% · QR은 지금도 읽어요`},"eng").then(()=>{const h=$("#camHint");if(h&&scan.stream&&!live.reading&&/엔진 준비/.test(h.textContent))h.textContent="QR이나 표찰을 비춰 주세요 · 표찰은 틀이 잡히면 자동으로 읽어요"}).catch(()=>{})},600);
 }
 async function startCam(){
-  stopCam(false);scan.liveKey=null;const o=$("#camOv");if(o)o.className="ov";
+  stopCam(false);scan.liveKey=null;const o=$("#camOv");if(o)o.className="ov";const lr=$("#liveRes");if(lr)lr.innerHTML="";
   {const cp=$("#camPanel"),st=$("#photoStage"),pk=$("#photoPick");if(cp)cp.hidden=false;if(st)st.hidden=true;if(pk)pk.hidden=false}
   const v=$("#cam"),hint=$("#camHint");if(!v)return;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){hint.textContent="이 기기에서는 카메라를 쓸 수 없어요. 아래에서 사진으로 읽어 주세요.";return}
