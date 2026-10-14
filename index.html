@@ -251,6 +251,12 @@ textarea.f-in{min-height:84px;resize:vertical}
 .rep .cover .repimgs{display:flex;gap:6px;flex:none}.rep .cover .repimg{width:110px;height:110px;object-fit:cover;border-radius:6px;border:1px solid #ccc}
 @media print{.rep .cover .repimg{width:40mm;height:40mm}}
 .ptcard .rthumb{width:36px;height:36px;object-fit:cover;border-radius:6px;flex:none}
+.posbox{margin:0 0 10px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-panel);background:var(--card)}
+.posbox .hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.posbox .hd b{font-size:14px}.posbox .hd .muted{font-size:12px}
+.posbox .d{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}.posbox .d.ok{color:var(--ok)}.posbox .d.far{color:var(--warn)}.posbox .d.bad{color:var(--bad)}
+.posbox .pmap{height:150px;border-radius:8px;overflow:hidden;margin-top:8px;background:var(--bg)}.posbox .ops{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.posme{background:none;border:0}.posme i{display:block;width:14px;height:14px;border-radius:50%;background:#2F5DA8;border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.hist .pos{display:inline-block;font-size:12px;color:var(--ink-2)}.hist .pos.far{color:var(--warn)}
 .leaflet-popup-content .rthumb{width:100%;max-height:110px;object-fit:cover;border-radius:6px;display:block;margin:6px 0 2px}
 .photo-in img{width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}
 .thumb{max-width:100%;border-radius:8px;margin-top:8px;display:block}
@@ -806,10 +812,15 @@ function vInspect(){
     <div class="frow"><span class="fl">상태</span><div class="chips"><button type="button" id="openOnly" aria-pressed="${S.stat==="__open"}">조치 필요만${open?` <span class="muted" style="font-size:11px">${open}</span>`:""}</button>${LSTAT.map(st=>`<button type="button" data-stat="${st}" aria-pressed="${S.stat===st}">${st}</button>`).join("")}</div></div>
     <div class="split" style="margin-top:8px"><button type="button" class="btn ghost sm" id="filterReset">모두 지우기</button><button type="button" class="btn sm" id="filterDone" style="margin-left:auto">닫기</button></div></div>`
   :act.length?`<div class="chipbar active"><span class="muted" style="align-self:center;font-size:12px">필터</span>${act.map(([k,v])=>`<button type="button" data-fclear="${k}" aria-pressed="true">${esc(v)} ×</button>`).join("")}</div>`:""}`})()}
-  <h2 style="margin-top:6px">${S.near&&S.pos?"가까운 순":S.q.trim()?"검색 결과":"점검할 등"} <span class="muted">${list.length.toLocaleString()}</span>${S.near&&!S.pos?`<span class="muted" style="font-weight:400;font-size:13px"> · 위치 잡는 중…</span>`:""}</h2>
-  ${S.near||S.q.trim()||due===0?"":`<p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${DUE_DAYS}일) 경과 ${due}개.</p>`}
-  <div class="list">${list.length?list.slice(0,S.limit).map(lightRow).join("")+(list.length>S.limit?`<button class="btn ghost block" id="moreList">더 보기 · ${list.length-S.limit}개 남음</button>`:""):`<div class="empty">${S.lights.length?`조건에 맞는 가로등이 없어요.<div class="muted" style="margin-top:4px">${[S.dong!=="전체"?`동: ${esc(S.dong)}`:"",S.kind!=="전체"?`종류: ${esc(S.kind)}`:"",S.stat?`상태: ${S.stat==="__open"?"조치 필요":esc(S.stat)}`:"",S.q.trim()?`검색: ${esc(S.q)}`:""].filter(Boolean).join(" · ")}</div><div class="split" style="justify-content:center"><button class="btn ghost sm" id="clearFilters">필터 모두 해제</button></div>`:(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}</div>`;
+  <div id="listArea">${listArea(list,due)}</div>`;
 }
+function listArea(list,due){
+  return `<h2 style="margin-top:6px">${S.near&&S.pos?"가까운 순":S.q.trim()?"검색 결과":"점검할 등"} <span class="muted">${list.length.toLocaleString()}</span>${S.near&&!S.pos?`<span class="muted" style="font-weight:400;font-size:13px"> · 위치 잡는 중…</span>`:""}</h2>
+  ${S.near||S.q.trim()||due===0?"":`<p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${DUE_DAYS}일) 경과 ${due}개.</p>`}
+  <div class="list">${list.length?list.slice(0,S.limit).map(lightRow).join("")+(list.length>S.limit?`<button class="btn ghost block" id="moreList">더 보기 · ${list.length-S.limit}개 남음</button>`:""):`<div class="empty">${S.lights.length?`조건에 맞는 가로등이 없어요.<div class="muted" style="margin-top:4px">${[S.dong!=="전체"?`동: ${esc(S.dong)}`:"",S.kind!=="전체"?`종류: ${esc(S.kind)}`:"",S.stat?`상태: ${S.stat==="__open"?"조치 필요":esc(S.stat)}`:"",S.q.trim()?`검색: ${esc(S.q)}`:""].filter(Boolean).join(" · ")}</div><div class="split" style="justify-content:center"><button class="btn ghost sm" id="clearFilters">필터 모두 해제</button></div>`:(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}`;
+}
+// typing in the search box: refresh the list only — replacing the <input> mid-composition splits Korean syllables (ㅈㅣㅅㅏㄴ)
+function renderList(){const a=$("#listArea");if(!a||S.tab!=="inspect"){render();return}a.innerHTML=listArea(filtered(),S.lights.filter(isDue).length)}
 function mapSVG(){
   const pts=S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
   if(!pts.length)return `<div class="empty">위치 정보가 있는 가로등이 없어요.</div>`;
@@ -959,6 +970,7 @@ async function openLight(id){
     <div class="muted">${esc(adongOf(l)||"")}${adongOf(l)!==l.dong?` · ${esc(l.dong)}`:""}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address)}</div><div class="muted">${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.lampId?` · 관리ID ${esc(l.lampId)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}${PT_LAST[l.id]?` · 순찰 통과 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" 점등 확인"}`:""}</div></div>
     ${can("admin")?`<button class="btn ghost sm hact" data-ledit="${esc(l.id)}">정보 수정</button>`:""}<button class="x" aria-label="닫기" data-close>×</button></div>
     ${repBox(l)}
+    ${posBox(l)}
     ${(()=>{const li=lightInfo(l);if(!li)return"";return `<div class="muted" style="margin:2px 0 6px">💡 예상 조명 반경 ${li.reach}m${li.on===0?" · 현재 꺼짐":li.on<1?" · 점검필요로 감쇠":""}${li.n1?` · 가장 가까운 등 ${esc(li.n1.code)} ${li.n1.d}m`:""}${li.gapNow?` · <span style="color:var(--warn)">이웃 등과 간격이 넓어요</span>`:""}${li.riskIfOut?` · <span style="color:var(--bad)">꺼지면 ${li.riskIfOut}개 구간이 어두워져요</span>`:""}</div>`})()}
     ${l.redoNote&&l.status==="점검필요"?`<div class="notice slim"><b>재점검 요청</b> ${esc(l.redoNote)}</div>`:""}
     ${(()=>{const rs=S.reports.filter(r=>r.lightId===l.id&&r.status!=="완료");return rs.length?`<div class="notice slim"><b>신고 ${rs.length}건</b> ${esc(rs[0].issue)}${rs[0].desc?` · ${esc(rs[0].desc.slice(0,40))}`:""} <span class="muted">${fmtD(rs[0].createdAt)}</span><button class="btn ghost sm" data-asec="inbox" style="margin-left:auto">신고함</button></div>`:""})()}
@@ -978,13 +990,13 @@ async function openLight(id){
     <h2 id="shHist">점검 이력</h2><div id="histBox" class="muted">불러오는 중…</div>
     <h2 id="shGal">사진 이력 <span class="muted" id="galN"></span></h2><div id="galBox" class="muted">불러오는 중…</div>
     ${l.edits&&l.edits.length?`<h2 id="shEdit">정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
-  restoreDraft(id);loadGallery(id);ensureRepPhotos(l).then(()=>refreshRepBox(id));
+  restoreDraft(id);loadGallery(id);ensureRepPhotos(l).then(()=>refreshRepBox(id));posCheckStart(id);
   if(!db){$("#histBox").textContent="기록을 불러올 수 없어요.";return}
   try{
     const snap=await db.collection("inspections").where("lightId","==",id).limit(20).get();
     const rows=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>b.date-a.date);
     const box=$("#histBox");if(!box||!draft||draft.lightId!==id)return;
-    box.innerHTML=rows.length?rows.map(i=>`<div class="hist st-${esc(i.result)}"><b>${fmtDT(i.date)}</b> <span class="chip">${esc(i.result)}</span> <span>${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${typeof i.tiltDeg==="number"?`<div>등주 기울기 ${i.tiltDeg.toFixed(1)}°</div>`:""}${i.faults&&i.faults.length?`<div>불량: ${i.faults.map(esc).join(", ")}</div>`:""}${i.memo?`<div>${esc(i.memo)}</div>`:""}${i.thumbs&&i.thumbs.length?`<div class="pgrid">${i.thumbs.map(t=>`<button type="button" data-pview="${esc(t.id)}"><img src="${esc(t.t)}" alt="${esc(t.label||"점검 사진")}" loading="lazy"><div class="lab">${esc(t.label||"")}</div></button>`).join("")}</div>`:i.photo?`<img class="thumb" src="${esc(i.photo)}" alt="점검 사진" style="max-height:200px">`:""}</div>`).join(""):"아직 점검 기록이 없어요.";
+    box.innerHTML=rows.length?rows.map(i=>`<div class="hist st-${esc(i.result)}"><b>${fmtDT(i.date)}</b> <span class="chip">${esc(i.result)}</span> <span>${esc(S.names[i.inspector]||i.inspectorName||"점검자")}</span>${typeof i.tiltDeg==="number"?`<div>등주 기울기 ${i.tiltDeg.toFixed(1)}°</div>`:""}${posChip(i)?`<div>${posChip(i)}</div>`:""}${i.faults&&i.faults.length?`<div>불량: ${i.faults.map(esc).join(", ")}</div>`:""}${i.memo?`<div>${esc(i.memo)}</div>`:""}${i.thumbs&&i.thumbs.length?`<div class="pgrid">${i.thumbs.map(t=>`<button type="button" data-pview="${esc(t.id)}"><img src="${esc(t.t)}" alt="${esc(t.label||"점검 사진")}" loading="lazy"><div class="lab">${esc(t.label||"")}</div></button>`).join("")}</div>`:i.photo?`<img class="thumb" src="${esc(i.photo)}" alt="점검 사진" style="max-height:200px">`:""}</div>`).join(""):"아직 점검 기록이 없어요.";
   }catch(e){const b=$("#histBox");if(b)b.textContent="기록을 불러오지 못했어요."}
 }
 function suggestResult(){
@@ -1004,6 +1016,7 @@ async function saveInspection(){
   const faults=CHECKS.filter(([k])=>draft.checks[k]==="bad").map(([,t])=>t);
   const rec={lightId:l.id,code:l.code,dong:l.dong,date:now,checks:{...draft.checks},faults,result:draft.result,memo:($("#iMemo").value||"").trim().slice(0,1000),inspector:S.me||null};
   if(typeof draft.tilt==="number")rec.tiltDeg=draft.tilt;
+  if(draft.pos){rec.pos={lat:+draft.pos.lat.toFixed(6),lng:+draft.pos.lng.toFixed(6),acc:draft.pos.acc||0};if(typeof draft.posDist==="number")rec.posDist=draft.posDist}
   if(draft.photo)rec.photo=draft.photo;
   const photos=draft.photos||[];
   // empty 전경/표찰 대표 슬롯 → this inspection's photo with that label fills it
@@ -1082,6 +1095,11 @@ document.addEventListener("click",async e=>{
   if(t.dataset.pedit){const ph=draft&&draft.photos&&draft.photos[+t.dataset.pedit];if(ph)editPhotoMeta(ph);return}
   if(t.dataset.pview){openPhotoViewer(t.dataset.pview);return}
   if(t.dataset.repview){openRepPhoto(t.dataset.repview,t.dataset.slot);return}
+  if(t.id==="posAgain"){if(PK.id)posCheckStart(PK.id);return}
+  if(t.id==="posFix"){if(!need("inspect"))return;posFix();return}
+  if(t.id==="posMapBtn"){if(PK.map){$("#posMap").hidden=true;PK.map.remove();PK.map=null;t.textContent="지도 보기"}else{posMapShow();t.textContent="지도 닫기"}return}
+  if(t.dataset.posapply){if(!need("admin"))return;posApplySuggest(t.dataset.posapply);return}
+  if(t.dataset.posdrop){if(!need("admin"))return;const id=t.dataset.posdrop;write(()=>patchLight(id,{posSuggest:null,updatedAt:Date.now()}),"좌표 제안을 지웠어요.").then(ok=>{if(ok){if($("#leSave"))openLightEdit(id);else openLight(id)}});return}
   if(t.dataset.repshoot){if(!need("inspect"))return;const box=t.closest("#repBox");if(!box)return;repTarget={id:box.dataset.id,slot:t.dataset.repshoot};const inp=box.querySelector(t.dataset.lib?"#repPhotoLib":"#repPhoto");if(inp){inp.value="";inp.click()}return}
   if(t.dataset.repclear){if(!need("inspect"))return;const box=t.closest("#repBox");if(!box)return;const id=box.dataset.id;clearRepPhoto(id,t.dataset.repclear).then(ok=>{if(ok)setTimeout(()=>refreshRepBox(id),60)});return}
   if(t.dataset.pcmp){openPhotoCompare(t.dataset.pcmp);return}
@@ -1166,7 +1184,7 @@ document.addEventListener("click",async e=>{
 });
 $("#sheetBg").addEventListener("click",()=>closeSheet());
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classList.contains("open"))closeSheet()});
-document.addEventListener("input",e=>{if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)}});
+document.addEventListener("input",e=>{if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;renderList()}});
 document.addEventListener("change",async e=>{
   if(e.target.id==="rvNoLight"){S.rvNoLight=e.target.checked;render();return}
   if(e.target.id==="ibOnly"){IB.only=e.target.checked;render();return}
@@ -1495,7 +1513,7 @@ async function openLightDossier(id){
     <div class="split noprint" style="margin:0 0 10px"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button></div>
     <div class="rep"><div class="cover" style="display:flex;gap:14px;align-items:flex-start"><div style="flex:1;min-width:0"><h2>${kindBadge(l.kind)}${esc(l.code)} <span class="chip st-${esc(l.status)}">${esc(l.status)}</span></h2><div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address||"")} · 출력 ${fmtDT(Date.now())}</div></div>${(()=>{const rs=repSlots(l);const imgs=REP_SLOTS.map(k=>{const e=rs[k];if(!e)return null;const src=e.legacy||(e.id&&GAL[e.id]&&GAL[e.id].data)||(l.photoId===e.id?l.photoT:null);return src?`<img class="repimg" src="${esc(src)}" alt="대표 사진 ${k}" title="${k}">`:null}).filter(Boolean);return imgs.length?`<div class="repimgs">${imgs.join("")}</div>`:""})()}</div>
     <h3>대장 정보</h3><table><tbody><tr><td>관리ID</td><td>${esc(l.lampId||"")}</td><td>종류</td><td>${esc(l.kind||"")}</td></tr><tr><td>광원</td><td>${esc(l.lampType||"")}</td><td>등주</td><td>${esc(l.pole||"")}</td></tr><tr><td>점멸기</td><td>${esc(l.sw||"")}</td><td>전주번호</td><td>${esc(l.poleNo||"")}</td></tr><tr><td>좌표</td><td>${typeof l.lat==="number"?`${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}`:""}</td><td>마지막 점검</td><td>${fmtD(l.lastInspected)}</td></tr>${l.note?`<tr><td>비고</td><td colspan="3">${esc(l.note)}</td></tr>`:""}${l.redoNote?`<tr><td>재점검 요청</td><td colspan="3">${esc(l.redoNote)}</td></tr>`:""}</tbody></table>
-    <h3>점검 이력 <span class="muted">${rows.length}</span></h3>${rows.length?`<table><thead><tr><th>일시</th><th>결과</th><th>점검자</th><th>내용</th></tr></thead><tbody>${rows.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${esc(S.names[i.inspector]||"점검자")}</td><td>${(i.faults||[]).map(esc).join(", ")}${typeof i.tiltDeg==="number"?` · 기울기 ${i.tiltDeg.toFixed(1)}°`:""}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.reviewedAt?`<br><span class="muted">검수 ${fmtD(i.reviewedAt)}</span>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">점검 기록이 없어요.</p>`}
+    <h3>점검 이력 <span class="muted">${rows.length}</span></h3>${rows.length?`<table><thead><tr><th>일시</th><th>결과</th><th>점검자</th><th>내용</th></tr></thead><tbody>${rows.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${esc(S.names[i.inspector]||"점검자")}</td><td>${(i.faults||[]).map(esc).join(", ")}${typeof i.tiltDeg==="number"?` · 기울기 ${i.tiltDeg.toFixed(1)}°`:""}${typeof i.posDist==="number"?` · 📍${i.posDist}m`:""}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.reviewedAt?`<br><span class="muted">검수 ${fmtD(i.reviewedAt)}</span>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">점검 기록이 없어요.</p>`}
     ${l.edits&&l.edits.length?`<h3>정보 변경 이력</h3><div class="panel">${editHistory(l)}</div>`:""}
     ${PT_LAST[l.id]?`<h3>순찰</h3><p>마지막 순찰 통과 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" · 점등 확인"}</p>`:""}
     ${photos.length?`<h3>사진 <span class="muted">${photos.length}</span></h3><div class="psheet">${photos.slice(0,12).map((r,i)=>`<figure><img src="${esc(r.data)}" alt=""><figcaption>${i+1}. ${esc(r.label||"")} · ${fmtDT(r.at)}${r.note?` · ${esc(r.note)}`:""}</figcaption></figure>`).join("")}</div>`:""}
@@ -1632,6 +1650,73 @@ async function openRepPhoto(id,slot){
   ov.innerHTML=`<div class="bar"><b>${esc(l.code)}</b><span style="color:#A9B6CC">대표 사진 · ${esc(slot)}</span><button class="x" id="pvX" aria-label="닫기">×</button></div><div class="stage"><img class="full" src="${esc(src)}" alt="대표 사진"></div>`;
   ov.querySelector("#pvX").onclick=()=>{ov.hidden=true;ov.innerHTML=""};
 }
+/* ---------- 위치 확인: while a light is open, compare the phone's GPS with the registered coordinate. The distance is
+   saved with the inspection; a big gap can be corrected (admin, with edit history) or left as a suggestion (inspector). ---------- */
+const POS_OK=25,POS_FAR=60; // m
+let PK={id:null,watch:null,pos:null,map:null,t:0};
+function posBox(l){
+  const w=S.canWrite&&can("inspect"),has=typeof l.lat==="number";
+  return `<div class="posbox" id="posBox" data-id="${esc(l.id)}"><div class="hd"><b>위치 확인</b><span class="muted" id="posTxt">${has?"GPS 잡는 중…":"등록 좌표가 없는 등이에요"}</span><span class="d" id="posD" style="margin-left:auto"></span></div>
+    ${l.posSuggest?`<div class="notice slim" style="margin:8px 0 0"><b>좌표 제안</b> ${fmtD(l.posSuggest.at)} ${esc(S.names[l.posSuggest.by]||"점검자")} · 등록 좌표에서 ${Math.round(l.posSuggest.dist||0)}m${can("admin")?`<button class="btn sm" data-posapply="${esc(l.id)}" style="margin-left:auto">적용</button><button class="btn ghost sm" data-posdrop="${esc(l.id)}">지우기</button>`:""}</div>`:""}
+    <div class="pmap" id="posMap" hidden></div>
+    <div class="ops"><button type="button" class="btn ghost sm" id="posAgain">위치 다시 잡기</button>${w?`<button type="button" class="btn ghost sm" id="posFix" hidden></button>`:""}<button type="button" class="btn ghost sm" id="posMapBtn" ${has?"":"hidden"}>지도 보기</button></div></div>`;
+}
+function posCheckStart(id){
+  posCheckStop();PK={id,watch:null,pos:null,map:null,t:Date.now()};
+  if(!navigator.geolocation){const t=$("#posTxt");if(t)t.textContent="이 기기에서는 위치를 쓸 수 없어요";return}
+  const onPos=p=>{if(PK.id!==id)return;const pos={lat:p.coords.latitude,lng:p.coords.longitude,acc:Math.round(p.coords.accuracy||0)};
+    if(PK.pos&&pos.acc>PK.pos.acc&&Date.now()-PK.t<8000)return; // keep the better fix while it settles
+    PK.pos=pos;S.pos={lat:pos.lat,lng:pos.lng};posDraw();if(pos.acc<=15&&Date.now()-PK.t>6000)posCheckStop(true)};
+  const onErr=e=>{if(PK.id!==id)return;const t=$("#posTxt");if(t)t.textContent=e&&e.code===1?"위치 권한이 없어요":"위치를 못 잡았어요 — 하늘이 보이는 곳에서 다시";};
+  try{PK.watch=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:20000})}catch(e){}
+  setTimeout(()=>{if(PK.id===id)posCheckStop(true)},30000);
+}
+function posCheckStop(keep){if(PK.watch!=null){try{navigator.geolocation.clearWatch(PK.watch)}catch(e){}PK.watch=null}if(!keep){if(PK.map){try{PK.map.remove()}catch(e){}PK.map=null}PK.id=null}}
+function posDraw(){
+  const l=byId(PK.id),pos=PK.pos;if(!l||!pos)return;const t=$("#posTxt"),d=$("#posD"),fx=$("#posFix");if(!t)return;
+  const has=typeof l.lat==="number";const dist=has?distM(pos,l):null;
+  if(draft&&draft.lightId===l.id){draft.pos=pos;draft.posDist=dist==null?null:Math.round(dist)}
+  if(!has){t.textContent=`등록 좌표가 없어요 · 현재 위치 ±${pos.acc}m`;d.textContent="";if(fx){fx.hidden=false;fx.textContent=can("admin")?"현재 위치로 좌표 등록":"현재 위치를 좌표로 제안"}return}
+  const cls=dist<=POS_OK+pos.acc*.5?"ok":dist<=POS_FAR+pos.acc?"far":"bad";
+  d.textContent=`${Math.round(dist)}m`;d.className="d "+cls;
+  t.textContent=cls==="ok"?`등록 좌표와 맞아요 (GPS ±${pos.acc}m)`:cls==="far"?`등록 좌표에서 조금 떨어져 있어요 (GPS ±${pos.acc}m) — 등 바로 옆이면 좌표를 바로잡으세요`:`등록 좌표에서 많이 떨어져 있어요 (GPS ±${pos.acc}m) — 다른 등이거나 좌표 오류일 수 있어요`;
+  if(fx){fx.hidden=cls==="ok";fx.textContent=can("admin")?"현재 위치로 좌표 보정":"현재 위치를 좌표로 제안"}
+  if(PK.map)posMapDraw();
+}
+function posMapShow(){
+  const l=byId(PK.id),box=$("#posMap");if(!l||!box||!window.L)return;box.hidden=false;
+  if(!PK.map){const c=typeof l.lat==="number"?[l.lat,l.lng]:(PK.pos?[PK.pos.lat,PK.pos.lng]:[35.146,126.923]);
+    PK.map=L.map(box,{zoomControl:false,attributionControl:false,tap:true}).setView(c,18);L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(PK.map);PK.layer=L.layerGroup().addTo(PK.map)}
+  posMapDraw();setTimeout(()=>{try{PK.map.invalidateSize()}catch(e){}},50);
+}
+function posMapDraw(){
+  const l=byId(PK.id);if(!l||!PK.map)return;PK.layer.clearLayers();const pts=[];
+  if(typeof l.lat==="number"){L.marker([l.lat,l.lng],{icon:L.divIcon({className:"lepin",html:'<div class="lepin-dot" style="cursor:default"></div>',iconSize:[30,30],iconAnchor:[15,15]}),interactive:false}).addTo(PK.layer);pts.push([l.lat,l.lng])}
+  if(PK.pos){L.circle([PK.pos.lat,PK.pos.lng],{radius:PK.pos.acc||0,color:"#2F5DA8",weight:1,fillOpacity:.1,interactive:false}).addTo(PK.layer);L.marker([PK.pos.lat,PK.pos.lng],{icon:L.divIcon({className:"posme",html:"<i></i>",iconSize:[14,14],iconAnchor:[7,7]}),interactive:false}).addTo(PK.layer);pts.push([PK.pos.lat,PK.pos.lng])}
+  if(pts.length===2){L.polyline(pts,{color:"#E89A0C",weight:2,dashArray:"4 4",interactive:false}).addTo(PK.layer);PK.map.fitBounds(pts,{padding:[24,24],maxZoom:19})}else if(pts.length)PK.map.setView(pts[0],18);
+}
+async function posFix(){
+  const l=byId(PK.id),pos=PK.pos;if(!l||!pos)return;const has=typeof l.lat==="number";const dist=has?Math.round(distM(pos,l)):null;
+  if(can("admin")){
+    if(!confirm(`${l.code}의 좌표를 현재 위치(±${pos.acc}m)로 ${has?"바로잡을까요? "+dist+"m 옮겨요.":"등록할까요?"} 변경 이력에 남아요.`))return;
+    const changes=[{f:"lat",from:has?l.lat:null,to:+pos.lat.toFixed(6)},{f:"lng",from:has?l.lng:null,to:+pos.lng.toFixed(6)}];
+    const entry={at:Date.now(),by:S.me||null,changes,note:`점검 중 위치 확인(GPS ±${pos.acc}m)`};
+    const ok=await write(()=>patchLight(l.id,{lat:changes[0].to,lng:changes[1].to,acc:pos.acc,posSuggest:null,edits:[...(l.edits||[]).slice(-29),entry],updatedAt:entry.at}),`${l.code} 좌표를 현재 위치로 ${has?"바로잡았어요":"등록했어요"}.`);
+    if(ok)setTimeout(()=>posDraw(),80);
+  }else{
+    if(!confirm(`현재 위치(±${pos.acc}m)를 ${l.code}의 좌표로 제안할까요? 관리자가 확인한 뒤 적용해요.`))return;
+    const ok=await write(()=>patchLight(l.id,{posSuggest:{lat:+pos.lat.toFixed(6),lng:+pos.lng.toFixed(6),acc:pos.acc,dist:dist||0,at:Date.now(),by:S.me||null},updatedAt:Date.now()}),"좌표 제안을 남겼어요. 관리자가 적용할 수 있어요.");
+    if(ok){const fx=$("#posFix");if(fx)fx.hidden=true}
+  }
+}
+async function posApplySuggest(id){
+  const l=byId(id),sg=l&&l.posSuggest;if(!sg)return;const has=typeof l.lat==="number";
+  if(!confirm(`${l.code}의 좌표를 제안 좌표(${fmtD(sg.at)} ${S.names[sg.by]||"점검자"}, ±${sg.acc}m)로 바꿀까요?`))return;
+  const changes=[{f:"lat",from:has?l.lat:null,to:sg.lat},{f:"lng",from:has?l.lng:null,to:sg.lng}];const entry={at:Date.now(),by:S.me||null,changes,note:"점검자 좌표 제안 적용"};
+  const ok=await write(()=>patchLight(l.id,{lat:sg.lat,lng:sg.lng,acc:sg.acc,posSuggest:null,edits:[...(l.edits||[]).slice(-29),entry],updatedAt:entry.at}),`${l.code} 좌표를 제안대로 바꿨어요.`);
+  if(ok){if($("#leSave"))openLightEdit(id);else openLight(id)}
+}
+const posChip=i=>typeof i.posDist==="number"?`<span class="pos ${i.posDist>POS_FAR?"far":""}">📍 ${i.posDist>POS_FAR?"등록 좌표에서 "+i.posDist+"m 떨어진 곳에서 점검":"위치 확인 "+i.posDist+"m"}</span>`:"";
 let repTarget=null; // {id,slot} while a file picker is open
 function repBox(l){
   const reps=repSlots(l),w=S.canWrite&&can("inspect"),n=repCount(l);
@@ -1698,6 +1783,7 @@ function openLightEdit(id){
     <div class="grid2"><div><label class="f" for="leSw">점멸기</label>${sel("leSw",SW_OPTS,l.sw)}</div><div><label class="f" for="lePoleNo">전주번호</label><input class="f-in" id="lePoleNo" value="${esc(l.poleNo||"")}" placeholder="예: 9792C742"></div></div>
     <div class="grid2"><div><label class="f" for="leYear">교체 연도</label><input class="f-in" id="leYear" type="number" inputmode="numeric" min="1990" max="2100" value="${esc(l.replacedYear||"")}" placeholder="예: 2025"></div><div><label class="f">철거</label><label style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="checkbox" id="leRemoved" ${l.removed?"checked":""}> 철거된 등</label></div></div>
     <label class="f">위치</label>
+    ${l.posSuggest?`<div class="notice slim" style="margin:0 0 8px"><b>점검자 좌표 제안</b> ${fmtD(l.posSuggest.at)} ${esc(S.names[l.posSuggest.by]||"점검자")} · 등록 좌표에서 ${Math.round(l.posSuggest.dist||0)}m (±${l.posSuggest.acc}m)<button class="btn sm" data-posapply="${esc(l.id)}" style="margin-left:auto">적용</button><button class="btn ghost sm" data-posdrop="${esc(l.id)}">지우기</button></div>`:""}
     <div class="grid2"><input class="f-in" id="leLat" inputmode="decimal" value="${typeof l.lat==="number"?l.lat.toFixed(6):""}" placeholder="위도"><input class="f-in" id="leLng" inputmode="decimal" value="${typeof l.lng==="number"?l.lng.toFixed(6):""}" placeholder="경도"></div>
     <div class="split" style="margin-top:6px"><button type="button" class="btn ghost sm" id="leGps">현재 위치로</button><button type="button" class="btn ghost sm" id="leReset" data-id="${esc(l.id)}">원래 좌표로</button><span class="muted" id="leAcc" style="align-self:center">지도의 핀을 끌어서 옮길 수도 있어요.</span></div>
     <div class="gmap" id="leMapBox" style="height:220px;margin-top:8px"></div>
@@ -3031,7 +3117,7 @@ async function readLabelPhoto(file){
   }finally{scan.busy=false}
 }
 document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"||e.target.id==="scanPhotoLib"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
-const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){meStop();gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
+const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;posCheckStop();stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){meStop();gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
 
 render();
 try{if(localStorage.getItem("dg-near")==="1"){S.near=false;nearToggle()}}catch(e){}
