@@ -317,7 +317,11 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50;display:none;max-width:90%}
 .toast.show{display:block}
 .ov{position:absolute;left:10px;right:10px;top:10px;background:rgba(16,24,40,.82);color:#fff;border-radius:12px;padding:10px 12px;backdrop-filter:blur(4px);border-left:5px solid var(--c);display:none}
-.ov.show{display:block}
+.ov.show{display:block}.ov{max-height:70%;overflow:auto}
+#plateOv{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.ov .lrow{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff;border-radius:8px;padding:7px 9px;margin-top:6px;text-align:left;font:inherit}
+.ov .lrow b{font-size:15px}.ov .lrow small{color:#C9D3E3;display:block;font-size:11px}.ov .lrow .d{flex:none;font-size:12px;color:#C9D3E3}
+.ov .lrow.hot{background:rgba(232,154,12,.22);border-color:#E89A0C}
 .ov b{font-size:20px}.ov .muted{color:#C9D2E3}.ov .chip{background:var(--c);color:#fff}
 .ov .split .btn{background:#fff;color:#16233D}.ov .split .btn.ghost{background:transparent;color:#fff;border-color:#fff8}
 .arwrap{position:relative;background:#000;border-radius:12px;overflow:hidden;height:60vh;min-height:360px}
@@ -1130,6 +1134,10 @@ document.addEventListener("click",async e=>{
   if(t.id==="scanStart"){startCam();return}
   if(t.dataset.apply){applyScan(t.dataset.apply);return}
   if(t.id==="cropManual"){openManualCrop();return}
+  if(t.dataset.livecand){onLiveCand(t.dataset.livecand);return}
+  if(t.dataset.livedetail){liveDetail();return}
+  if(t.dataset.livenew){const n=t.dataset.livenew,k=t.dataset.kind||"보안등";const g=n.match(/^(\d{1,4})-(\d{1,3})$/);const code=k==="가로등"&&g?{kind:"가로등",road:"",main:g[1],sub:g[2]}:null;
+    scan.found={code,kind:k,how:"plate",raw:"",plate:live.snap&&live.box?cropTo(live.snap,live.box,480).toDataURL("image/jpeg",.7):null,pick:code?null:{kind:k,num:n,dong:"",road:"",auto:true}};stopCam(false);showScanResult(scan.found);return}
   if(t.id==="camBack"){backToCam();return}
   if(t.id==="pkGo"){confirmPick();return}
   if(t.dataset.cand){const c=byId(t.dataset.cand);if(!c)return;const prev=scan.found||{};const code=c.kind==="가로등"?{kind:"가로등",road:c.road||"",main:c.main,sub:c.sub}:{kind:c.kind,dong:c.dong,num:c.num};
@@ -2466,16 +2474,16 @@ function arStop(reset=true){
 }
 
 /* ---------- on-device OCR fallback (Tesseract.js) for plain hosting ---------- */
-let ocrWorker=null,ocrLoading=null;
+let ocrWorker=null;const ocrWorkers={},ocrLoading={}; // ocrWorker: the kor+eng one (photo path); ocrWorkers.eng: digits only, ~2.5× faster, used by the live viewfinder
 function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=()=>rej(new Error("load "+src));document.head.appendChild(s)})}
-async function getOcr(onProgress){
-  if(ocrWorker)return ocrWorker;
-  if(!ocrLoading)ocrLoading=(async()=>{
+async function getOcr(onProgress,langs="kor+eng"){
+  if(ocrWorkers[langs])return ocrWorkers[langs];
+  if(!ocrLoading[langs])ocrLoading[langs]=(async()=>{
     if(!window.Tesseract){try{await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js")}catch(e){await loadScript("https://unpkg.com/tesseract.js@5/dist/tesseract.min.js")}}
-    const w=await Tesseract.createWorker(["kor","eng"],1,{logger:m=>onProgress&&onProgress(m)});
-    ocrWorker=w;return w;
-  })();
-  return ocrLoading;
+    const w=await Tesseract.createWorker(langs.split("+"),1,{logger:m=>onProgress&&onProgress(m)});
+    ocrWorkers[langs]=w;if(langs==="kor+eng")ocrWorker=w;return w;
+  })().catch(e=>{delete ocrLoading[langs];throw e});
+  return ocrLoading[langs];
 }
 /* Find the label plate in a photo: both plate types have a saturated blue or green frame/band.
    Works on a 360px-wide copy; returns a box in source-canvas pixels, or null. */
@@ -2606,15 +2614,128 @@ function confirmPick(){
   const prev=scan.found||{};showScanResult({...prev,code:p,kind,how:prev.how||"photo",raw:"",pick:null});
 }
 
+/* ---------- live plate recognition: watch the viewfinder for a plate frame, read it when it holds still ---------- */
+const LIVE_AUTO=!(window.claude&&window.claude.use); // on-device OCR runs by itself; in the shared artifact Claude reads on a tap (sends a photo)
+let live={last:null,stable:0,cool:0,t:0,reading:false,key:null,snap:null,box:null};
+const liveCv=document.createElement("canvas");
+function livePlateStep(v){
+  if(!v.videoWidth)return;
+  const W=v.videoWidth,H=v.videoHeight;if(liveCv.width!==W||liveCv.height!==H){liveCv.width=W;liveCv.height=H}
+  const g=liveCv.getContext("2d",{willReadFrequently:true});g.drawImage(v,0,0,W,H);
+  const box=findPlate(liveCv);
+  drawPlateOv(v,box);
+  if(!box){live.stable=0;live.last=null;liveHint(null);return}
+  const big=box.w>=W*.14&&box.h>=H*.12;
+  const same=live.last&&Math.abs(box.x+box.w/2-(live.last.x+live.last.w/2))<W*.05&&Math.abs(box.y+box.h/2-(live.last.y+live.last.h/2))<H*.06&&Math.abs(box.w-live.last.w)<box.w*.25;
+  live.stable=same?live.stable+1:1;live.last=box;
+  if(!big){liveHint("표찰이 보여요 — 조금 더 가까이");return}
+  const ready=live.stable>=3&&performance.now()>live.cool;
+  if(LIVE_AUTO){if(ready)liveRead(box);else liveHint($("#camOv").classList.contains("show")?"읽었어요 · 다른 표찰로 옮기면 다시 읽어요":"표찰이 보여요 — 잠깐 멈춰 주세요")}
+  else{liveHint(live.stable>=2?"표찰이 보여요":null);if(live.stable>=2&&!$("#camOv").classList.contains("show")){live.snap=snapFrame();live.box=box;const ov=$("#camOv");ov.className="ov show st-점검필요";ov.innerHTML=`<b style="font-size:15px">표찰이 보여요</b><div class="muted">탭하면 사진을 보내 번호를 읽어요(처음엔 동의 창이 떠요).</div><div class="split" style="margin-top:8px"><button class="btn sm" data-livedetail="1">표찰 읽기</button></div>`}}
+}
+function snapFrame(){const c=document.createElement("canvas");c.width=liveCv.width;c.height=liveCv.height;c.getContext("2d").drawImage(liveCv,0,0);return c}
+function liveHint(t){const h=$("#camHint");if(!h||!scan.stream)return;if(/엔진 준비|읽는 중/.test(h.textContent)&&!t)return;if(t){h.textContent=t;h.dataset.live="1"}else if(h.dataset.live){h.textContent=LIVE_AUTO?"QR이나 표찰을 비춰 주세요 · 표찰은 틀이 잡히면 자동으로 읽어요":"QR이나 표찰을 비춰 주세요 · 표찰이 잡히면 '읽기'를 눌러요";delete h.dataset.live}}
+function drawPlateOv(v,box){
+  const c=$("#plateOv");if(!c)return;const cw=v.clientWidth,ch=v.clientHeight;if(!cw||!ch)return;
+  if(c.width!==cw||c.height!==ch){c.width=cw;c.height=ch}
+  const g=c.getContext("2d");g.clearRect(0,0,cw,ch);if(!box)return;
+  // object-fit: cover → the frame is scaled to fill the element and centred
+  const k=Math.max(cw/v.videoWidth,ch/v.videoHeight),ox=(v.videoWidth*k-cw)/2,oy=(v.videoHeight*k-ch)/2;
+  const x=box.x*k-ox,y=box.y*k-oy,w=box.w*k,h=box.h*k;
+  g.strokeStyle=live.stable>=3?"#E89A0C":"#fff";g.lineWidth=3;g.setLineDash(live.stable>=3?[]:[10,6]);
+  const r=10;g.beginPath();g.roundRect?g.roundRect(x,y,w,h,r):g.rect(x,y,w,h);g.stroke();
+}
+async function liveRead(box){
+  if(live.reading||scan.busy)return;live.reading=true;
+  const src=snapFrame();live.snap=src;live.box=box;
+  const h=$("#camHint");
+  try{
+    const plate=cropTo(src,box,800);
+    // a QR inside the plate frame beats OCR
+    try{const d=plate.getContext("2d").getImageData(0,0,plate.width,plate.height);const r=window.jsQR&&jsQR(d.data,plate.width,plate.height,{inversionAttempts:"attemptBoth"});if(r&&r.data&&parseCode(r.data)){onLive(r.data);live.cool=performance.now()+2500;return}}catch(e){}
+    if(h)h.textContent=ocrWorkers.eng?"표찰 읽는 중…":"표찰 인식 엔진 준비 중…";
+    const w=await getOcr(m=>{if(h&&(m.status==="loading language traineddata"||m.status==="loading tesseract core"))h.textContent=`표찰 인식 엔진 준비 중 ${Math.round((m.progress||0)*100)}%`},"eng");
+    if(h)h.textContent="표찰 읽는 중…";
+    if(!scan.stream)return;
+    const gray=grayContrast(plate);
+    await w.setParameters({tessedit_pageseg_mode:"11",tessedit_char_whitelist:"0123456789-"});
+    const clean=x=>({t:x.text.replace(/[^\d-]/g,"").replace(/^-+|-+$/g,"").replace(/--+/g,"-"),h:x.bbox.y1-x.bbox.y0,c:x.confidence});
+    const okTok=x=>/^\d{1,4}(-\d{1,3})?$/.test(x.t)&&!/^\d{3}-\d{4}$/.test(x.t)&&!/^\d{4}-\d{4}$/.test(x.t);
+    const r1=await w.recognize(gray);
+    let toks=(r1.data.words||[]).map(clean).filter(okTok).sort((a,b)=>b.h-a.h);
+    const kindGuess=plateColor(plate);
+    if(kindGuess==="가로등"||toks.some(x=>x.t.includes("-"))){
+      await w.setParameters({tessedit_pageseg_mode:"7"});const votes={};
+      for(const tw of [700,1100]){const mid=cropTo(src,{x:box.x+box.w*.12,y:box.y+box.h*.28,w:box.w*.88,h:box.h*.4},tw);const r2=await w.recognize(grayContrast(mid));const t=(r2.data.text||"").replace(/\s+/g,"").match(/\d{1,4}-\d{1,3}/);if(t)votes[t[0]]=(votes[t[0]]||0)+1+(r2.data.confidence||0)/100}
+      const best=Object.entries(votes).sort((a,b)=>b[1]-a[1])[0];if(best)toks.unshift({t:best[0],h:9999,c:best[1]});
+    }
+    const numTok=toks[0]?toks[0].t:"";
+    if(!scan.stream)return;
+    if(!numTok){liveShow({num:"",kind:kindGuess,plate,cands:[],nearby:[]});return}
+    const hy=/^\d{1,4}-\d{1,3}$/.test(numTok);const kind=hy?"가로등":kindGuess||"보안등";
+    let {cands,nearby}=liveCands(numTok,kind);
+    // several dongs share this number and GPS can't split them → one Korean pass for the dong name
+    if(cands.length>1&&!scan.pos){const wk=await getOcr(null,"kor+eng");await wk.setParameters({tessedit_pageseg_mode:"11",tessedit_char_whitelist:""});const r3=await wk.recognize(gray);const kt=(r3.data.words||[]).map(x=>x.text.replace(/[^가-힣]/g,"")).filter(t=>t.length>=2);const dong=fuzzyDong(kt);if(dong){const f=cands.filter(c=>c.dong===dong);if(f.length)cands=f}}
+    liveShow({num:numTok,kind,plate,cands,nearby});
+  }catch(e){
+    if(h)h.textContent="표찰 글자 인식을 불러오지 못했어요(네트워크 필요). QR을 비추거나 아래에서 사진으로 읽어 주세요.";
+    live.cool=performance.now()+15000;
+  }finally{live.reading=false;if(performance.now()>live.cool)live.cool=performance.now()+4000;const hh=$("#camHint");if(hh&&/읽는 중|엔진 준비/.test(hh.textContent))liveHint(null)}
+}
+// exact matches for the read number (same kind), nearest first; plus nearby lights whose number resembles it
+function liveCands(tok,kind){
+  const t=String(tok).trim(),digits=t.replace(/\D/g,"");
+  let cands=numCands(t).filter(c=>!kind||c.kind===kind||(kind==="보안등"&&isPlateDong(c.kind)));
+  let nearby=[];
+  if(scan.pos){const dist=x=>distM(scan.pos,x);cands=cands.map(c=>({c,d:typeof c.lat==="number"?dist(c):1e9})).sort((a,b)=>a.d-b.d).map(x=>x.c);
+    if(!cands.length||dist(cands[0])>60)nearby=S.lights.filter(x=>!x.removed&&typeof x.lat==="number"&&!cands.includes(x)&&(x.kind===kind||(kind==="보안등"&&isPlateDong(x.kind)))).map(x=>({x,d:dist(x)})).filter(o=>o.d<=120)
+      .map(o=>{const cd=o.x.kind==="가로등"?`${o.x.main||""}${o.x.sub?"-"+o.x.sub:""}`:String(o.x.num||"");const cdd=cd.replace(/\D/g,"");const sim=cd===t?3:(cdd&&digits.length>=2&&(cdd.endsWith(digits)||cdd.startsWith(digits)||cdd.includes(digits)||(cdd.length>=2&&digits.includes(cdd))))?2:(o.x.kind==="가로등"&&/-/.test(t)&&cd.split("-")[1]===t.split("-")[1])?1:0;return{...o,sim}}).filter(o=>o.sim>0).sort((a,b)=>b.sim-a.sim||a.d-b.d).slice(0,3);}
+  return{cands,nearby};
+}
+function liveShow({num,kind,plate,cands,nearby}){
+  const ov=$("#camOv");if(!ov)return;
+  const key=`${kind}:${num}:${cands.map(c=>c.id).join(",")}`;
+  const row=(c,d,hot)=>`<button class="lrow${hot?" hot":""}" data-livecand="${esc(c.id)}"><span>${kindBadge(c.kind)}<b>${esc(c.code)}</b><small>${esc(c.address||c.dong||"")} · ${esc(c.status)}</small></span><span class="d">${typeof d==="number"?Math.round(d)+"m":""}</span></button>`;
+  const dist=c=>scan.pos&&typeof c.lat==="number"?distM(scan.pos,c):null;
+  const d0=cands.length?dist(cands[0]):null,d1=cands.length>1?dist(cands[1]):null;
+  // confident when the number is unique, or the nearest match is right here and the next one is clearly elsewhere
+  const one=cands.length===1?(d0==null||d0<=80):(d0!=null&&d0<=80&&(d1==null||d1>=200));
+  ov.className="ov show "+(one?`st-${cands[0].status}`:num?"st-수리중":"st-점검필요");
+  const thumb=plate?`<img src="${cropTo(plate,{x:0,y:0,w:plate.width,h:plate.height},160).toDataURL("image/jpeg",.6)}" alt="" style="width:56px;height:56px;object-fit:cover;border-radius:6px;float:right;margin-left:8px;border:1px solid #fff4">`:"";
+  ov.innerHTML=thumb+(num?`<b style="font-size:16px">표찰 ${esc(num)}</b> <span class="chip">${esc(kind||"")} · 글자 인식</span>`:`<b style="font-size:15px">표찰 번호를 읽지 못했어요</b>`)
+    +(one?`<div class="muted">${scan.pos?"근처에 이 번호는 하나뿐이에요":"대장에 이 번호는 하나예요"} · 표찰과 맞는지 확인하세요</div>`+row(cands[0],d0,true)+(cands.length>1?`<div class="muted" style="margin-top:6px">같은 번호의 다른 등</div>`+cands.slice(1,3).map(c=>row(c,dist(c))).join(""):"")
+      :cands.length===1?`<div class="muted">대장의 이 번호는 현재 위치에서 ${Math.round(dist(cands[0]))}m 떨어져 있어요 — 표찰의 동 이름과 맞는지 확인하세요.</div>`+row(cands[0],dist(cands[0]))
+      :cands.length?`<div class="muted">이 번호가 ${cands.length}곳에 있어요${scan.pos?" · 가까운 순":""}. 표찰의 동·도로명과 맞는 것을 고르세요.</div>`+cands.slice(0,3).map(c=>row(c,dist(c))).join("")+(cands.length>3?`<div class="muted">외 ${cands.length-3}곳 → 자세히 읽기</div>`:"")
+      :num?`<div class="muted">${scan.pos?"근처 대장에 이 번호가 없어요.":"대장에 이 번호가 없어요."}${nearby.length?" 번호가 비슷한 근처 등:":""}</div>`:`<div class="muted">표찰을 정면에서 더 가까이 비추거나, 자세히 읽기를 눌러 주세요.</div>`)
+    +(nearby.length?nearby.map(({x,d})=>row(x,d)).join(""):"")
+    +`<div class="split" style="margin-top:8px"><button class="btn ghost sm" data-livedetail="1">자세히 읽기 · 직접 입력</button>${num&&!cands.length&&!nearby.length&&S.canWrite&&scan.ctx!=="report"?`<button class="btn ghost sm" data-livenew="${esc(num)}" data-kind="${esc(kind||"보안등")}">미등록으로</button>`:""}</div>`;
+  if(key!==live.key&&navigator.vibrate)navigator.vibrate(one?[30,40,30]:20);live.key=key;
+  live.cool=performance.now()+(one?6000:4000);
+}
+function onLiveCand(id){
+  const c=byId(id);if(!c)return;
+  if(!c.num&&c.kind!=="가로등"){stopCam(false);if(scan.ctx==="report"||scan.ctx==="inbox"){toast("표찰 없는 등이에요. 등을 열어 확인하세요.")}openLight(c.id);return}
+  const code=c.kind==="가로등"?{kind:"가로등",road:c.road||"",main:c.main,sub:c.sub}:{kind:c.kind,dong:c.dong,num:c.num};
+  scan.found={code,kind:c.kind,how:"plate",raw:"",plate:live.snap&&live.box?cropTo(live.snap,live.box,480).toDataURL("image/jpeg",.7):null};
+  stopCam(false);showScanResult(scan.found);
+}
+async function liveDetail(){
+  const src=live.snap,box=live.box;if(!src){toast("표찰이 잡힌 뒤에 눌러 주세요.");return}
+  stopCam(false);const ov=$("#camOv");if(ov)ov.className="ov";
+  if(LIVE_AUTO){ocrState.src=src;ocrState.box=box;await ocrLabel(null,null,box||undefined);return}
+  // artifact: hand the frame to the photo path, where Claude reads the plate
+  const blob=await new Promise(res=>src.toBlob(res,"image/jpeg",.92));
+  await readLabelPhoto(new File([blob],"plate.jpg",{type:"image/jpeg"}));
+}
 /* ---------- label scanner ---------- */
 let scan={ctx:null,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null,pos:null};
 function scanLocate(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(p=>{scan.pos={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy};if(scan.found&&!lookup(scan.found.code))showScanResult(scan.found)},()=>{},{enableHighAccuracy:true,maximumAge:15000,timeout:8000})}
 let sampleNs=null;
 async function openScanner(ctx){
   scan={ctx,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null};
-  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">표찰 스캔</h3><div class="muted">표찰 QR을 비추면 그 등의 상태가 화면 위에 바로 떠요. QR이 없거나 흐리면 사진으로 읽어요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">표찰 스캔</h3><div class="muted">QR이나 표찰을 비추면 그 등이 화면 위에 바로 떠요. 표찰은 틀이 잡히면 자동으로 번호를 읽어요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div id="camPanel"><div class="panel" style="padding:0;overflow:hidden;position:relative;background:#000"><video id="cam" playsinline muted style="width:100%;max-height:52vh;display:block;object-fit:cover"></video>
-      <div class="reticle"></div><div id="camOv" class="ov"></div>
+      <canvas id="plateOv"></canvas><div class="reticle"></div><div id="camOv" class="ov"></div>
       <div id="camHint" class="muted" style="position:absolute;left:0;right:0;bottom:0;padding:8px 12px;background:rgba(0,0,0,.55);color:#fff;font-size:13px">카메라 준비 중…</div></div>
     <div class="split"><button class="btn ghost sm" id="scanStart">카메라 다시 켜기</button><button class="btn ghost sm" id="scanStop">카메라 끄기</button></div></div>
     <div id="photoStage" hidden><div class="stage"><canvas id="stageCanvas"></canvas></div><div id="stageStatus" class="muted stage-status" hidden></div>
@@ -2623,8 +2744,9 @@ async function openScanner(ctx){
     <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="scanPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="scanPhotoLib">앨범에서 선택</button><input type="file" id="scanPhoto" accept="image/*" capture="environment" hidden><input type="file" id="scanPhotoLib" accept="image/*" hidden><img id="scanPrev" alt="" hidden style="display:none"></div></div>
     <p class="muted" id="scanNote">${window.claude&&window.claude.use?"사진을 올리면 표찰 글자를 읽어요. 읽은 번호는 저장 전에 확인할 수 있어요.":"체험 모드는 휴대폰 안에서 글자를 읽어요. 처음엔 인식 데이터를 받느라 잠깐 걸리고, 읽은 번호는 저장 전에 확인하세요."}</p>
     <div id="scanResult"></div>`);
-  if(!sampleNs&&window.claude&&window.claude.use){claude.use("sample").then(async s=>{sampleNs=s;try{const lim=s&&await s.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}const n=$("#scanNote");if(n&&!scan.sampleImg)n.textContent="이 화면에서는 사진 인식을 쓸 수 없어요. QR 스캔이나 직접 입력을 이용하세요."})}
+  if(!sampleNs&&window.claude&&window.claude.use){claude.use("sample").then(async s=>{sampleNs=s;try{const lim=s&&await s.limits();scan.sampleImg=!!(lim&&lim.images)}catch(e){}const n=$("#scanNote");if(n&&!scan.sampleImg)n.textContent="이 화면에서는 사진 인식을 쓸 수 없어요. QR 스캔이나 직접 입력을 이용하세요."}).catch(()=>{})}
   scanLocate();startCam();
+  if(LIVE_AUTO)setTimeout(()=>{getOcr(m=>{const h=$("#camHint");if(!h||!scan.stream||ocrWorkers.eng||live.reading)return;if(m.status==="loading language traineddata"||m.status==="loading tesseract core")h.textContent=`표찰 인식 엔진 준비 중 ${Math.round((m.progress||0)*100)}% · QR은 지금도 읽어요`},"eng").then(()=>{const h=$("#camHint");if(h&&scan.stream&&!live.reading&&/엔진 준비/.test(h.textContent))h.textContent="QR이나 표찰을 비춰 주세요 · 표찰은 틀이 잡히면 자동으로 읽어요"}).catch(()=>{})},600);
 }
 async function startCam(){
   stopCam(false);scan.liveKey=null;const o=$("#camOv");if(o)o.className="ov";
@@ -2632,8 +2754,8 @@ async function startCam(){
   const v=$("#cam"),hint=$("#camHint");if(!v)return;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){hint.textContent="이 기기에서는 카메라를 쓸 수 없어요. 아래에서 사진으로 읽어 주세요.";return}
   try{
-    scan.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280}},audio:false});
-    v.srcObject=scan.stream;await v.play();hint.textContent="표찰 QR을 네모 안에 맞춰 주세요";
+    scan.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1920}},audio:false});
+    v.srcObject=scan.stream;await v.play();hint.textContent=LIVE_AUTO?"QR이나 표찰을 비춰 주세요 · 표찰은 틀이 잡히면 자동으로 읽어요":"QR이나 표찰을 비춰 주세요 · 표찰이 잡히면 '읽기'를 눌러요";live={last:null,stable:0,cool:0,t:0,reading:false,key:null,snap:null,box:null};
     const c=document.createElement("canvas"),g=c.getContext("2d",{willReadFrequently:true});
     const tick=()=>{
       if(!scan.stream)return;
@@ -2642,6 +2764,7 @@ async function startCam(){
         g.drawImage(v,(v.videoWidth-s)/2,(v.videoHeight-s)/2,s,s,0,0,s,s);
         const d=g.getImageData(0,0,s,s);const r=jsQR(d.data,s,s,{inversionAttempts:"dontInvert"});
         if(r&&r.data)onLive(r.data);
+        const now=performance.now();if(now-live.t>220&&!scan.busy&&!live.reading){live.t=now;livePlateStep(v)}
       }
       scan.raf=requestAnimationFrame(tick);
     };
@@ -2652,6 +2775,7 @@ function stopCam(updateHint=true){
   cancelAnimationFrame(scan.raf);
   if(scan.stream){scan.stream.getTracks().forEach(t=>t.stop());scan.stream=null}
   const v=$("#cam");if(v)v.srcObject=null;
+  const pc=$("#plateOv");if(pc)pc.getContext("2d").clearRect(0,0,pc.width,pc.height);
   const h=$("#camHint");if(h&&updateHint)h.textContent="카메라가 꺼져 있어요";
 }
 function onLive(text){
@@ -2703,7 +2827,7 @@ function showScanResult(r){
   }
   const isCodeless=!r.code;
   box.innerHTML=`<div class="panel" style="margin-top:12px;border-left:5px solid ${isCodeless?"var(--warn)":l?"var(--ok)":"var(--fix)"}">
-    <h3>${r.how==="qr"?"QR에서 읽음":"사진에서 읽음"}</h3>
+    <h3>${r.how==="qr"?"QR에서 읽음":r.how==="plate"?"표찰에서 읽음(글자 인식)":"사진에서 읽음"}</h3>
     ${r.code?`<div style="font-size:22px;font-weight:700">${esc(labelText(r.code))} <span class="muted" style="font-size:14px">${esc(r.code.kind)}${r.code.kind==="가로등"&&!r.code.road?" · 도로명 없음":""}</span></div>`:cands.length?`<div style="font-size:22px;font-weight:700">${esc(r.pick.num)} <span class="muted" style="font-size:14px">동 이름은 못 읽었어요</span></div>`:`<div>표찰 번호를 찾지 못했어요.</div>`}
     ${!r.code&&cands.length?`<div class="muted">번호 ${esc(r.pick.num)}이(가) ${cands.length}곳에 있어요. ${scan.pos?"가까운 순이에요. ":""}표찰의 동 이름과 맞는 것을 고르세요.</div><div class="list" style="margin-top:6px">${cands.slice(0,8).map(c=>`<button class="row st-${esc(c.status)}" data-cand="${esc(c.id)}"><span class="pole"></span><span class="body">${kindBadge(c.kind)}<span class="code">${esc(c.code)}</span><span class="addr" style="display:block">${esc(c.address)}</span></span><span class="meta"><span class="chip">${esc(c.status)}</span>${scan.pos?`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${Math.round(distM(scan.pos,c))}m</span>`:""}</span></button>`).join("")}${cands.length>8?`<div class="muted">외 ${cands.length-8}곳 — 아래에서 동을 골라 확인하세요</div>`:""}</div>`:""}
     ${!l&&nearby.length?`<div class="muted" style="margin-top:8px">현재 위치 근처에서 번호가 비슷한 등이에요${tok?` (읽은 값 ${esc(tok)})`:""}. 표찰과 맞으면 고르세요.</div><div class="list" style="margin-top:6px">${nearby.map(({x,d})=>`<button class="row st-${esc(x.status)}" data-cand="${esc(x.id)}"><span class="pole"></span><span class="body">${kindBadge(x.kind)}<span class="code">${esc(x.code)}</span><span class="addr" style="display:block">${esc(x.address)}</span></span><span class="meta"><span class="chip">${esc(x.status)}</span><span class="muted" style="display:block;font-size:11px;margin-top:3px">${Math.round(d)}m</span></span></button>`).join("")}</div>`:""}
