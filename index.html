@@ -1163,7 +1163,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="arOnlyOpen"){ar.onlyOpen=!ar.onlyOpen;t.setAttribute("aria-pressed",ar.onlyOpen);arList();arDraw();return}
   if(t.dataset.turn){toast(t.dataset.turn==="l"?"왼쪽으로 돌아보세요":"오른쪽으로 돌아보세요");return}
   if(t.id==="arCal"){arCalCheck(true);$("#arCalBox").scrollIntoView({behavior:"smooth",block:"center"});return}
-  if(t.id==="arCalHide"){const b=$("#arCalBox");b.hidden=true;b.innerHTML="";ar.courseDiff=null;return}
+  if(t.id==="arCalHide"){const b=$("#arCalBox");b.hidden=true;b.innerHTML="";ar.courseDiff=null;ar.calMuted=performance.now();ar.badSince=0;return}
   if(t.id==="arUseCourse"){if(ar.gpsHeading==null){toast("몇 걸음 걸어야 GPS 진행 방향이 잡혀요.");return}arCalibrateTo(ar.gpsHeading,"걷는 방향");return}
   if(t.id==="arFront"){const l=ar.target&&byId(ar.target);if(!l||!ar.pos){toast("먼저 목록에서 정면에 보이는 등을 고르세요.");return}arCalibrateTo(bearing(ar.pos,l),l.code);return}
   if(t.id==="arResetCal"){ar.offset=0;ar.courseDiff=null;toast("보정을 해제했어요.");arCalCheck();arDraw();return}
@@ -2510,7 +2510,7 @@ function openAR(){
   arStart();
 }
 async function arStart(){
-  arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;ar.offset=0;ar.raw=null;ar.courseDiff=null;ar.lastEvt=0;
+  arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;ar.offset=0;ar.raw=null;ar.courseDiff=null;ar.lastEvt=0;ar.cacc=null;ar.badSince=0;ar.goodSince=0;ar.calMuted=0;
   clearInterval(ar.staleTimer);ar.staleTimer=setInterval(()=>{if(ar.on)arCalCheck()},2500);
   const v=$("#arCam"),wrap=$("#arwrap");if(!v)return;
   try{ar.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});v.srcObject=ar.stream;await v.play();wrap.classList.remove("nocam")}
@@ -2528,7 +2528,7 @@ async function arStart(){
 function onHeading(e){
   if(!ar.on)return;
   let h=null;
-  if(typeof e.webkitCompassHeading==="number"){h=e.webkitCompassHeading;ar.compassOk=!(e.webkitCompassAccuracy>30||e.webkitCompassAccuracy<0)}
+  if(typeof e.webkitCompassHeading==="number"){h=e.webkitCompassHeading;const a=e.webkitCompassAccuracy;if(typeof a==="number"){if(a<0)ar.cacc=999;else ar.cacc=ar.cacc==null||ar.cacc>=999?a:ar.cacc*.8+a*.2;ar.compassOk=!(ar.cacc>(ar.compassOk===false?22:35))}}
   else if(typeof e.alpha==="number"){if(e.type==="deviceorientationabsolute"||e.absolute){h=(360-e.alpha)%360;ar.compassOk=true}else if(ar.heading==null&&!("ondeviceorientationabsolute" in window)){h=(360-e.alpha)%360;ar.compassOk=false}}
   if(h==null){if(ar.gpsHeading!=null){h=ar.gpsHeading;ar.compassOk=false}else return}
   const so=(screen.orientation&&typeof screen.orientation.angle==="number")?screen.orientation.angle:(window.orientation||0);
@@ -2624,10 +2624,14 @@ function arDraw(){
 }
 /* compass trouble: say what is wrong and offer three ways out — shake to recalibrate, trust the walking direction, or line up on a light you can see */
 function arCalCheck(force){
-  const box=$("#arCalBox");if(!box)return;
-  const stale=ar.lastEvt&&performance.now()-ar.lastEvt>4000;
-  const off=ar.courseDiff!=null&&ar.courseDiff>45;
-  const bad=force||stale||off||ar.compassOk===false;
+  const box=$("#arCalBox");if(!box)return;const now=performance.now();
+  const stale=ar.lastEvt&&now-ar.lastEvt>4000;
+  const off=ar.courseDiff!=null&&ar.courseDiff>(box.hidden?45:30);
+  const badNow=stale||off||ar.compassOk===false;
+  // hysteresis: a problem must last 3 s to show the banner and be gone 6 s to hide it — single noisy readings used to make it blink
+  if(badNow){ar.goodSince=0;if(!ar.badSince)ar.badSince=now}else{ar.badSince=0;if(!ar.goodSince)ar.goodSince=now}
+  const muted=ar.calMuted&&now-ar.calMuted<120000;
+  const bad=force||(!muted&&(box.hidden?(badNow&&now-ar.badSince>3000):!(ar.goodSince&&now-ar.goodSince>6000)));
   if(!bad){if(!box.hidden){box.hidden=true;box.innerHTML=""}return}
   const why=stale?"나침반 신호가 끊겼어요.":off?`걷는 방향과 나침반이 ${Math.round(ar.courseDiff)}° 어긋나요.`:ar.compassOk===false?"나침반 정확도가 낮아요.":"방향이 실제와 다르게 보이면 아래 중 하나로 맞추세요.";
   const html=`<b>${why}</b><div style="margin-top:4px">① 휴대폰을 8자 모양으로 몇 번 크게 돌려 보정 ② 몇 걸음 걸은 뒤 <b>걷는 방향으로 맞추기</b> ③ 보이는 등을 정면에 두고 목록에서 그 등을 고른 뒤 <b>이 등이 정면</b></div>
