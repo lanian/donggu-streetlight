@@ -263,6 +263,13 @@ textarea.f-in{min-height:84px;resize:vertical}
 .pstrip{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.pstrip .pt{position:relative;width:88px}.pstrip img{width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}
 .pstrip .lab{font-size:11px;color:var(--ink-2);text-align:center;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pstrip .x{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--bad);color:#fff;border:2px solid var(--bg);font-size:14px;line-height:18px;text-align:center;padding:0}
 .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin-top:8px}.pgrid button{padding:0;border:0;background:none;text-align:left}.pgrid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--line);display:block}.pgrid .lab{font-size:11px;color:var(--ink-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmpsh{position:fixed;left:0;right:0;bottom:0;z-index:62;background:#0B1120;color:#E6ECF7;border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.45);padding:10px 12px calc(12px + env(safe-area-inset-bottom));max-height:62vh;display:flex;flex-direction:column;gap:8px}.cmpsh[hidden]{display:none}
+.cmpsh .hd{display:flex;align-items:center;gap:8px}.cmpsh .hd b{font-size:17px}.cmpsh .hd .muted{color:#A9B6CC;font-size:12px}.cmpsh .hd .x{margin-left:auto;background:none;border:0;color:#fff;font-size:24px;line-height:1;padding:4px 8px}
+.cmpsh .strip{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}.cmpsh .strip figure{margin:0;flex:0 0 min(78%,320px);scroll-snap-align:start}.cmpsh .strip img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:10px;display:block;background:#1A2538}.cmpsh .strip figcaption{font-size:12px;color:#A9B6CC;margin-top:3px}
+.cmpsh .btns{display:flex;gap:8px}.cmpsh .btns button{flex:1}.cmpsh .empty{color:#A9B6CC;padding:18px 6px;text-align:center}
+.cmpsh .hint{font-size:12px;color:#A9B6CC}
+.near .row .rthumb{width:64px;height:64px}
+.row .rthumb[data-repconf]{cursor:zoom-in}
 .ovl{position:fixed;inset:0;z-index:60;background:#0B1120;color:#E6ECF7;display:flex;flex-direction:column}.ovl[hidden]{display:none}
 .ovl .bar{display:flex;gap:8px;align-items:center;padding:10px 12px;padding-top:max(10px,env(safe-area-inset-top));flex-wrap:wrap}.ovl .bar b{font-size:15px}.ovl .bar .x{margin-left:auto;background:#1A2538;color:#fff;border:0;width:40px;height:40px;border-radius:50%;font-size:22px}
 .ovl .stage{flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;touch-action:none}.ovl canvas,.ovl img.full{max-width:100%;max-height:100%;display:block}
@@ -425,7 +432,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 <div class="sheet-bg" id="sheetBg"></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"><div class="sheet-in" id="sheetIn"></div></div>
 <div class="toast" id="toast" role="status"></div>
-<div class="ovl" id="ovl" hidden></div>
+<div class="ovl" id="ovl" hidden></div><div id="cmpSheet" class="cmpsh" hidden></div>
 <div class="ptfull" id="ptFull" hidden></div>
 
 <script>
@@ -766,7 +773,7 @@ function tally(clickable){
       <div class="rest"><b>${n("정상").toLocaleString()}</b> 정상<br><span>전체 ${S.lights.length.toLocaleString()}${open?` · 조치 필요 ${open}`:""}</span></div></div></div>`;
 }
 function lightRow(l){
-  return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>${repThumb(l)?`<img class="rthumb" src="${esc(repThumb(l))}" alt="" loading="lazy">`:""}
+  return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>${repThumb(l)?`<img class="rthumb" src="${esc(repThumb(l))}" alt="대표 사진" loading="lazy" data-repconf="${esc(l.id)}" data-ctx="list">`:""}
     <span class="body">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:l.noPlate&&!l.plateFixed?`<span class="reg np">표찰없음</span>`:""}<span class="code">${esc(l.code)}</span> <span class="muted">${esc(adongOf(l)||l.dong)}${l.lampType?` · ${esc(l.lampType)}`:""}</span>
     <span class="addr" style="display:block">${esc(l.address)}</span></span>
     <span class="meta">${S.near&&S.pos&&typeof l.lat==="number"?`<span class="dist">${fmtDist(distM(S.pos,l))}</span>`:""}<span class="chip">${esc(l.status)}</span>${DRAFTS[l.id]?`<span class="due" style="color:var(--fix)">작성 중</span>`:l.redoNote&&l.status==="점검필요"?`<span class="due">재점검 요청</span>`:isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${l.lastInspected?fmtD(l.lastInspected):"점검 기록 없음"}</span>`}</span></button>`;
@@ -817,7 +824,7 @@ function vInspect(){
 function listArea(list,due){
   return `<h2 style="margin-top:6px">${S.near&&S.pos?"가까운 순":S.q.trim()?"검색 결과":"점검할 등"} <span class="muted">${list.length.toLocaleString()}</span>${S.near&&!S.pos?`<span class="muted" style="font-weight:400;font-size:13px"> · 위치 잡는 중…</span>`:""}</h2>
   ${S.near||S.q.trim()||due===0?"":`<p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${DUE_DAYS}일) 경과 ${due}개.</p>`}
-  <div class="list">${list.length?list.slice(0,S.limit).map(lightRow).join("")+(list.length>S.limit?`<button class="btn ghost block" id="moreList">더 보기 · ${list.length-S.limit}개 남음</button>`:""):`<div class="empty">${S.lights.length?`조건에 맞는 가로등이 없어요.<div class="muted" style="margin-top:4px">${[S.dong!=="전체"?`동: ${esc(S.dong)}`:"",S.kind!=="전체"?`종류: ${esc(S.kind)}`:"",S.stat?`상태: ${S.stat==="__open"?"조치 필요":esc(S.stat)}`:"",S.q.trim()?`검색: ${esc(S.q)}`:""].filter(Boolean).join(" · ")}</div><div class="split" style="justify-content:center"><button class="btn ghost sm" id="clearFilters">필터 모두 해제</button></div>`:(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}`;
+  <div class="list${S.near?" near":""}">${list.length?list.slice(0,S.limit).map(lightRow).join("")+(list.length>S.limit?`<button class="btn ghost block" id="moreList">더 보기 · ${list.length-S.limit}개 남음</button>`:""):`<div class="empty">${S.lights.length?`조건에 맞는 가로등이 없어요.<div class="muted" style="margin-top:4px">${[S.dong!=="전체"?`동: ${esc(S.dong)}`:"",S.kind!=="전체"?`종류: ${esc(S.kind)}`:"",S.stat?`상태: ${S.stat==="__open"?"조치 필요":esc(S.stat)}`:"",S.q.trim()?`검색: ${esc(S.q)}`:""].filter(Boolean).join(" · ")}</div><div class="split" style="justify-content:center"><button class="btn ghost sm" id="clearFilters">필터 모두 해제</button></div>`:(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}`;
 }
 // typing in the search box: refresh the list only — replacing the <input> mid-composition splits Korean syllables (ㅈㅣㅅㅏㄴ)
 function renderList(){const a=$("#listArea");if(!a||S.tab!=="inspect"){render();return}a.innerHTML=listArea(filtered(),S.lights.filter(isDue).length)}
@@ -1032,7 +1039,15 @@ async function saveInspection(){
 
 /* ---------- events ---------- */
 document.addEventListener("click",async e=>{
+  const rc=e.target.closest("[data-repconf]");
+  if(rc){e.preventDefault();e.stopPropagation();const ctx=rc.dataset.ctx||"list";const id=rc.dataset.repconf;
+    const cands=ctx==="ar"?arNear().slice(0,6).map(x=>x.l.id):ctx==="patrol"?pt.ahead.map(a=>a.l.id):ctx==="scan"?[...document.querySelectorAll("#liveRes [data-livecand]")].map(b=>b.dataset.livecand):(S.near&&S.pos?filtered().slice(0,6).map(l=>l.id):[]);
+    repConfirm(id,ctx,cands);return}
+  if(e.target.closest("#cmpSheet .strip img")){const f=e.target.closest("figure");const l=byId(CMP.id);if(l&&f){openRepPhoto(l.id,f.dataset.slot)}return}
   const t=e.target.closest("button,circle");if(!t)return;
+  if(t.id==="cmpX"){repConfirmClose();return}
+  if(t.id==="cmpYes"){repConfirmYes();return}
+  if(t.id==="cmpNo"){repConfirmNext();return}
   if(t.dataset.tab){S.tab=t.dataset.tab;render();window.scrollTo(0,0);return}
   if(t.dataset.close!==undefined){if(pt.on&&(pt.passed.size||pt.marks.length)){ptFinish();return}closeSheet();return}
   if(t.dataset.light){openLight(t.dataset.light);return}
@@ -1717,6 +1732,31 @@ async function posApplySuggest(id){
   if(ok){if($("#leSave"))openLightEdit(id);else openLight(id)}
 }
 const posChip=i=>typeof i.posDist==="number"?`<span class="pos ${i.posDist>POS_FAR?"far":""}">📍 ${i.posDist>POS_FAR?"등록 좌표에서 "+i.posDist+"m 떨어진 곳에서 점검":"위치 확인 "+i.posDist+"m"}</span>`:"";
+/* ---------- "이 등이 맞나요?": the candidate's 대표 사진 in a bottom panel, so the inspector can compare them with the pole in
+   front (the camera view stays visible above it in AR / 순찰). cands = the other nearby candidates to flip through. ---------- */
+let CMP={id:null,ctx:null,cands:[]};
+async function repConfirm(id,ctx,cands){
+  const l=byId(id);if(!l)return;const sh=$("#cmpSheet");if(!sh)return;
+  CMP={id,ctx:ctx||"list",cands:(cands&&cands.length?cands:CMP.ctx===ctx?CMP.cands:[]).filter(x=>x!==id)};
+  const rs=repSlots(l);const order=REP_SLOTS.filter(k=>rs[k]);
+  const d=S.pos&&typeof l.lat==="number"?Math.round(distM(S.pos,l)):(ar.pos&&typeof l.lat==="number"?Math.round(distM(ar.pos,l)):null);
+  const act=ctx==="patrol"?"이 등이 맞아요":ctx==="scan"?"맞아요 · 이 등으로":S.canWrite&&ctx!=="admin"?"맞아요 · 점검하기":"맞아요 · 열기";
+  const fig=k=>{const e=rs[k];const src=e.legacy||(e.id&&GAL[e.id]&&GAL[e.id].data)||(l.photoId===e.id?l.photoT:null);return `<figure data-slot="${k}"><img src="${src?esc(src):""}" alt="${k}"><figcaption>${k}${e.at?" · "+fmtD(e.at):""}</figcaption></figure>`};
+  sh.innerHTML=`<div class="hd">${kindBadge(l.kind)}<b>${esc(l.code)}</b><span class="muted">${d!=null?d+"m · ":""}${esc(l.address||l.dong||"")}</span><button class="x" id="cmpX" aria-label="닫기">×</button></div>
+    ${order.length?`<div class="strip">${order.map(fig).join("")}</div><div class="hint">앞에 보이는 등주·배경과 사진을 견주어 보세요. 사진을 누르면 크게 봐요.</div>`:`<div class="empty">이 등은 아직 대표 사진이 없어요. 점검 결과에 '전경' 사진을 붙이면 다음부터 여기 떠요.</div>`}
+    <div class="btns"><button class="btn sodium" id="cmpYes">${act}</button>${CMP.cands.length?`<button class="btn ghost" id="cmpNo" style="color:#fff;border-color:#4A5A78">아니에요 · 다음 후보 (${CMP.cands.length})</button>`:""}</div>`;
+  sh.hidden=false;
+  if(order.length){await ensureRepPhotos(l);if(CMP.id!==id)return;order.forEach(k=>{const e=rs[k];const src=e.legacy||(e.id&&GAL[e.id]&&GAL[e.id].data);const img=sh.querySelector(`figure[data-slot="${k}"] img`);if(img&&src)img.src=src})}
+}
+function repConfirmClose(){const sh=$("#cmpSheet");if(sh){sh.hidden=true;sh.innerHTML=""}CMP={id:null,ctx:null,cands:[]}}
+function repConfirmYes(){
+  const {id,ctx}=CMP;repConfirmClose();if(!id)return;
+  if(ctx==="ar"){arStop();openLight(id);return}
+  if(ctx==="patrol"){pt.sel=id;ptDraw(true);toast("이 등을 골랐어요. 아래 버튼으로 표시하세요.");return}
+  if(ctx==="scan"){onLiveCand(id);return}
+  openLight(id);
+}
+function repConfirmNext(){const {ctx,cands}=CMP;if(!cands.length){repConfirmClose();return}const next=cands[0];repConfirm(next,ctx,cands.slice(1))}
 let repTarget=null; // {id,slot} while a file picker is open
 function repBox(l){
   const reps=repSlots(l),w=S.canWrite&&can("inspect"),n=repCount(l);
@@ -2328,7 +2368,7 @@ function ptDraw(force){
   const key=pt.ahead.map(a=>a.l.id+":"+a.d+":"+a.side).join("|")+"#"+pt.sel+"#"+pt.marks.length+"#"+pt.spots.length;
   if(!force&&key===pt.key)return;pt.key=key;
   const marked=new Map(pt.marks.map(m=>[m.id,m.result]));
-  $("#ptAhead").innerHTML=pt.ahead.length?pt.ahead.map((a,i)=>`<button class="ptcard st-${esc(a.l.status)} ${(pt.sel?pt.sel===a.l.id:i===0)?"first":""}" data-ptsel="${esc(a.l.id)}"><span class="ptnum ${(pt.sel?pt.sel===a.l.id:i===0)?"sel":""}">${i+1}</span><span class="ptarrow" style="transform:rotate(${pt.heading==null?0:Math.round(angDiff(pt.heading,a.b))}deg)" aria-hidden="true">⬆</span>${repThumb(a.l)?`<img class="rthumb" src="${esc(repThumb(a.l))}" alt="">`:""}${kindBadge(a.l.kind)}<span><b>${esc(a.l.code)}</b><br><span class="side">${a.side}${a.l.status!=="정상"?` · ${esc(a.l.status)}`:""}${marked.has(a.l.id)?` · <b style="color:#FFB347">${esc(marked.get(a.l.id))} 표시됨</b>`:""}</span></span><span class="d">${a.fwd<0?"지남":a.d+"m"}</span></button>`).join(""):`<div class="muted" style="color:#A9B6CC">${pt.pos?"앞쪽 140m 안에 등록된 등이 없어요.":"GPS를 기다리는 중…"}</div>`;
+  $("#ptAhead").innerHTML=pt.ahead.length?pt.ahead.map((a,i)=>`<button class="ptcard st-${esc(a.l.status)} ${(pt.sel?pt.sel===a.l.id:i===0)?"first":""}" data-ptsel="${esc(a.l.id)}"><span class="ptnum ${(pt.sel?pt.sel===a.l.id:i===0)?"sel":""}">${i+1}</span><span class="ptarrow" style="transform:rotate(${pt.heading==null?0:Math.round(angDiff(pt.heading,a.b))}deg)" aria-hidden="true">⬆</span>${repThumb(a.l)?`<img class="rthumb" src="${esc(repThumb(a.l))}" alt="대표 사진" data-repconf="${esc(a.l.id)}" data-ctx="patrol">`:""}${kindBadge(a.l.kind)}<span><b>${esc(a.l.code)}</b><br><span class="side">${a.side}${a.l.status!=="정상"?` · ${esc(a.l.status)}`:""}${marked.has(a.l.id)?` · <b style="color:#FFB347">${esc(marked.get(a.l.id))} 표시됨</b>`:""}</span></span><span class="d">${a.fwd<0?"지남":a.d+"m"}</span></button>`).join(""):`<div class="muted" style="color:#A9B6CC">${pt.pos?"앞쪽 140m 안에 등록된 등이 없어요.":"GPS를 기다리는 중…"}</div>`;
   const items=[...pt.marks.map(m=>({at:m.at,html:`<b>${esc(m.code)}</b> ${esc(m.result)} <span style="color:#8A98B3">${fmtT(m.at)}</span><button data-ptdrop="${esc(m.id)}">삭제</button>`})),...pt.spots.map((sp,i)=>({at:sp.at,html:`<b>어두운 지점</b> ${sp.near?esc(sp.near)+" 근처":""} <span style="color:#8A98B3">${fmtT(sp.at)}</span><button data-ptspotdel="${i}">삭제</button>`}))].sort((a,b)=>b.at-a.at).slice(0,5);
   $("#ptLog").innerHTML=items.map(i=>`<div>${i.html}</div>`).join("");
 }
@@ -2567,7 +2607,7 @@ function arList(force){
   if(force||key!==ar.listKey){
     ar.listKey=key;
     box.innerHTML=top.length?top.map(({l,d,b})=>`<button class="row st-${esc(l.status)} ${ar.target===l.id?"sel":""}" data-ar-target="${esc(l.id)}" data-row="${esc(l.id)}"><span class="pole"></span>
-      <span class="arrow" style="transform:rotate(${H==null?0:Math.round(angDiff(H,b))}deg)" aria-hidden="true">➤</span>
+      <span class="arrow" style="transform:rotate(${H==null?0:Math.round(angDiff(H,b))}deg)" aria-hidden="true">➤</span>${repThumb(l)?`<img class="rthumb" src="${esc(repThumb(l))}" alt="대표 사진" data-repconf="${esc(l.id)}" data-ctx="ar">`:""}
       <span class="body">${kindBadge(l.kind)}<span class="code">${esc(l.code)}</span><span class="addr" style="display:block">${esc(l.address)}</span></span>
       <span class="meta"><span class="chip">${esc(l.status)}</span><span class="muted dist" style="display:block;font-size:11px;margin-top:3px">${Math.round(d)}m · ${dirName(b)}</span></span></button>`).join("")
     :`<div class="empty">${ar.range}m 안에 ${ar.onlyOpen?"조치가 필요한 ":""}등록된 등이 없어요.</div>`;
@@ -2616,7 +2656,7 @@ function arDraw(){
       guide.hidden=false;const gc="arguide st-"+esc(l.status)+(near8?" here":"");if(guide.className!==gc)guide.className=gc;
       const dirTxt=near8?"바로 근처예요 — 표찰을 확인하세요":`${Math.round(d)}m · ${Math.abs(diff)<12?"정면":diff<0?`왼쪽으로 ${Math.round(-diff/5)*5}°`:`오른쪽으로 ${Math.round(diff/5)*5}°`}`;
       if(guide.dataset.for!==l.id){guide.dataset.for=l.id;guide.innerHTML=`<span class="garrow">➤</span><div><b>${esc(l.code)}</b> <span class="chip">${esc(l.status)}</span><div class="gdir"></div></div>
-        <div class="split" style="margin:0"><button class="btn sm" data-ar-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button><button class="btn sm ghost" id="arFront" title="이 등을 정면에 두고 누르면 나침반을 맞춰요">정면 보정</button><button class="btn sm ghost" data-ar-target="">끝</button></div>`}
+        <div class="split" style="margin:0"><button class="btn sm" data-ar-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button>${repCount(l)?`<button class="btn sm ghost" data-repconf="${esc(l.id)}" data-ctx="ar">사진 확인</button>`:""}<button class="btn sm ghost" id="arFront" title="이 등을 정면에 두고 누르면 나침반을 맞춰요">정면 보정</button><button class="btn sm ghost" data-ar-target="">끝</button></div>`}
       const ga=guide.querySelector(".garrow");if(ga)ga.style.transform=`rotate(${Math.round(diff/3)*3}deg)`;
       const gd=guide.querySelector(".gdir");if(gd&&gd.textContent!==dirTxt)gd.textContent=dirTxt;
     }else{guide.hidden=true;guide.dataset.for=""}
@@ -2876,7 +2916,7 @@ function liveShow({num,kind,plate,cands,nearby}){
   const ov=$("#liveRes");if(!ov)return;
   const key=`${kind}:${num}:${cands.map(c=>c.id).join(",")}`;
   if(!num){ov.innerHTML=`<div class="panel lres none"><span class="muted">표찰 번호를 읽지 못했어요 — 정면에서 조금 더 가까이. 계속 다시 읽어요.</span><button class="btn ghost sm" data-livedetail="1">자세히 읽기</button></div>`;live.key=null;live.cool=performance.now()+2500;return}
-  const row=(c,d,hot)=>`<button class="lrow${hot?" hot":""}" data-livecand="${esc(c.id)}"><span>${kindBadge(c.kind)}<b>${esc(c.code)}</b><small>${esc(c.address||c.dong||"")} · ${esc(c.status)}</small></span><span class="d">${typeof d==="number"?Math.round(d)+"m":""}</span></button>`;
+  const row=(c,d,hot)=>`<button class="lrow${hot?" hot":""}" data-livecand="${esc(c.id)}">${repThumb(c)?`<img class="rthumb" src="${esc(repThumb(c))}" alt="대표 사진" data-repconf="${esc(c.id)}" data-ctx="scan" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex:none">`:""}<span style="flex:1;min-width:0">${kindBadge(c.kind)}<b>${esc(c.code)}</b><small>${esc(c.address||c.dong||"")} · ${esc(c.status)}</small></span><span class="d">${typeof d==="number"?Math.round(d)+"m":""}</span></button>`;
   const dist=c=>scan.pos&&typeof c.lat==="number"?distM(scan.pos,c):null;
   const d0=cands.length?dist(cands[0]):null,d1=cands.length>1?dist(cands[1]):null;
   // confident when the number is unique, or the nearest match is right here and the next one is clearly elsewhere
@@ -3121,7 +3161,7 @@ async function readLabelPhoto(file){
   }finally{scan.busy=false}
 }
 document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"||e.target.id==="scanPhotoLib"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
-const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;posCheckStop();stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){meStop();gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
+const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;repConfirmClose();posCheckStop();stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){meStop();gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
 
 render();
 try{if(localStorage.getItem("dg-near")==="1"){S.near=false;nearToggle()}}catch(e){}
