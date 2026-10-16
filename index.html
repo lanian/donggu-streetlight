@@ -379,7 +379,8 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .arguide .chip{background:var(--c);color:#fff}
 .arguide .split .btn{background:#fff;color:#16233D}.arguide .split .btn.ghost{background:transparent;color:#fff;border-color:#fff8}
 .arguide>div{flex:1;min-width:0}
-.arguide .split{flex:none;flex-direction:column;gap:4px}
+.arguide{flex-wrap:wrap;padding-right:36px}.arguide .split{flex:1 1 100%;flex-direction:row;flex-wrap:wrap;gap:6px;margin-top:2px}.arguide .split .btn{min-height:36px;padding:0 10px}
+.arguide .gx{position:absolute;top:2px;right:4px;background:none;border:0;color:#fff;font-size:26px;line-height:1;padding:4px 8px;min-height:0}
 .gmap{height:62vh;min-height:380px;border-radius:12px;overflow:hidden;background:var(--bg);position:relative;z-index:0}
 .gmap .leaflet-popup-content{margin:10px 12px;font-family:var(--font);font-size:13px;line-height:1.45}
 .gmap .leaflet-popup-content-wrapper{border-radius:10px}
@@ -2650,12 +2651,12 @@ function arDraw(){
   let er=layer.querySelector(".aredge.r");if(right){if(!er){er=document.createElement("button");er.className="aredge r";er.dataset.turn="r";layer.appendChild(er)}const t=`${right} ▶`;if(er.textContent!==t)er.textContent=t}else if(er)er.remove();
   if(radar)radar.innerHTML=`<i class="me"></i>`+near.map(({l,d,b})=>{const a=toRad(angDiff(H,b)-90),r=Math.min(d,ar.range)/ar.range*42;return`<i class="st-${esc(l.status)} ${ar.target===l.id?"tgt":""}" style="left:${(50+Math.cos(a)*r).toFixed(1)}%;top:${(50+Math.sin(a)*r).toFixed(1)}%"></i>`}).join("");
   if(guide){
-    if(!tgt&&ar.target){const l=byId(ar.target);const d=l&&ar.pos?distM(ar.pos,l):null;guide.hidden=false;guide.innerHTML=`<b>${esc(l?l.code:"")}</b> <span>${d!=null?Math.round(d)+"m":""} · 범위 밖이에요</span><button class="btn sm ghost" data-ar-target="">안내 끝</button>`}
+    if(!tgt&&ar.target){const l=byId(ar.target);const d=l&&ar.pos?distM(ar.pos,l):null;guide.hidden=false;guide.innerHTML=`<b>${esc(l?l.code:"")}</b> <span>${d!=null?Math.round(d)+"m":""} · 범위 밖이에요</span><button class="btn sm ghost" data-ar-target="">안내 해제</button><button class="gx" data-ar-target="" aria-label="안내 해제">×</button>`}
     else if(tgt){const {l,d,b}=tgt;const diff=angDiff(H,b);const near8=d<=Math.max(8,(ar.acc||0)*.6);
       if(near8&&!ar.arrived){ar.arrived=true;if(navigator.vibrate)navigator.vibrate([60,40,60])}
       guide.hidden=false;const gc="arguide st-"+esc(l.status)+(near8?" here":"");if(guide.className!==gc)guide.className=gc;
       const dirTxt=near8?"바로 근처예요 — 표찰을 확인하세요":`${Math.round(d)}m · ${Math.abs(diff)<12?"정면":diff<0?`왼쪽으로 ${Math.round(-diff/5)*5}°`:`오른쪽으로 ${Math.round(diff/5)*5}°`}`;
-      if(guide.dataset.for!==l.id){guide.dataset.for=l.id;guide.innerHTML=`<span class="garrow">➤</span><div><b>${esc(l.code)}</b> <span class="chip">${esc(l.status)}</span><div class="gdir"></div></div>
+      if(guide.dataset.for!==l.id){guide.dataset.for=l.id;guide.innerHTML=`<button class="gx" data-ar-target="" aria-label="안내 해제">×</button><span class="garrow">➤</span><div><b>${esc(l.code)}</b> <span class="chip">${esc(l.status)}</span><div class="gdir"></div></div>
         <div class="split" style="margin:0"><button class="btn sm" data-ar-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button>${repCount(l)?`<button class="btn sm ghost" data-repconf="${esc(l.id)}" data-ctx="ar">사진 확인</button>`:""}<button class="btn sm ghost" id="arFront" title="이 등을 정면에 두고 누르면 나침반을 맞춰요">정면 보정</button><button class="btn sm ghost" data-ar-target="">안내 해제</button></div>`}
       const ga=guide.querySelector(".garrow");if(ga)ga.style.transform=`rotate(${Math.round(diff/3)*3}deg)`;
       const gd=guide.querySelector(".gdir");if(gd&&gd.textContent!==dirTxt)gd.textContent=dirTxt;
