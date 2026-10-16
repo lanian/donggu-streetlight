@@ -2609,7 +2609,7 @@ function arList(force){
     box.innerHTML=top.length?top.map(({l,d,b})=>`<button class="row st-${esc(l.status)} ${ar.target===l.id?"sel":""}" data-ar-target="${esc(l.id)}" data-row="${esc(l.id)}"><span class="pole"></span>
       <span class="arrow" style="transform:rotate(${H==null?0:Math.round(angDiff(H,b))}deg)" aria-hidden="true">➤</span>${repThumb(l)?`<img class="rthumb" src="${esc(repThumb(l))}" alt="대표 사진" data-repconf="${esc(l.id)}" data-ctx="ar">`:""}
       <span class="body">${kindBadge(l.kind)}<span class="code">${esc(l.code)}</span><span class="addr" style="display:block">${esc(l.address)}</span></span>
-      <span class="meta"><span class="chip">${esc(l.status)}</span><span class="muted dist" style="display:block;font-size:11px;margin-top:3px">${Math.round(d)}m · ${dirName(b)}</span></span></button>`).join("")
+      <span class="meta"><span class="chip">${esc(l.status)}</span><span class="muted dist" style="display:block;font-size:11px;margin-top:3px">${Math.round(d)}m · ${dirName(b)}</span>${ar.target===l.id?`<span class="muted" style="display:block;font-size:11px;color:var(--sodium)">안내 중 · 다시 누르면 해제</span>`:""}</span></button>`).join("")
     :`<div class="empty">${ar.range}m 안에 ${ar.onlyOpen?"조치가 필요한 ":""}등록된 등이 없어요.</div>`;
   }else{
     top.forEach(({l,d,b})=>{const row=box.querySelector(`[data-row="${CSS.escape(l.id)}"]`);if(!row)return;row.classList.toggle("sel",ar.target===l.id);
@@ -2656,7 +2656,7 @@ function arDraw(){
       guide.hidden=false;const gc="arguide st-"+esc(l.status)+(near8?" here":"");if(guide.className!==gc)guide.className=gc;
       const dirTxt=near8?"바로 근처예요 — 표찰을 확인하세요":`${Math.round(d)}m · ${Math.abs(diff)<12?"정면":diff<0?`왼쪽으로 ${Math.round(-diff/5)*5}°`:`오른쪽으로 ${Math.round(diff/5)*5}°`}`;
       if(guide.dataset.for!==l.id){guide.dataset.for=l.id;guide.innerHTML=`<span class="garrow">➤</span><div><b>${esc(l.code)}</b> <span class="chip">${esc(l.status)}</span><div class="gdir"></div></div>
-        <div class="split" style="margin:0"><button class="btn sm" data-ar-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button>${repCount(l)?`<button class="btn sm ghost" data-repconf="${esc(l.id)}" data-ctx="ar">사진 확인</button>`:""}<button class="btn sm ghost" id="arFront" title="이 등을 정면에 두고 누르면 나침반을 맞춰요">정면 보정</button><button class="btn sm ghost" data-ar-target="">끝</button></div>`}
+        <div class="split" style="margin:0"><button class="btn sm" data-ar-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button>${repCount(l)?`<button class="btn sm ghost" data-repconf="${esc(l.id)}" data-ctx="ar">사진 확인</button>`:""}<button class="btn sm ghost" id="arFront" title="이 등을 정면에 두고 누르면 나침반을 맞춰요">정면 보정</button><button class="btn sm ghost" data-ar-target="">안내 해제</button></div>`}
       const ga=guide.querySelector(".garrow");if(ga)ga.style.transform=`rotate(${Math.round(diff/3)*3}deg)`;
       const gd=guide.querySelector(".gdir");if(gd&&gd.textContent!==dirTxt)gd.textContent=dirTxt;
     }else{guide.hidden=true;guide.dataset.for=""}
@@ -2684,7 +2684,7 @@ function arCalibrateTo(trueHeading,label){
   const el=$("#arHead");if(el)el.textContent=`${Math.round(ar.heading)}° ${dirName(ar.heading)} · 보정됨`;
   toast(`${label} 기준으로 방향을 맞췄어요 (${Math.round(ar.offset)}° 보정).`);arCalCheck();arList(true);arDraw();
 }
-function arSetTarget(id){ar.target=id||null;ar.arrived=false;arList(true);arDraw();if(id){const w=$("#arwrap");w&&w.scrollIntoView({behavior:"smooth",block:"start"})}}
+function arSetTarget(id){const same=id&&ar.target===id;ar.target=same?null:(id||null);ar.arrived=false;arList(true);arDraw();if(same){toast("안내를 해제했어요.");return}if(id){const w=$("#arwrap");w&&w.scrollIntoView({behavior:"smooth",block:"start"})}}
 function arStop(reset=true){
   ar.on=false;clearInterval(ar.staleTimer);
   if(ar.stream){ar.stream.getTracks().forEach(t=>t.stop());ar.stream=null}
