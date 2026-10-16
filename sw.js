@@ -1,7 +1,7 @@
 /* 동구 가로등 점검 — service worker
    App shell is cached on install; index.html is served from cache and refreshed in the background;
    map tiles and OCR assets are cached as they are used so a patrol in a known area works without signal. */
-const VERSION="v9";
+const VERSION="v10";
 const SHELL="dg-shell-"+VERSION, RUNTIME="dg-runtime-"+VERSION, TILES="dg-tiles-"+VERSION;
 const SHELL_FILES=["./","./index.html","./manifest.webmanifest","./firebase-config.js","./report/config.js","./data/lights.json","./seed/manifest.json","./vendor/jsQR.js","./vendor/leaflet.js","./vendor/qrcode.js","./icons/icon-192.png","./icons/icon-512.png","./icons/maskable-512.png","./icons/apple-touch-icon.png"];
 const TILE_MAX=600, RUNTIME_HOSTS=["cdn.jsdelivr.net","unpkg.com","cdnjs.cloudflare.com","fonts.googleapis.com","fonts.gstatic.com","tessdata.projectnaptha.com"];

@@ -820,7 +820,7 @@ function vInspect(){
     <div class="frow"><span class="fl">상태</span><div class="chips"><button type="button" id="openOnly" aria-pressed="${S.stat==="__open"}">조치 필요만${open?` <span class="muted" style="font-size:11px">${open}</span>`:""}</button>${LSTAT.map(st=>`<button type="button" data-stat="${st}" aria-pressed="${S.stat===st}">${st}</button>`).join("")}</div></div>
     <div class="split" style="margin-top:8px"><button type="button" class="btn ghost sm" id="filterReset">모두 지우기</button><button type="button" class="btn sm" id="filterDone" style="margin-left:auto">닫기</button></div></div>`
   :act.length?`<div class="chipbar active"><span class="muted" style="align-self:center;font-size:12px">필터</span>${act.map(([k,v])=>`<button type="button" data-fclear="${k}" aria-pressed="true">${esc(v)} ×</button>`).join("")}</div>`:""}`})()}
-  <div id="listArea">${listArea(list,due)}</div>`;
+  <div id="listArea">${listArea(list,due)}</div><p class="muted" style="font-size:11px;text-align:center;margin:14px 0 4px">버전 ${APP_VER}</p>`;
 }
 function listArea(list,due){
   return `<h2 style="margin-top:6px">${S.near&&S.pos?"가까운 순":S.q.trim()?"검색 결과":"점검할 등"} <span class="muted">${list.length.toLocaleString()}</span>${S.near&&!S.pos?`<span class="muted" style="font-weight:400;font-size:13px"> · 위치 잡는 중…</span>`:""}</h2>
@@ -2551,7 +2551,7 @@ function openAR(){
   arStart();
 }
 async function arStart(){
-  arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;ar.offset=0;ar.raw=null;ar.courseDiff=null;ar.lastEvt=0;ar.cacc=null;ar.badSince=0;ar.goodSince=0;ar.calMuted=0;
+  arBindGuide();arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;ar.offset=0;ar.raw=null;ar.courseDiff=null;ar.lastEvt=0;ar.cacc=null;ar.badSince=0;ar.goodSince=0;ar.calMuted=0;
   clearInterval(ar.staleTimer);ar.staleTimer=setInterval(()=>{if(ar.on)arCalCheck()},2500);
   const v=$("#arCam"),wrap=$("#arwrap");if(!v)return;
   try{ar.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});v.srcObject=ar.stream;await v.play();wrap.classList.remove("nocam")}
@@ -2685,7 +2685,11 @@ function arCalibrateTo(trueHeading,label){
   const el=$("#arHead");if(el)el.textContent=`${Math.round(ar.heading)}° ${dirName(ar.heading)} · 보정됨`;
   toast(`${label} 기준으로 방향을 맞췄어요 (${Math.round(ar.offset)}° 보정).`);arCalCheck();arList(true);arDraw();
 }
-function arSetTarget(id){const same=id&&ar.target===id;ar.target=same?null:(id||null);ar.arrived=false;arList(true);arDraw();if(same){toast("안내를 해제했어요.");return}if(id){const w=$("#arwrap");w&&w.scrollIntoView({behavior:"smooth",block:"start"})}}
+function arSetTarget(id){const same=id&&ar.target===id;const had=!!ar.target;ar.target=same?null:(id||null);ar.arrived=false;const g=$("#arGuide");if(!ar.target&&g){g.hidden=true;g.dataset.for="";g.innerHTML=""}arList(true);arDraw();if(!ar.target){if(had)toast("안내를 해제했어요.");return}const w=$("#arwrap");w&&w.scrollIntoView({behavior:"smooth",block:"start"})}
+// the guide card handles its own taps too (some phones drop the delegated click when the layer is redrawn mid-tap);
+// a tap on empty camera area also ends the guidance
+function arBindGuide(){const g=$("#arGuide"),layer=$("#arLayer");if(g&&!g.dataset.bound){g.dataset.bound="1";g.addEventListener("click",e=>{const b=e.target.closest("[data-ar-target]");if(b&&b.dataset.arTarget===""){e.preventDefault();e.stopPropagation();arSetTarget("")}},true)}
+  const wrap=$("#arwrap");if(wrap&&!wrap.dataset.bound){wrap.dataset.bound="1";wrap.addEventListener("click",e=>{if((e.target===wrap||e.target.id==="arCam"||e.target===layer)&&ar.target){arSetTarget("")}})}}
 function arStop(reset=true){
   ar.on=false;clearInterval(ar.staleTimer);
   if(ar.stream){ar.stream.getTracks().forEach(t=>t.stop());ar.stream=null}
@@ -2835,6 +2839,7 @@ function confirmPick(){
 }
 
 /* ---------- live plate recognition: watch the viewfinder for a plate frame, read it when it holds still ---------- */
+const APP_VER="2026.10.16-2";
 const LIVE_AUTO=!(window.claude&&window.claude.use); // on-device OCR runs by itself; in the shared artifact Claude reads on a tap (sends a photo)
 let live={last:null,stable:0,cool:0,t:0,reading:false,key:null,snap:null,box:null};
 const liveCv=document.createElement("canvas");
