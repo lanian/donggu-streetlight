@@ -375,7 +375,7 @@ nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
 .radar i.tgt{width:11px;height:11px;box-shadow:0 0 0 2px #fff}
 .arguide{position:absolute;left:10px;right:10px;bottom:10px;background:rgba(16,24,40,.88);color:#fff;border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:center;border-left:5px solid var(--c);font-size:13px;backdrop-filter:blur(4px)}
 .arguide .garrow{font-size:30px;line-height:1;color:var(--sodium);transition:transform .4s ease-out;display:inline-block;transform-origin:50% 50%;flex:none}
-.arguide.here{background:rgba(44,122,87,.9)}
+.arguide.here{background:rgba(44,122,87,.9)}.arguide[hidden]{display:none}
 .arguide .chip{background:var(--c);color:#fff}
 .arguide .split .btn{background:#fff;color:#16233D}.arguide .split .btn.ghost{background:transparent;color:#fff;border-color:#fff8}
 .arguide>div{flex:1;min-width:0}
@@ -2587,7 +2587,7 @@ function onHeading(e){
 }
 function onPosition(p){
   const nl={lat:p.coords.latitude,lng:p.coords.longitude};ar.acc=p.coords.accuracy;
-  if(typeof p.coords.heading==="number"&&!isNaN(p.coords.heading)&&p.coords.speed>0.7){ar.gpsHeading=p.coords.heading;
+  if(typeof p.coords.heading==="number"&&!isNaN(p.coords.heading)&&p.coords.speed>1.0&&(p.coords.accuracy||0)<=25){ar.gpsHeading=p.coords.heading;ar.gpsHeadAt=performance.now();
     // while walking, the GPS course is a second opinion on the compass: a steady disagreement means the compass is off
     if(ar.heading!=null&&!ar.frozen){const d=Math.abs(angDiff(ar.heading,p.coords.heading));ar.courseDiff=ar.courseDiff==null?d:ar.courseDiff*.6+d*.4;arCalCheck()}}
   // position: ignore GPS jitter smaller than a few metres, otherwise ease toward the new fix
@@ -2667,6 +2667,7 @@ function arDraw(){
 function arCalCheck(force){
   const box=$("#arCalBox");if(!box)return;const now=performance.now();
   const stale=ar.lastEvt&&now-ar.lastEvt>4000;
+  if(ar.courseDiff!=null&&ar.gpsHeadAt&&now-ar.gpsHeadAt>20000)ar.courseDiff=null;
   const off=ar.courseDiff!=null&&ar.courseDiff>(box.hidden?45:30);
   const badNow=stale||off||ar.compassOk===false;
   // hysteresis: a problem must last 3 s to show the banner and be gone 6 s to hide it — single noisy readings used to make it blink
