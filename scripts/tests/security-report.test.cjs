@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '../..');
 const reportHtml = fs.readFileSync(path.join(root, 'report/index.html'), 'utf8');
 const reportScript = [...reportHtml.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
-  .map(match => match[1]).find(source => source.includes('function sendFirestore'));
+  .map(match => match[1]).find(source => source.includes('function sendGateway'));
 
 // Execute the shipped page script with a small DOM/fetch substitute. No network is used.
 function reportPage(config, { search = '', response } = {}) {
@@ -47,21 +47,21 @@ function reportPage(config, { search = '', response } = {}) {
     },
     navigator: { userAgent: 'Offline test', clipboard: { writeText: async () => {} } },
     location: { search },
-    URLSearchParams,
+    URLSearchParams, crypto: require('node:crypto').webcrypto,
     fetch: async (url, options) => {
       requests.push({ url, options, body: JSON.parse(options.body) });
-      return response ? response() : { ok: true, json: async () => ({ name: 'test-document' }) };
+      return response ? response() : { ok: true, json: async () => ({ receipt: 'R261022-TEST0001', id: 'test-document' }) };
     }
   };
   vm.createContext(sandbox);
   vm.runInContext(reportScript, sandbox, { filename: 'report/index.html' });
   const run = source => vm.runInContext(source, sandbox);
-  run('st.issue = "불이 꺼져 있어요";');
+  run('st.issue = "불이 꺼져 있어요";if(!st.code)st.code="산수동 1";');
   return { nodes, requests, run, submit: () => nodes.get('#send').onclick() };
 }
 
 const firebaseConfig = {
-  backend: 'firestore',
+  backend: 'gateway', gatewayUrl: 'http://127.0.0.1:5001/demo/api', allowLocalGateway: true,
   firestore: { projectId: 'demo-donggu-streetlight', apiKey: 'offline-test-key' }
 };
 
@@ -106,8 +106,10 @@ test('a blank optional description is serialized and receipt appears after serve
   const page = reportPage(firebaseConfig);
   await page.submit();
   assert.equal(page.requests.length, 1);
-  assert.equal(page.requests[0].body.fields.desc.stringValue, '');
-  assert.equal(page.requests[0].body.fields.imported.booleanValue, false);
+  assert.equal(page.requests[0].body.desc, '');
+  assert.equal('imported' in page.requests[0].body, false);
+  assert.equal('at' in page.requests[0].body, false);
+  assert.match(page.requests[0].body.requestId, /^[a-f0-9-]{36}$/);
   assert.equal(page.nodes.get('#doneTitle').textContent, '접수됐어요');
   assert.equal(page.nodes.get('#receipt').hidden, false);
   assert.match(page.nodes.get('#receipt').textContent, /^R\d{6}-/);
@@ -120,7 +122,7 @@ test('pending or failed server writes do not produce a receipt', async () => {
   const pending = page.submit();
   assert.equal(page.nodes.get('#done').hidden, true);
   assert.equal(page.nodes.get('#send').disabled, true);
-  respond({ ok: false, status: 403 });
+  respond({ ok: false, status: 403, json: async () => ({error:'접수 거부'}) });
   await pending;
   assert.equal(page.nodes.get('#done').hidden, true);
   assert.equal(page.nodes.get('#form').hidden, false);
@@ -132,7 +134,7 @@ test('QR light identity is preserved for submission and cleared when its plate i
   const page = reportPage(firebaseConfig, { search: '?c=%EC%82%B0%EC%88%98%EB%8F%99%20642&lid=p2872307' });
   assert.equal(page.run('st.lightId'), 'p2872307');
   await page.submit();
-  assert.equal(page.requests[0].body.fields.lightId.stringValue, 'p2872307');
+  assert.equal(page.requests[0].body.lightId, 'p2872307');
   page.nodes.get('#codeEdit').onclick();
   assert.equal(page.run('st.lightId'), null);
   page.nodes.get('#codeIn').listeners.input({ target: { value: '산수동 643' } });
@@ -163,7 +165,7 @@ test('admin edit map and custom light options escape database text', async () =>
     tileLayer: layer, circleMarker: layer, marker: layer, divIcon: value => value
   };
   const sandbox = {
-    L, window: { L }, S: { lights: [selected, neighbor] },
+    L, window: { L }, S: { lights: [selected, neighbor] }, DongguPWA: { tileLayer: () => layer() },
     byId: () => selected, openSheet(html) { sheetHtml = html; }, repBox: () => '',
     LAMP_OPTS: [], POLE_OPTS: [], SW_OPTS: [], KIND_COL: {},
     ensureRepPhotos: async () => {}, refreshRepBox() {}, distM: () => 5, setTimeout() {}

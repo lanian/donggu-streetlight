@@ -1,37 +1,97 @@
-/* 동구 가로등 점검 — service worker
-   App shell is cached on install; HTML/JS use a short network-first request with a cache fallback;
-   map tiles and OCR assets are cached as they are used so a patrol in a known area works without signal. */
-const VERSION="v11";
-const SHELL="dg-shell-"+VERSION, RUNTIME="dg-runtime-"+VERSION, TILES="dg-tiles-"+VERSION;
-const SHELL_FILES=["./","./index.html","./manifest.webmanifest","./firebase-config.js","./report/config.js","./data/lights.json","./seed/manifest.json","./vendor/jsQR.js","./vendor/leaflet.js","./vendor/qrcode.js","./icons/icon-192.png","./icons/icon-512.png","./icons/maskable-512.png","./icons/apple-touch-icon.png"];
-const TILE_MAX=600, RUNTIME_HOSTS=["cdn.jsdelivr.net","unpkg.com","cdnjs.cloudflare.com","fonts.googleapis.com","fonts.gstatic.com","www.gstatic.com","tessdata.projectnaptha.com"];
+/* Versioned public shell, deliberate updates, and bounded public runtime caches.
+   No API, report submission, auth response, POST, or user attachment is cached.
+   OSM tiles use the browser HTTP cache (Cache-Control/Expires/ETag) unchanged; no prefetch. */
+importScripts('./app/map-config.js');
+const VERSION = 'v13';
+const SHELL = 'dg-shell-' + VERSION, RUNTIME = 'dg-runtime-public-v2', META = 'dg-cache-metadata-v2', TILES = 'dg-provider-tiles-v2';
+const SHELL_FILES = ['./', './index.html', './manifest.webmanifest', './firebase-config.js', './security.js', './report/config.js', './report/', './report/index.html', './data/lights.json', './seed/manifest.json', './vendor/jsQR.js', './vendor/leaflet.js', './vendor/qrcode.js', './app/field.js', './app/field-ui.js', './app/pwa.js', './app/map-config.js', './app/data.js', './app/integration.js', './app/legacy-bridge.js', './app/management.js', './app/offline.js', './app/operations-core.js', './app/operations.css', './app/operations.js', './app/registry-commands.js', './app/work-commands.js', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png'];
+// All modules used by this release are installed atomically with its shell.
+const PUBLIC_PATHS = new Set(SHELL_FILES.map(p => new URL(p, self.registration.scope).pathname));
+const RUNTIME_HOSTS = new Set(['cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com', 'www.gstatic.com', 'tessdata.projectnaptha.com']);
+const DAY = 86400000;
 
-self.addEventListener("install",e=>{e.waitUntil(caches.open(SHELL).then(c=>c.addAll(SHELL_FILES)).then(()=>self.skipWaiting()))});
-self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith("dg-")&&![SHELL,RUNTIME,TILES].includes(k)).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
-self.addEventListener("message",e=>{if(e.data==="skipWaiting")self.skipWaiting()});
+self.addEventListener('install', event => { event.waitUntil(caches.open(SHELL).then(cache => cache.addAll(SHELL_FILES))); });
+self.addEventListener('activate', event => {
+  event.waitUntil((async () => {
+    // Keep one previous shell so a tab with an unsaved draft can finish its loaded version.
+    const names = await caches.keys(), shells = names.filter(n => n.startsWith('dg-shell-') && n !== SHELL);
+    await Promise.all(shells.slice(0, -1).map(n => caches.delete(n)));
+    await Promise.all(names.filter(n => /^dg-(runtime-v\d+|tiles-v\d+)$/.test(n)).map(n => caches.delete(n)));
+    await self.clients.claim();
+  })());
+});
+self.addEventListener('message', event => {
+  if (event.data?.type === 'activate-update') event.waitUntil(self.skipWaiting());
+  if (event.data?.type === 'offline-status') event.waitUntil(offlineStatus().then(status => event.ports[0]?.postMessage(status)));
+});
 
-async function trim(name,max){const c=await caches.open(name);const keys=await c.keys();if(keys.length>max){for(const k of keys.slice(0,keys.length-max))await c.delete(k)}}
-
-self.addEventListener("fetch",e=>{
-  const req=e.request;if(req.method!=="GET")return;
-  const url=new URL(req.url);
-  // HTML/JS use network first; registry/images use stale-while-revalidate.
-  if(url.origin===location.origin){
-    const shellish=/\/$|\.html$|\.js$|\.webmanifest$/.test(url.pathname);
-    e.respondWith(caches.open(SHELL).then(async c=>{
-      if(shellish){ // network first (3 s), then cache: deploys show up on the very next open
-        try{const r=await Promise.race([fetch(req),new Promise((_,rej)=>setTimeout(()=>rej(new Error("slow")),3000))]);if(r&&r.ok){c.put(req,r.clone());return r}}catch(err){}
-        const cached=await c.match(req,{ignoreSearch:true});return cached||new Response("오프라인이에요. 연결되면 다시 열어 주세요.",{status:503,headers:{"Content-Type":"text/plain;charset=utf-8"}});
-      }
-      const cached=await c.match(req,{ignoreSearch:true});
-      const net=fetch(req).then(r=>{if(r&&r.ok)c.put(req,r.clone());return r}).catch(()=>null);
-      return cached||(await net)||new Response("",{status:504});
-    }));return;
+function metadataKey(url) { return new Request(new URL('__dg_cache_metadata__?url=' + encodeURIComponent(url), self.registration.scope)); }
+async function readMetadata(url) { const r = await (await caches.open(META)).match(metadataKey(url)); return r ? r.json() : null; }
+function cachePolicy(response, fallbackMs, now = Date.now()) {
+  const control = response.headers.get('cache-control') || '';
+  if (/\b(no-store|private|no-cache)\b/i.test(control)) return null;
+  const maxAge = /(?:^|,)\s*max-age\s*=\s*"?(\d+)/i.exec(control);
+  const date = Date.parse(response.headers.get('date'));
+  const age = Math.max(0, Number(response.headers.get('age')) || 0) * 1000;
+  const expires = Date.parse(response.headers.get('expires'));
+  const expiresAt = maxAge ? Math.min(now, Number.isFinite(date) ? date : now) + Number(maxAge[1]) * 1000 - age : Number.isFinite(expires) ? expires : now + fallbackMs;
+  return { storedAt: now, expiresAt, mustRevalidate: /\bmust-revalidate\b/i.test(control) };
+}
+async function putPublic(cache, request, response, fallbackMs) {
+  if (!(response.ok || response.type === 'opaque')) return;
+  const metadata = cachePolicy(response, fallbackMs); if (!metadata) return;
+  await cache.put(request, response.clone());
+  await (await caches.open(META)).put(metadataKey(request.url), new Response(JSON.stringify(metadata)));
+}
+async function trim(name, limit) {
+  const cache = await caches.open(name), keys = await cache.keys();
+  for (const key of keys.slice(0, Math.max(0, keys.length - limit))) { await cache.delete(key); await (await caches.open(META)).delete(metadataKey(key.url)); }
+}
+async function publicRuntime(request, name, fallbackMs, limit) {
+  const cache = await caches.open(name), hit = await cache.match(request), metadata = hit && await readMetadata(request.url);
+  if (hit && metadata && metadata.expiresAt > Date.now()) return hit;
+  try {
+    // Default fetch cache mode lets the browser revalidate expired HTTP entries conditionally.
+    const response = await fetch(request);
+    if (response.ok || response.type === 'opaque') { await putPublic(cache, request, response, fallbackMs); await trim(name, limit); }
+    return response;
+  } catch (_) { return hit && metadata && !metadata.mustRevalidate ? hit : Response.error(); }
+}
+function runtimeAsset(url) {
+  if (!RUNTIME_HOSTS.has(url.hostname)) return false;
+  if (url.hostname === 'www.gstatic.com') return /^\/firebasejs\/[^/]+\/firebase-[\w-]+\.js$/.test(url.pathname);
+  return /\.(?:js|wasm|css|woff2?|ttf|traineddata(?:\.gz)?)$/.test(url.pathname) || url.hostname === 'fonts.googleapis.com' && /^\/css2?$/.test(url.pathname);
+}
+function providerTile(request, url) {
+  const p = globalThis.DONGGU_MAP_PROVIDER;
+  if (!p || p.offlineAllowed !== true || p.requiresKey && !p.apiKey || request.destination !== 'image') return false;
+  try {
+    const template = new URL(String(p.urlTemplate).replaceAll('{key}', encodeURIComponent(p.apiKey || '')), self.registration.scope).href.replace(/%7B/gi, '{').replace(/%7D/gi, '}');
+    const host = new URL(template).hostname;
+    if (/(^|\.)openstreetmap\.org$/.test(host)) return false;
+    const pattern = template.split(/(\{[zxy]\})/).map(part => /^\{[zxy]\}$/.test(part) ? '\\d+' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('');
+    return new RegExp('^' + pattern + '$').test(url.href);
+  } catch (_) { return false; }
+}
+async function offlineStatus() {
+  const shell = await caches.open(SHELL);
+  const files = await Promise.all(SHELL_FILES.map(p => shell.match(new URL(p, self.registration.scope).href)));
+  const keys = await (await caches.open(RUNTIME)).keys(), paths = keys.map(k => k.url);
+  const ocr = [/tesseract(?:\.min)?\.js/, /worker(?:\.min)?\.js/, /tesseract-core.*\.wasm\.js/, /\.wasm(?:\?|$)/, /kor\.traineddata/, /eng\.traineddata/].every(re => paths.some(p => re.test(p)));
+  return { version: VERSION, shell: files.every(Boolean), registry: !!(await shell.match(new URL('./data/lights.json', self.registration.scope))), ocr, missing: SHELL_FILES.filter((_, i) => !files[i]) };
+}
+self.addEventListener('fetch', event => {
+  const request = event.request; if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin === location.origin && PUBLIC_PATHS.has(url.pathname)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(SHELL), key = new Request(url.origin + url.pathname), hit = await cache.match(key);
+      if (hit) return hit; // Executable assets stay with the active release until deliberate activation.
+      try { const response = await fetch(request); if (response.ok) await cache.put(key, response.clone()); return response; }
+      catch (_) { return new Response('앱 파일 준비가 완료되지 않았어요. 연결 후 다시 열어 주세요.', { status: 503, headers: { 'Content-Type': 'text/plain;charset=utf-8' } }); }
+    })()); return;
   }
-  if(url.hostname==="tile.openstreetmap.org"){
-    e.respondWith(caches.open(TILES).then(async c=>{const hit=await c.match(req);if(hit)return hit;try{const r=await fetch(req);if(r&&r.ok){c.put(req,r.clone());trim(TILES,TILE_MAX)}return r}catch(err){return new Response("",{status:504})}}));return;
-  }
-  if(RUNTIME_HOSTS.includes(url.hostname)){
-    e.respondWith(caches.open(RUNTIME).then(async c=>{const hit=await c.match(req);if(hit)return hit;try{const r=await fetch(req);if(r&&(r.ok||r.type==="opaque"))c.put(req,r.clone());return r}catch(err){return hit||Response.error()}}));return;
-  }
+  if (url.hostname === 'tile.openstreetmap.org') return; // Browser HTTP caching; no tile archive or prefetch.
+  if (providerTile(request, url)) { event.respondWith(publicRuntime(request, TILES, Math.max(1, Number(DONGGU_MAP_PROVIDER.cacheDays) || 7) * DAY, 600)); return; }
+  if (runtimeAsset(url)) event.respondWith(publicRuntime(request, RUNTIME, 30 * DAY, 120));
 });

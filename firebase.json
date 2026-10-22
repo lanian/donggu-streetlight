@@ -1,13 +1,20 @@
 {
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
   "emulators": {
     "firestore": {
       "host": "127.0.0.1",
       "port": 8089
     },
-    "ui": { "enabled": false },
+    "ui": {
+      "enabled": false
+    },
     "singleProjectMode": true
+  },
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs22"
   }
 }

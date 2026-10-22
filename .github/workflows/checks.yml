@@ -25,14 +25,20 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
+      - name: Install locked Functions dependencies without lifecycle scripts
+        run: npm ci --prefix functions --include=optional --ignore-scripts --no-audit --no-fund
+      - name: Verify Functions input, image, and audit behavior
+        run: npm test --prefix functions
       - name: Install isolated emulator test tools
         run: npm install --prefix "$RUNNER_TEMP/donggu-tools" --no-audit --no-fund --ignore-scripts firebase-tools@15.34.1 @firebase/rules-unit-testing@3.0.3 firebase@10.12.2
-      - name: Verify access rules with an isolated demo project
+      - name: Verify access rules and server operations sequentially
         env:
           NODE_PATH: ${{ runner.temp }}/donggu-tools/node_modules
-        run: '"$RUNNER_TEMP/donggu-tools/node_modules/.bin/firebase" emulators:exec --only firestore --project demo-donggu-streetlight "node --test scripts/tests/firestore-rules.emulator.cjs"'
+        run: '"$RUNNER_TEMP/donggu-tools/node_modules/.bin/firebase" emulators:exec --only firestore --project demo-donggu-streetlight "node scripts/check-emulator.cjs"'

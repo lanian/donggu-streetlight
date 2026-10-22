@@ -88,20 +88,22 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
 </div>
 <script src="config.js"></script>
 <script>
-const C=Object.assign({org:"",dept:"",phone:"",sms:"",mail:"",backend:null,firestore:{},privacyDays:90,maxPhotoKB:150},window.REPORT_CONFIG||{});
+const C=Object.assign({org:"",dept:"",phone:"",sms:"",mail:"",backend:null,firestore:{},gatewayUrl:"",appCheckSiteKey:"",allowLocalGateway:false,privacyDays:90,maxPhotoKB:150},window.REPORT_CONFIG||{});
+if(!Number.isInteger(C.privacyDays)||C.privacyDays<1||C.privacyDays>3650)C.privacyDays=90;
 const ISSUES=["불이 꺼져 있어요","깜빡거려요","낮에도 켜져 있어요","등이 파손됐어요","기둥이 기울었어요","전선이 노출됐어요","기타"];
 const $=s=>document.querySelector(s);
 const st={code:"",lightId:null,issue:"",photo:null,pos:null};
 const contactPhone=String(C.phone||"").trim()==="062-000-0000"?"":String(C.phone||"").trim();
 $("#orgLine").textContent=[C.org,C.dept].filter(Boolean).join(" ");$("#pdays").textContent=C.privacyDays;$("#phoneLine").textContent=contactPhone||"담당 부서의 공식 연락처";
 function deliveryMode(){
-  if(C.backend==="firestore"&&C.firestore&&C.firestore.projectId&&C.firestore.apiKey)return "firestore";
+  const local=C.allowLocalGateway===true&&/^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(C.gatewayUrl||"");
+  if(C.backend==="gateway"&&(local||(/^https:\/\//.test(C.gatewayUrl||"")&&C.appCheckSiteKey&&C.firestore&&C.firestore.projectId&&C.firestore.apiKey&&C.firestore.appId)))return "gateway";
   return String(C.sms||"").trim()||String(C.mail||"").trim()?"external":null;
 }
 function configureDelivery(){
   const mode=deliveryMode(),btn=$("#send"),notice=$("#deliveryNotice");
-  btn.disabled=!mode;btn.textContent=mode==="firestore"?"신고 보내기":mode==="external"?"신고 내용 준비하기":"신고 접수 준비 중";
-  notice.hidden=mode==="firestore";
+  btn.disabled=!mode;btn.textContent=mode==="gateway"?"신고 보내기":mode==="external"?"신고 내용 준비하기":"신고 접수 준비 중";
+  notice.hidden=mode==="gateway";
   notice.textContent=mode==="external"?"신고 내용을 준비한 뒤 문자·이메일 앱에서 직접 보내 주세요. 보내기 전에는 접수되지 않아요.":`현재 이 페이지의 신고 접수가 준비 중이에요. ${contactPhone?contactPhone+"로 문의해 주세요.":"담당 부서의 공식 연락처로 문의해 주세요."}`;
 }
 configureDelivery();
@@ -127,9 +129,20 @@ $("#useGps").addEventListener("change",async e=>{if(e.target.checked){$("#gpsSta
 function showErr(m){const e=$("#err");e.textContent=m;e.hidden=false;e.scrollIntoView({block:"center"})}
 function receiptNo(){const d=new Date();const r=Math.random().toString(36).slice(2,6).toUpperCase();return `R${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${r}`}
 function buildText(rec){return `[가로등 고장 신고 ${rec.receipt}]\n등 번호: ${rec.code||"(모름)"}\n문제: ${rec.issue}\n내용: ${rec.desc||"-"}\n위치: ${rec.lat?`${rec.lat}, ${rec.lng} (±${rec.acc}m)`:"-"}\n연락처: ${rec.contact||"-"}\n시각: ${new Date(rec.at).toLocaleString("ko-KR")}`}
-async function sendFirestore(rec){const f=C.firestore;const url=`https://firestore.googleapis.com/v1/projects/${f.projectId}/databases/(default)/documents/${f.collection||"citizen_reports"}?key=${encodeURIComponent(f.apiKey)}`;
-  const fields={};for(const [k,v] of Object.entries(rec)){if(v==null)continue;fields[k]=typeof v==="number"?(Number.isInteger(v)?{integerValue:String(v)}:{doubleValue:v}):typeof v==="boolean"?{booleanValue:v}:{stringValue:String(v)}}
-  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fields})});if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}
+const REPORT_SCRIPTS=new Map();
+function loadReportScript(src){if(REPORT_SCRIPTS.has(src))return REPORT_SCRIPTS.get(src);const promise=new Promise((resolve,reject)=>{const script=document.createElement("script");script.src=src;script.onload=resolve;script.onerror=()=>{REPORT_SCRIPTS.delete(src);script.remove();reject(new Error("접수 기능을 불러오지 못했어요."))};document.head.appendChild(script)});REPORT_SCRIPTS.set(src,promise);return promise;}
+async function sendGateway(rec){
+  const payload={code:rec.code,lightId:rec.lightId||"",issue:rec.issue,desc:rec.desc,lat:rec.lat,lng:rec.lng,acc:rec.acc,photo:rec.photo||"",contact:rec.contact||"",consent:rec.consent,consentDays:C.privacyDays};
+  const key=JSON.stringify(payload);if(!st.submitJob||st.submitJob.key!==key)st.submitJob={key,requestId:crypto.randomUUID()};
+  const headers={"Content-Type":"application/json"};
+  const local=C.allowLocalGateway===true&&/^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(C.gatewayUrl||"");
+  if(!local){for(const component of ["app","app-check"])await loadReportScript(`https://www.gstatic.com/firebasejs/10.12.2/firebase-${component}-compat.js`);
+    if(!firebase.apps.length)firebase.initializeApp(C.firestore);if(!st.appCheck){firebase.appCheck().activate(C.appCheckSiteKey,true);st.appCheck=true;}headers["X-Firebase-AppCheck"]=(await firebase.appCheck().getToken(false)).token;}
+  const response=await fetch(C.gatewayUrl,{method:"POST",headers,body:JSON.stringify({...payload,requestId:st.submitJob.requestId}),cache:"no-store"});
+  const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"접수 서버에 연결하지 못했어요.");
+  if(typeof result.receipt!=="string"||!result.receipt)throw new Error("접수 확인을 받지 못했어요. 같은 내용으로 다시 시도해 주세요.");
+  return result;
+}
 $("#send").onclick=async()=>{
   $("#err").hidden=true;
   const mode=deliveryMode();if(!mode){configureDelivery();showErr($("#deliveryNotice").textContent);return}
@@ -137,9 +150,10 @@ $("#send").onclick=async()=>{
   const contact=$("#contact").value.trim();if(contact&&!$("#consent").checked){showErr("연락처를 남기려면 보관 동의에 체크해 주세요.");return}
   const useGps=$("#useGps").checked;
   const rec={receipt:receiptNo(),code:st.code,lightId:st.lightId,issue:st.issue,desc:$("#desc").value.trim().slice(0,500),lat:useGps&&st.pos?st.pos.lat:null,lng:useGps&&st.pos?st.pos.lng:null,acc:useGps&&st.pos?st.pos.acc:null,photo:st.photo||null,contact:contact||null,consent:!!contact,at:Date.now(),ua:navigator.userAgent.slice(0,80),imported:false};
+  if(!rec.code&&!rec.lightId&&!rec.desc&&rec.lat==null){showErr("등 번호, 위치 설명 또는 현재 위치 중 하나는 알려 주세요.");return}
   const btn=$("#send");btn.disabled=true;btn.textContent="보내는 중…";
   try{
-    if(mode==="firestore"){await sendFirestore(rec);finish(rec,"담당 부서에 바로 전달됐어요.")}
+    if(mode==="gateway"){const result=await sendGateway(rec);rec.receipt=result.receipt;finish(rec,"담당 부서에 바로 전달됐어요.")}
     else{
       const text=buildText(rec);const hasPhoto=!!rec.photo;
       finish(rec,`아직 접수되지 않았어요. 아래 버튼으로 문자·이메일 앱을 열고 직접 보내 주세요.${hasPhoto?" 사진은 메시지에 직접 첨부해 주세요.":""}`,text);
@@ -149,7 +163,7 @@ $("#send").onclick=async()=>{
       if(String(C.mail||"").trim())addLink("이메일로 보내기",`mailto:${String(C.mail).trim()}?subject=${encodeURIComponent("가로등 고장 신고 "+rec.receipt)}&body=${encodeURIComponent(text)}`,"ghost");
       $("#done").appendChild(alt);
     }
-  }catch(e){configureDelivery();showErr("보내지 못했어요. 잠시 후 다시 시도하거나 "+(contactPhone||"담당 부서의 공식 연락처")+"로 문의해 주세요.")}
+  }catch(e){configureDelivery();showErr((e&&e.message?e.message+" ":"")+"보내지 못했어요. 잠시 후 같은 내용으로 다시 시도하거나 "+(contactPhone||"담당 부서의 공식 연락처")+"로 문의해 주세요.")}
 };
 function finish(rec,msg,copy){const sent=!copy;$("#form").hidden=true;$("#done").hidden=false;$("#doneIcon").textContent=sent?"✓":"→";$("#doneTitle").textContent=sent?"접수됐어요":"신고 내용을 준비했어요 · 전송 전";$("#receipt").hidden=!sent;$("#receipt").textContent=sent?rec.receipt:"";$("#doneMsg").textContent=msg;$("#doneFoot").textContent=sent?"감사합니다. 같은 등을 여러 번 신고하지 않으셔도 돼요.":"문자·이메일 앱에서 보내기를 눌러 신고를 마쳐 주세요.";$("#doneCopy").hidden=sent;if(copy){$("#copyText").value=copy;$("#copyBtn").onclick=async()=>{try{await navigator.clipboard.writeText(copy);$("#copyBtn").textContent="복사했어요"}catch(e){$("#copyText").select()}}}window.scrollTo(0,0)}
 </script>

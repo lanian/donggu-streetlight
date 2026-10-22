@@ -6,6 +6,7 @@ const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 
 const html = fs.readFileSync(path.join(__dirname, '../../index.html'), 'utf8');
+const dataSource = fs.readFileSync(path.join(__dirname, '../../app/data.js'), 'utf8');
 const copy = value => JSON.parse(JSON.stringify(value));
 function section(start, end) {
   const a = html.indexOf(start), b = html.indexOf(end, a);
@@ -13,7 +14,8 @@ function section(start, end) {
   return html.slice(a, b);
 }
 function context(values = {}) {
-  return vm.createContext({ console, Date, Math, crypto: webcrypto, ...values });
+  const c = vm.createContext({ console, Date, Math, crypto: webcrypto, window: {}, FB: null, S: {me:'staff'}, fetch: async()=>{throw new Error('test has no network')}, ...require('../../security.js'), ...values });
+  vm.runInContext(dataSource,c);c.listAllRecords=(name,options)=>c.DGData.readAll(c.db,name,options);return c;
 }
 function load(ctx, start, end) { vm.runInContext(section(start, end), ctx); }
 function storage(initial) {
@@ -37,19 +39,20 @@ function memoryDb(initial = {}) {
   const control = { failPath: null, rejectBatch: false, loseBatchAck: false, beforeWrite: null, batches: 0 };
   function apply(op) { records[op.path] = op.merge ? { ...(records[op.path] || {}), ...copy(op.data) } : copy(op.data); }
   const db = {
+    mode: 'local',
     doc(key) {
       return {
         path: key,
         async get() { return { exists: key in records, data: () => records[key] && copy(records[key]) }; },
         async set(data, options) {
           if (control.beforeWrite) await control.beforeWrite(key);
-          if (control.failPath === key) throw new Error('simulated write failure');
+          if (control.failPath === key || (control.failPath && control.failPath.endsWith('/') && key.startsWith(control.failPath))) throw new Error('simulated write failure');
           apply({ path: key, data, merge: !!options });
         },
         async update(data) {
           if (control.beforeWrite) await control.beforeWrite(key);
-          if (control.failPath === key) throw new Error('simulated write failure');
-          assert.ok(key in records, 'update requires an existing document');
+          if (control.failPath === key || (control.failPath && control.failPath.endsWith('/') && key.startsWith(control.failPath))) throw new Error('simulated write failure');
+          if(db.mode!=='local')assert.ok(key in records, 'update requires an existing document');
           apply({ path: key, data, merge: true });
         },
       };
@@ -89,7 +92,7 @@ function inspectionContext(db, { firebase = false, local = false } = {}) {
     render() {}, closeCount: 0,
   });
   c.closeSheet = () => { c.closeCount++; };
-  load(c, 'async function patchLight(id,patch){', '/* ---------- Firebase mode');
+  load(c, 'async function lightState(id,server=false){', '/* ---------- Firebase mode');
   load(c, 'async function write(fn,okMsg){', '// Downscale a photo.');
   load(c, 'const INSPECTION_JOBS=', '/* ---------- events ---------- */');
   return { c, source, nodes, toasts };
@@ -125,7 +128,7 @@ test('light patches preserve another client’s fields and replace a representat
     const { db, records } = memoryDb({ 'lights/p1': { status: '정상', lat: 35, reps: { 전경: { id: 'a' }, 표찰: { id: 'b' } } } });
     const make = () => {
       const c = context({ db, FB: firebase ? { fs: db } : null, OV: { p1: copy(records['lights/p1']) } });
-      load(c, 'async function patchLight(id,patch){', '/* ---------- Firebase mode');
+      load(c, 'async function lightState(id,server=false){', '/* ---------- Firebase mode');
       return c;
     };
     const a = make(), b = make();
@@ -227,7 +230,8 @@ test('artifact partial failure retries frozen payloads and IDs instead of duplic
   const { db, records, control } = memoryDb({ 'lights/p1': { status: '정상' } });
   const { c, source, nodes } = inspectionContext(db);
   source.photos.push({ label: '기타', data: 'data:image/jpeg;base64,abc', thumb: 'thumb', w: 2, h: 2 });
-  control.failPath = 'lights/p1';
+  db.mode='artifact';
+  control.failPath = 'lightFields/';
   await c.saveInspection();
   const firstHistory = Object.entries(records).find(([key]) => key.startsWith('inspections/'));
   assert.ok(firstHistory, 'artifact may have written history before the light update fails');
@@ -242,7 +246,7 @@ test('artifact partial failure retries frozen payloads and IDs instead of duplic
   assert.equal(Object.keys(records).filter(key => key.startsWith('inspections/')).length, 1);
   assert.equal(Object.keys(records).filter(key => key.startsWith('photos/')).length, 1);
   assert.deepEqual(records[firstHistory[0]], savedPayload, 'retry preserves the exact original record and timestamp');
-  assert.equal(records['lights/p1'].status, '고장');
+  assert.equal(c.DGData.mergeLightFields({p1:records['lights/p1']},Object.entries(records).filter(([k])=>k.startsWith('lightFields/')).map(([id,d])=>({id,...d}))).p1.status,'고장');
   assert.equal(c.draft, source, 'new edits remain available after finishing the pending save');
   assert.equal(source.result, '정상');
   assert.equal(source.memo, 'edited after failure');
@@ -301,9 +305,12 @@ test('report, shared summary and CSV use the same district and date selection', 
 
 test('field registration with an existing plate contains a boolean noPlate, never undefined', async () => {
   const fields = { nDong: '지산동', nKind: '보안등', nNum: '123', nAddr: '테스트 위치', nLat: '', nLng: '', nPole: '', nType: 'LED', nNote: '' };
+  const nodes = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, { value }]));
+  nodes.nNoPlate = { checked: false };
+  nodes.nPrev = { hidden: false, src: 'data:image/png;base64,aGVsbG8=', removeAttribute(name) { delete this[name]; } };
   let saved;
   const c = context({
-    $: key => key === '#nNoPlate' ? { checked: false } : { value: fields[key.slice(1)] || '' },
+    $: key => nodes[key.slice(1)] || null,
     S: { me: 'staff' }, window: {},
     labelText: () => '지산동 123', newIdFor: () => 'bd-testid',
     lookup: () => null, byId: () => null,
@@ -316,37 +323,35 @@ test('field registration with an existing plate contains a boolean noPlate, neve
   load(c, 'async function addLight(){', '/* ---------- unregistered lights:');
   await c.addLight();
   assert.equal(saved.noPlate, false);
+  assert.equal(nodes.nNum.value, '');
+  assert.equal(nodes.nAddr.value, '');
+  assert.equal(nodes.nPrev.hidden, true);
+  assert.equal(nodes.nPrev.src, undefined);
 });
 
 test('citizen report lightId is authoritative and a deleted ID remains unlinked', async () => {
   const light = { id: 'p2', code: '지호로 65-5', dong: '지산동' };
-  let imported, available = true;
-  const report = { lightId: 'p2', code: '65-5', issue: '꺼짐', at: 10 };
-  const inbox = { id: 'external-1', data: () => report, ref: { update: async () => {} } };
+  let available = true;
+  const report = { lightId: 'p2', code: '65-5', issue: '꺼짐', at: 10, imported:false };
+  const db=localStore(storage({}));
   const c = context({
-    IB: {}, S: { reports: [] }, window: { REPORT_CONFIG: { firestore: {} } },
+    IB: {}, S: { reports: [],me:'staff' }, window: { REPORT_CONFIG: { firestore: {projectId:'demo'} } },db,
     byId: id => available && id === light.id ? light : null,
     parseCode: () => { throw new Error('an explicit lightId must not fall back to ambiguous code matching'); },
     lightGrid: () => { throw new Error('an explicit lightId must not fall back to a nearby different light'); },
-    fsApp: async () => ({ collection: () => ({ where: () => ({ limit: () => ({ get: async () => ({ docs: [inbox] }) }) }) }) }),
-    db: { collection: () => ({ add: async value => { imported = value; } }) },
+    fsApp: async () => db,
     firebase: { firestore: { FieldValue: { delete: () => 'delete-field' } } },
     render() {}, toast() {},
   });
   load(c, 'async function importCitizenReports(){', 'async function addInboxReport(btn){');
-  await c.importCitizenReports();
-  assert.equal(imported.lightId, 'p2');
-  assert.equal(imported.code, light.code);
-  available = false;
-  report.lat = 35.15;
-  report.lng = 126.92;
-  for (const code of ['65-5', '']) {
-    report.code = code;
-    imported = null;
-    await c.importCitizenReports();
+  await db.doc('citizen_reports/external-1').set(report);await c.importCitizenReports();
+  let imported=(await db.collection('reports').get()).docs[0].data();
+  assert.equal(imported.lightId, 'p2');assert.equal(imported.code, light.code);
+  available = false;report.lat = 35.15;report.lng = 126.92;
+  for (const [i,code] of ['65-5', ''].entries()) {
+    report.code=code;await db.doc('citizen_reports/deleted-'+i).set(report);await c.importCitizenReports();
+    imported=(await db.collection('reports').get()).docs.map(d=>d.data()).find(r=>r.ext==='deleted-'+i);
     assert.ok(imported, 'the report is still imported for manual handling');
-    assert.equal(imported.lightId, null);
-    assert.equal(imported.code, code);
-    assert.equal(imported.dong, '');
+    assert.equal(imported.lightId, null);assert.equal(imported.code, code);assert.equal(imported.dong, '');
   }
 });

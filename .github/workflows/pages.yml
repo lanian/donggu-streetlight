@@ -13,8 +13,10 @@ concurrency:
 jobs:
   checks:
     uses: ./.github/workflows/checks.yml
+  browser:
+    uses: ./.github/workflows/browser.yml
   deploy:
-    needs: checks
+    needs: [checks, browser]
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -27,8 +29,8 @@ jobs:
       - name: Prepare public application files
         run: |
           mkdir -p _site
-          cp index.html sw.js manifest.webmanifest firebase-config.js _site/
-          cp -R data icons report seed vendor _site/
+          cp index.html sw.js manifest.webmanifest firebase-config.js security.js _site/
+          cp -R app data icons report seed vendor _site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

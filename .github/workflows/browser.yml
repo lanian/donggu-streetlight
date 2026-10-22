@@ -1,0 +1,30 @@
+name: Local browser workflows
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install isolated browser tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/donggu-browser" --no-audit --no-fund --ignore-scripts playwright@1.58.2
+          node "$RUNNER_TEMP/donggu-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify field, recovery, and operational workflows
+        env:
+          DONGGU_PLAYWRIGHT_MODULE: ${{ runner.temp }}/donggu-browser/node_modules/playwright
+        run: |
+          node scripts/field-browser-smoke.cjs
+          node scripts/integration-ui-smoke.cjs
+          node scripts/operations-browser-smoke.cjs

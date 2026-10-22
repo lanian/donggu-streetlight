@@ -15,8 +15,14 @@ for (const file of ['index.html', 'report/index.html']) {
   }
   assert.ok(count > 0, `${file}: inline application script is missing`);
 }
-for (const file of ['sw.js', 'firebase-config.js', 'report/config.js']) {
+for (const file of ['sw.js', 'firebase-config.js', 'report/config.js', ...(existsSync(resolve(root, 'security.js')) ? ['security.js'] : []), ...readdirSync(resolve(root, 'app')).filter(name => name.endsWith('.js')).map(name => 'app/' + name)]) {
   new Script(read(file), { filename: file });
+}
+for (const file of ['index.html', 'report/index.html']) {
+  for (const match of read(file).matchAll(/<(?:script|link)\b[^>]*(?:src|href)=["']([^"']+)["']/gi)) {
+    if (/^(?:https?:|data:|\/\/|#)/.test(match[1])) continue;
+    assert.ok(existsSync(resolve(root, dirname(file), match[1].split('?')[0])), `Missing local asset: ${file} → ${match[1]}`);
+  }
 }
 const manifest = JSON.parse(read('manifest.webmanifest'));
 JSON.parse(read('seed/manifest.json'));

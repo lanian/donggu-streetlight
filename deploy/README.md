@@ -1,14 +1,115 @@
-# 페이지만 구청 서버에 올리기 (DB는 Firebase)
+# 정적 앱과 Firebase 배포
 
-앱은 정적 파일뿐이라 어떤 웹서버든 됩니다. 저장소 내용 전체(`index.html`, `sw.js`, `manifest.webmanifest`, `firebase-config.js`, `data/`, `vendor/`, `icons/`, `seed/`, `report/`)를 웹 루트에 복사하세요.
+정적 앱은 GitHub Pages·nginx·IIS에 배포할 수 있습니다. 직원 공유 DB, 공개 신고 게이트웨이, 서버 감사·보관 작업은 Firebase에 별도로 배포합니다. **이 저장소 변경 과정에서 실제 Firebase 프로젝트·App Check·서버 비밀값·예약 작업을 운영에 설정하거나 배포하지 않았습니다.**
 
-필수
-1. **HTTPS** — 카메라·GPS·서비스 워커(설치·오프라인)는 https에서만 동작합니다.
-2. `firebase-config.js` 채우기 (README "Firebase 적용") → Firebase 콘솔 Authentication → 승인된 도메인에 **구청 도메인 추가**.
-3. `manifest.webmanifest`의 MIME을 `application/manifest+json`으로 (nginx.conf / web.config 참고).
-4. `index.html`, `sw.js`, `firebase-config.js`는 캐시 금지(no-cache). 그래야 배포 즉시 반영됩니다.
-5. 하위 경로(예: `https://www.donggu.kr/light/`)에 올려도 됩니다 — 모든 경로가 상대 경로이고, QR 신고 주소(`report/`)도 올라간 곳 기준으로 자동 계산됩니다. 이미 인쇄한 QR 라벨은 예전 주소를 가리키니 주소가 정해진 뒤에 인쇄하세요.
+## 공개할 파일
 
-선택
-- 저장소 내용만 복사하면 되므로 GitHub Actions로 구청 서버에 자동 배포(rsync/FTP)할 수도 있습니다.
-- 내부에서만 접근하게 하려면 서버 방화벽에서 IP 제한을 거세요. 다만 점검자는 외부에서 쓰므로 보통 열어 둡니다.
+[Pages workflow](../.github/workflows/pages.yml)는 다음 목록만 공개합니다. 기관 웹서버에도 같은 목록을 사용합니다.
+
+```text
+index.html
+sw.js
+manifest.webmanifest
+firebase-config.js
+security.js
+app/
+data/
+icons/
+report/
+seed/
+vendor/
+```
+
+새 공개 디렉터리를 만드는 예시입니다.
+
+```bash
+DG_PUBLIC_DIR="$(mktemp -d)"
+cp index.html sw.js manifest.webmanifest firebase-config.js security.js "$DG_PUBLIC_DIR/"
+cp -R app data icons report seed vendor "$DG_PUBLIC_DIR/"
+```
+
+이 디렉터리의 내용만 웹 루트에 전달합니다. `functions/`, `scripts/`, `docs/`, `deploy/`, Firebase 규칙·설정·인덱스, 테스트 도구, 자격증명·비밀값은 공개 앱 파일 목록에 없습니다. `data/`·`seed/`는 공개 파일이므로 직원 연락처·운영 백업을 여기에 넣지 않습니다.
+
+Firebase 웹 앱 설정은 클라이언트가 읽는 공개 설정입니다. 서비스 계정 키·서버 비밀값은 `firebase-config.js`, `report/config.js`나 저장소에 넣지 않습니다.
+
+## 기관 웹서버
+
+- HTTPS를 구성하고 Firebase Auth의 승인된 도메인, App Check 도메인, 신고 서버의 허용 origin에 실제 주소를 맞춥니다.
+- [nginx 예시](nginx.conf)는 `http {}` 안에 포함하는 형태입니다. 도메인·인증서·공개 디렉터리를 바꿉니다. MIME 목록을 유지하고 manifest는 `application/manifest+json`, JavaScript는 JavaScript MIME으로 제공합니다.
+- [IIS 예시](web.config)는 공개 사이트 루트에 별도로 둡니다. HTTPS 바인딩과 URL Rewrite 모듈을 준비합니다. 저장소의 나머지 `deploy/` 파일을 함께 공개할 필요는 없습니다.
+- HTML·앱 스크립트·서비스 워커·설정은 재검증하도록 제공하고 `nosniff` 등 예시의 헤더를 유지합니다. `no-cache`는 즉시 강제 새로고침을 뜻하지 않으며 앱의 업데이트 확인 절차가 적용됩니다.
+- 하위 경로에 배포할 때는 서버의 location·별칭·manifest·서비스 워커 범위와 신고 URL을 함께 확인합니다. 예시 nginx 설정은 루트 경로 기준입니다. 새 주소를 확정한 뒤 QR을 인쇄하고, 기존 QR의 주소를 유지하거나 이전 안내를 준비합니다.
+
+기본 OSM 타일은 서비스 워커에서 가로채거나 일괄 다운로드하지 않습니다. 별도 지도 제공기관은 `app/map-config.js`의 이용 허가·도메인 제한 키·오프라인 허용 설정을 확인합니다.
+
+## Firebase 운영 준비
+
+1. 운영할 프로젝트에 Firestore와 Google 로그인을 준비하고 실제 공개 도메인을 등록합니다. 배포 전에 프로젝트 ID를 확인합니다.
+2. `firebase-config.js`에 Firebase 웹 앱 설정을 넣습니다. `null`이면 기기 체험 모드입니다. 값이 있으나 연결에 실패하면 오류·재시도 화면을 표시하며 체험 모드로 자동 전환하지 않습니다.
+3. `firestore.rules`와 `firestore.indexes.json`을 배포합니다. `firebase.json`이 두 파일을 가리킵니다. 인덱스가 준비된 뒤 시설별 이력·사진·작업 이력과 기간 조회를 확인합니다.
+4. 운영자가 실제 Auth UID를 확인하고 초기 관리자 설정 계획을 실행합니다. 기본 명령은 서버에 연결하거나 쓰지 않습니다.
+
+```bash
+node scripts/admin-setup.cjs --project PROJECT_ID --uid VERIFIED_UID
+```
+
+실제 관리자 지정은 운영자가 자격증명을 준비하고 같은 명령에 `--apply`를 추가할 때 수행됩니다. 기존 초기 설정이 있으면 다시 선점하지 않습니다. 이후 직원은 접근 신청을 보내고 관리자가 승인합니다. 확인된 이메일의 초대 코드 발급·수락에는 Functions가 필요합니다.
+
+5. Functions를 사용할 경우 서버 의존성을 설치하고, `functions/.env.example`을 참고해 `PUBLIC_REPORT_ORIGINS`를 실제 신고 origin 목록으로 설정합니다. `REPORT_RATE_SECRET`은 Firebase Secret Manager에 보관합니다. App Check를 등록하고 실제 토큰 검증을 준비합니다.
+6. 아래 명령은 운영자가 확인한 프로젝트에 실행하는 **배포 예시**입니다. 코드 검사나 Pages 배포가 이 명령을 대신 실행하지 않습니다.
+
+```bash
+npm ci --prefix functions --include=optional --ignore-scripts --no-audit --no-fund
+npx firebase-tools@15.34.1 functions:secrets:set REPORT_RATE_SECRET --project PROJECT_ID
+npx firebase-tools@15.34.1 deploy --only firestore:rules,firestore:indexes,functions --project PROJECT_ID
+```
+
+Functions 런타임은 Node.js 22, 지역은 `asia-northeast3`입니다. 직원 앱에서 서버 호출을 쓰려면 `functionsEnabled`, `functionsRegion`, `appCheckSiteKey`를 설정합니다. 주민 신고는 `report/config.js`의 `backend: "gateway"`, `gatewayUrl`, App Check와 같은 프로젝트의 Firebase 웹 앱 설정을 연결합니다. `backend: "firestore"` 직접 접수는 지원하지 않습니다.
+
+서버 배포 후 공개 접수·초대·감사 트리거·만료 정리 예약 작업의 실제 실행과 로그를 확인합니다. 예약 함수와 클라이언트 설정만으로 과거 문서에 만료가 생기지는 않으므로 필요한 경우 보관 기간 이관 계획도 검토합니다. [서버 운영 안내](../docs/security-operations.md)에 상세 경계를 정리했습니다.
+
+## 로컬·CI 검사
+
+CI는 앱·브라우저 검사에 Node.js 24, Functions·에뮬레이터 검사에 Node.js 22를 사용합니다. 앱 회귀는 외부 패키지 없이 실행하며, 서버 검사는 `functions` 의존성이 필요합니다. 아래 첫 명령은 Node.js 24에서, 서버 명령은 Node.js 22에서 실행합니다.
+
+```bash
+node scripts/check.mjs
+npm ci --prefix functions --include=optional --ignore-scripts --no-audit --no-fund
+npm test --prefix functions
+```
+
+Firestore 규칙과 실제 서버 핸들러의 로컬 검사는 Java 21과 npm이 필요합니다. 저장소 루트의 Bash에서 실행합니다.
+
+```bash
+DG_TOOLS_DIR="$(mktemp -d)"
+npm install --prefix "$DG_TOOLS_DIR" --no-audit --no-fund --ignore-scripts \
+  firebase-tools@15.34.1 @firebase/rules-unit-testing@3.0.3 firebase@10.12.2
+NODE_PATH="$DG_TOOLS_DIR/node_modules" \
+  "$DG_TOOLS_DIR/node_modules/.bin/firebase" emulators:exec \
+  --only firestore --project demo-donggu-streetlight \
+  "node scripts/check-emulator.cjs"
+```
+
+에뮬레이터는 `127.0.0.1:8089`를 사용합니다. `check-emulator.cjs`는 규칙 검사와 서버 핸들러 검사를 각각의 `demo-*` 프로젝트로 순서대로 실행하며 loopback 에뮬레이터가 없으면 실패합니다. 운영 DB에는 연결하지 않습니다. 서버 핸들러 검사는 로컬 권한·트랜잭션을 확인하며 실제 Firebase 인증/App Check 전송 계층과 예약·이벤트 전달까지 검증하지는 않습니다.
+
+브라우저 검사는 별도로 설치한 Playwright와 Chromium을 사용합니다. 임시 로컬 서버와 독립 프로필을 사용하며 외부 서비스 요청은 검사 안에서 차단·대체합니다.
+
+```bash
+DG_BROWSER_DIR="$(mktemp -d)"
+npm install --prefix "$DG_BROWSER_DIR" --no-audit --no-fund --ignore-scripts playwright@1.58.2
+node "$DG_BROWSER_DIR/node_modules/playwright/cli.js" install chromium
+export DONGGU_PLAYWRIGHT_MODULE="$DG_BROWSER_DIR/node_modules/playwright"
+node scripts/field-browser-smoke.cjs
+node scripts/integration-ui-smoke.cjs
+node scripts/operations-browser-smoke.cjs
+```
+
+이미 설치한 Chromium은 `DONGGU_CHROMIUM=/실제/실행파일`로 지정할 수 있습니다. Linux의 브라우저 시스템 의존성도 필요하며, CI는 Playwright 설치에 `--with-deps`를 사용합니다.
+
+[검사 workflow](../.github/workflows/checks.yml)는 앱 회귀, 서버 단위 검사, 규칙·서버 에뮬레이터를 실행합니다. [브라우저 workflow](../.github/workflows/browser.yml)는 세 브라우저 검사를 실행합니다. [Pages workflow](../.github/workflows/pages.yml)는 두 workflow가 모두 성공한 뒤 공개 목록만 배포합니다. 실제 휴대전화 센서·야간 OCR·장시간 오프라인과 기관 서버의 HTTPS/MIME 응답은 배포 환경에서 따로 확인합니다.
+
+## 업데이트와 이전
+
+새 필수 앱 모듈은 서비스 워커의 앱 셸 목록과 공개 파일 목록에 함께 반영합니다. 사용자는 **새 버전 적용** 전에 미전송 작업·초안을 확인합니다. 서비스 워커가 다른 탭의 작성 내용을 자동으로 새로고침하지 않습니다.
+
+운영 자료를 옮길 때는 [백업·복원 절차](../docs/operations-guide.md#7-백업복원이전)를 따릅니다. 백업은 초안·대기함·서버 설정 전체를 포함하지 않습니다. 사용자 UID와 권한, 신고 접수 원본, 감사·보관 정책은 대상 환경에서 별도로 확인합니다.
