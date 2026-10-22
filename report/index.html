@@ -70,6 +70,7 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
     <input class="f-in" id="contact" inputmode="tel" placeholder="처리 결과를 받고 싶으면 전화번호" maxlength="40">
     <label class="ck"><input type="checkbox" id="consent"> 처리 결과 안내 목적으로 연락처를 <span id="pdays"></span>일 보관하는 데 동의해요</label>
 
+    <div id="deliveryNotice" class="notice" role="status" hidden></div>
     <div id="err" class="err" hidden></div>
     <div style="margin-top:18px"><button type="button" class="btn sodium block" id="send">신고 보내기</button></div>
     <div id="alt" class="row" style="margin-top:10px;flex-wrap:wrap" hidden></div>
@@ -77,12 +78,12 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
   </main>
 
   <section id="done" class="done" hidden>
-    <div class="big">✓</div>
-    <div>접수됐어요</div>
+    <div class="big" id="doneIcon"></div>
+    <div id="doneTitle"></div>
     <div class="rc" id="receipt"></div>
     <p class="muted" id="doneMsg"></p>
     <div id="doneCopy" hidden><p class="muted">문자·이메일 앱이 열리지 않으면 아래 내용을 복사해서 보내 주세요.</p><textarea class="f-in" id="copyText" readonly style="min-height:120px"></textarea><button type="button" class="btn ghost" id="copyBtn" style="margin-top:8px">내용 복사</button></div>
-    <p class="foot">감사합니다. 같은 등을 여러 번 신고하지 않으셔도 돼요.</p>
+    <p class="foot" id="doneFoot"></p>
   </section>
 </div>
 <script src="config.js"></script>
@@ -90,14 +91,27 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
 const C=Object.assign({org:"",dept:"",phone:"",sms:"",mail:"",backend:null,firestore:{},privacyDays:90,maxPhotoKB:150},window.REPORT_CONFIG||{});
 const ISSUES=["불이 꺼져 있어요","깜빡거려요","낮에도 켜져 있어요","등이 파손됐어요","기둥이 기울었어요","전선이 노출됐어요","기타"];
 const $=s=>document.querySelector(s);
-const st={code:"",issue:"",photo:null,pos:null};
-$("#orgLine").textContent=[C.org,C.dept].filter(Boolean).join(" ");$("#pdays").textContent=C.privacyDays;$("#phoneLine").textContent=C.phone||"담당 부서";
+const st={code:"",lightId:null,issue:"",photo:null,pos:null};
+const contactPhone=String(C.phone||"").trim()==="062-000-0000"?"":String(C.phone||"").trim();
+$("#orgLine").textContent=[C.org,C.dept].filter(Boolean).join(" ");$("#pdays").textContent=C.privacyDays;$("#phoneLine").textContent=contactPhone||"담당 부서의 공식 연락처";
+function deliveryMode(){
+  if(C.backend==="firestore"&&C.firestore&&C.firestore.projectId&&C.firestore.apiKey)return "firestore";
+  return String(C.sms||"").trim()||String(C.mail||"").trim()?"external":null;
+}
+function configureDelivery(){
+  const mode=deliveryMode(),btn=$("#send"),notice=$("#deliveryNotice");
+  btn.disabled=!mode;btn.textContent=mode==="firestore"?"신고 보내기":mode==="external"?"신고 내용 준비하기":"신고 접수 준비 중";
+  notice.hidden=mode==="firestore";
+  notice.textContent=mode==="external"?"신고 내용을 준비한 뒤 문자·이메일 앱에서 직접 보내 주세요. 보내기 전에는 접수되지 않아요.":`현재 이 페이지의 신고 접수가 준비 중이에요. ${contactPhone?contactPhone+"로 문의해 주세요.":"담당 부서의 공식 연락처로 문의해 주세요."}`;
+}
+configureDelivery();
 // plate code from the QR link (?c=산수동 642) or typed
-const q=new URLSearchParams(location.search).get("c");
+const params=new URLSearchParams(location.search),q=params.get("c"),qrId=params.get("lid");
+st.lightId=qrId&&/^[A-Za-z0-9_-]{1,120}$/.test(qrId)?qrId:null;
 function setCode(c){st.code=(c||"").trim().slice(0,40);$("#codeKnown").hidden=!st.code;$("#codeAsk").hidden=!!st.code;$("#codeText").textContent=st.code}
 setCode(q);
-$("#codeEdit").onclick=()=>{$("#codeIn").value=st.code;setCode("");$("#codeIn").focus()};
-$("#codeIn").addEventListener("input",e=>{st.code=e.target.value.trim().slice(0,40)});
+$("#codeEdit").onclick=()=>{st.lightId=null;$("#codeIn").value=st.code;setCode("");$("#codeIn").focus()};
+$("#codeIn").addEventListener("input",e=>{st.lightId=null;st.code=e.target.value.trim().slice(0,40)});
 $("#issues").innerHTML=ISSUES.map(i=>`<button type="button" aria-pressed="false">${i}</button>`).join("");
 $("#issues").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;st.issue=b.textContent;document.querySelectorAll("#issues button").forEach(x=>x.setAttribute("aria-pressed",x===b))});
 // photo: shrink to ~150 KB so it fits in one record
@@ -114,28 +128,30 @@ function showErr(m){const e=$("#err");e.textContent=m;e.hidden=false;e.scrollInt
 function receiptNo(){const d=new Date();const r=Math.random().toString(36).slice(2,6).toUpperCase();return `R${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${r}`}
 function buildText(rec){return `[가로등 고장 신고 ${rec.receipt}]\n등 번호: ${rec.code||"(모름)"}\n문제: ${rec.issue}\n내용: ${rec.desc||"-"}\n위치: ${rec.lat?`${rec.lat}, ${rec.lng} (±${rec.acc}m)`:"-"}\n연락처: ${rec.contact||"-"}\n시각: ${new Date(rec.at).toLocaleString("ko-KR")}`}
 async function sendFirestore(rec){const f=C.firestore;const url=`https://firestore.googleapis.com/v1/projects/${f.projectId}/databases/(default)/documents/${f.collection||"citizen_reports"}?key=${encodeURIComponent(f.apiKey)}`;
-  const fields={};for(const [k,v] of Object.entries(rec)){if(v==null||v==="")continue;fields[k]=typeof v==="number"?(Number.isInteger(v)?{integerValue:String(v)}:{doubleValue:v}):typeof v==="boolean"?{booleanValue:v}:{stringValue:String(v)}}
+  const fields={};for(const [k,v] of Object.entries(rec)){if(v==null)continue;fields[k]=typeof v==="number"?(Number.isInteger(v)?{integerValue:String(v)}:{doubleValue:v}):typeof v==="boolean"?{booleanValue:v}:{stringValue:String(v)}}
   const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fields})});if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}
 $("#send").onclick=async()=>{
   $("#err").hidden=true;
+  const mode=deliveryMode();if(!mode){configureDelivery();showErr($("#deliveryNotice").textContent);return}
   if(!st.issue){showErr("무슨 문제인지 하나 골라 주세요.");return}
   const contact=$("#contact").value.trim();if(contact&&!$("#consent").checked){showErr("연락처를 남기려면 보관 동의에 체크해 주세요.");return}
   const useGps=$("#useGps").checked;
-  const rec={receipt:receiptNo(),code:st.code,issue:st.issue,desc:$("#desc").value.trim().slice(0,500),lat:useGps&&st.pos?st.pos.lat:null,lng:useGps&&st.pos?st.pos.lng:null,acc:useGps&&st.pos?st.pos.acc:null,photo:st.photo||null,contact:contact||null,consent:!!contact,at:Date.now(),ua:navigator.userAgent.slice(0,80),imported:false};
+  const rec={receipt:receiptNo(),code:st.code,lightId:st.lightId,issue:st.issue,desc:$("#desc").value.trim().slice(0,500),lat:useGps&&st.pos?st.pos.lat:null,lng:useGps&&st.pos?st.pos.lng:null,acc:useGps&&st.pos?st.pos.acc:null,photo:st.photo||null,contact:contact||null,consent:!!contact,at:Date.now(),ua:navigator.userAgent.slice(0,80),imported:false};
   const btn=$("#send");btn.disabled=true;btn.textContent="보내는 중…";
   try{
-    if(C.backend==="firestore"&&C.firestore&&C.firestore.projectId){await sendFirestore(rec);finish(rec,"담당 부서에 바로 전달됐어요.")}
+    if(mode==="firestore"){await sendFirestore(rec);finish(rec,"담당 부서에 바로 전달됐어요.")}
     else{
       const text=buildText(rec);const hasPhoto=!!rec.photo;
-      finish(rec,`아직 자동 접수가 연결되지 않아 문자·이메일로 보내 주셔야 해요.${hasPhoto?" 사진은 메시지에 직접 첨부해 주세요.":""}`,text);
-      const alt=$("#alt");alt.hidden=false;
-      if(C.sms)alt.insertAdjacentHTML("beforeend",`<a class="btn sodium" href="sms:${C.sms}${/iphone|ipad/i.test(navigator.userAgent)?"&":"?"}body=${encodeURIComponent(text)}">문자로 보내기</a>`);
-      if(C.mail)alt.insertAdjacentHTML("beforeend",`<a class="btn ghost" href="mailto:${C.mail}?subject=${encodeURIComponent("가로등 고장 신고 "+rec.receipt)}&body=${encodeURIComponent(text)}">이메일로 보내기</a>`);
+      finish(rec,`아직 접수되지 않았어요. 아래 버튼으로 문자·이메일 앱을 열고 직접 보내 주세요.${hasPhoto?" 사진은 메시지에 직접 첨부해 주세요.":""}`,text);
+      const alt=$("#alt");alt.hidden=false;alt.replaceChildren();
+      const addLink=(label,href,style)=>{const a=document.createElement("a");a.className="btn "+style;a.textContent=label;a.href=href;alt.appendChild(a)};
+      if(String(C.sms||"").trim())addLink("문자로 보내기",`sms:${String(C.sms).trim()}${/iphone|ipad/i.test(navigator.userAgent)?"&":"?"}body=${encodeURIComponent(text)}`,"sodium");
+      if(String(C.mail||"").trim())addLink("이메일로 보내기",`mailto:${String(C.mail).trim()}?subject=${encodeURIComponent("가로등 고장 신고 "+rec.receipt)}&body=${encodeURIComponent(text)}`,"ghost");
       $("#done").appendChild(alt);
     }
-  }catch(e){btn.disabled=false;btn.textContent="신고 보내기";showErr("보내지 못했어요. 잠시 후 다시 시도하거나 "+(C.phone||"담당 부서")+"로 전화해 주세요.")}
+  }catch(e){configureDelivery();showErr("보내지 못했어요. 잠시 후 다시 시도하거나 "+(contactPhone||"담당 부서의 공식 연락처")+"로 문의해 주세요.")}
 };
-function finish(rec,msg,copy){$("#form").hidden=true;$("#done").hidden=false;$("#receipt").textContent=rec.receipt;$("#doneMsg").textContent=msg;if(copy){$("#doneCopy").hidden=false;$("#copyText").value=copy;$("#copyBtn").onclick=async()=>{try{await navigator.clipboard.writeText(copy);$("#copyBtn").textContent="복사했어요"}catch(e){$("#copyText").select()}}}window.scrollTo(0,0)}
+function finish(rec,msg,copy){const sent=!copy;$("#form").hidden=true;$("#done").hidden=false;$("#doneIcon").textContent=sent?"✓":"→";$("#doneTitle").textContent=sent?"접수됐어요":"신고 내용을 준비했어요 · 전송 전";$("#receipt").hidden=!sent;$("#receipt").textContent=sent?rec.receipt:"";$("#doneMsg").textContent=msg;$("#doneFoot").textContent=sent?"감사합니다. 같은 등을 여러 번 신고하지 않으셔도 돼요.":"문자·이메일 앱에서 보내기를 눌러 신고를 마쳐 주세요.";$("#doneCopy").hidden=sent;if(copy){$("#copyText").value=copy;$("#copyBtn").onclick=async()=>{try{await navigator.clipboard.writeText(copy);$("#copyBtn").textContent="복사했어요"}catch(e){$("#copyText").select()}}}window.scrollTo(0,0)}
 </script>
 </body>
 </html>

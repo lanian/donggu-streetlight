@@ -470,13 +470,17 @@ const codeOf=(dong,num)=>`${dong} ${num}`;
 const glCode=(road,main,sub)=>`${road?road+" ":""}${main}${sub!=null&&sub!==""?"-"+sub:""}`;
 const roadSlug=r=>{let x=0;for(const ch of String(r||""))x=(x*31+ch.codePointAt(0))>>>0;return r?x.toString(36):"x"};
 const glId=(road,main,sub)=>`gl-${roadSlug(road)}-${main}-${sub}`;
-const labelText=p=>!p?"":p.kind==="가로등"?glCode(p.road,p.main,p.sub):codeOf(p.dong,p.num);
+const labelText=p=>!p?"":p.codeText||(p.kind==="가로등"?glCode(p.road,p.main,p.sub):codeOf(p.dong,p.num));
 const idOf=(dong,num)=>`bd-${roadSlug(dong)}-${num}`;
 const newIdFor=p=>p.kind==="가로등"?glId(p.road,p.main,p.sub):idOf(p.dong,p.num);
 const nrm=v=>v==null||v===""?"":String(v).split("-").map(x=>String(+x)).join("-"); // 063 → 63, 204-016 → 204-16
+const plateKey=v=>String(v||"").normalize("NFKC").replace(/\s+/g,"").toLowerCase();
+// Keep the registry ID when a label is known: special labels and duplicate numbers cannot be reconstructed from digits alone.
+function plateRef(l){return{lightId:l.id,codeText:l.code,kind:l.kind||"가로등",dong:l.dong||"",num:l.num,road:l.road||"",main:l.main,sub:l.sub}}
 // find a registered light for a parsed label (prefers ones still standing)
 function lookup(p){
   if(!p)return null;
+  if(p.lightId)return S.lights.find(l=>l.id===p.lightId)||null;
   const live=a=>a.find(l=>!l.removed)||a[0]||null;
   if(p.kind==="가로등"){
     const m=nrm(p.main),s=nrm(p.sub);
@@ -492,7 +496,17 @@ const ROAD_RE=/([\uac00-\ud7a3]{1,8}?(?:대로|로|길))\s*(\d{1,4})\s*-\s*(\d{1
 const GL_RE=/(?<![\d-])(\d{1,4})\s*-\s*(\d{1,3})(?![\d-]|\s*-\s*\d)/;   // 140-8, not phone 608-2894, not 1544-1555, not 2022-11-26
 function parseCode(text){
   if(!text)return null;let t=String(text).replace(/\s+/g," ");
-  if(/^https?:|[?&](?:no|num|id|code|lamp)=/i.test(t)){const u=t.match(/(?:no|num|id|code|lamp)=([^&#]+)/i);if(u){let v=u[1].trim();try{v=decodeURIComponent(v.replace(/\+/g," "))}catch(e){}const q=parseCode(v);if(q)return q}}
+  if(/^https?:|[?&](?:c|lid|no|num|id|code|lamp)=/i.test(t)){
+    try{
+      const query=t.includes("?")?t.slice(t.indexOf("?")+1).split("#")[0]:t.replace(/^&/,"");
+      const params=new URLSearchParams(query),id=params.get("lid");
+      if(id){const l=S.lights.find(x=>x.id===id);return l?plateRef(l):null}
+      for(const key of ["c","no","num","id","code","lamp"]){const value=params.get(key);if(value&&value!==t){const p=parseCode(value);if(p)return p}}
+    }catch(e){}
+    return null;
+  }
+  const exact=S.lights.filter(l=>l.code&&plateKey(l.code)===plateKey(t));
+  if(exact.length)return plateRef(exact.find(l=>!l.removed)||exact[0]);
   for(const d of DONGS_M){const m=t.match(new RegExp("(?:^|[^\\uac00-\\ud7a3])"+dongRe(d)+"\\s*(\\d{1,5}(?:\\s*-\\s*\\d{1,3}){0,2})(?![\\d-])"));if(m)return{kind:"보안등",dong:d,num:m[1].replace(/\s+/g,"")}}
   const r=t.match(ROAD_RE);if(r)return{kind:"가로등",road:r[1],main:r[2],sub:r[3]};
   const g=t.match(GL_RE);if(g)return{kind:"가로등",road:"",main:g[1],sub:g[2]};
@@ -551,7 +565,9 @@ function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");cl
 function localDb(){
   const KEY="donggu-streetlight-local";let data={lights:{},inspections:{},reports:{},patrols:{},roles:{},photos:{}};const subs=[];
   try{const s=localStorage.getItem(KEY);if(s)data=JSON.parse(s)}catch(e){}
-  const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}subs.forEach(f=>f())};
+  const copy=v=>JSON.parse(JSON.stringify(v));
+  // Persist a candidate first. A quota/error must leave both the live data and subscribers unchanged.
+  const commit=change=>{const next=copy(data);change(next);localStorage.setItem(KEY,JSON.stringify(next));data=next;subs.forEach(f=>{try{f()}catch(e){console.error("Local data subscriber failed",e)}})};
   const snapOf=(col,q)=>{let rows=Object.entries(data[col]||{}).map(([id,d])=>({id,data:()=>d}));
     if(q.where)rows=rows.filter(r=>r.data()[q.where[0]]===q.where[2]);
     if(q.order)rows.sort((x,y)=>{const a=x.data()[q.order[0]]||0,b=y.data()[q.order[0]]||0;return q.order[1]==="desc"?b-a:a-b});
@@ -560,23 +576,26 @@ function localDb(){
     where:(f,op,v)=>query(col,{...q,where:[f,op,v]}),orderBy:(f,d)=>query(col,{...q,order:[f,d]}),limit:n=>query(col,{...q,lim:n}),
     get:async()=>snapOf(col,q),
     onSnapshot:cb=>{const f=()=>cb(snapOf(col,q));subs.push(f);f();return()=>{const i=subs.indexOf(f);if(i>=0)subs.splice(i,1)}},
-    add:async rec=>{const id="l"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);(data[col]=data[col]||{})[id]=rec;save();return{id}}
+    add:async rec=>{const id="l"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);commit(next=>{(next[col]=next[col]||{})[id]=copy(rec)});return{id}}
   });
   const seed=async()=>{
+    let seedData;
     try{const mf=await (await fetch("seed/manifest.json",{cache:"no-cache"})).json();
       const m=Array.isArray(mf)?mf:mf.docs,ver=Array.isArray(mf)?1:mf.version;
       const refresh=data.seedVersion!==ver;
       // a new seed version means the sample data changed: drop everything stored by older seeds (and test records made against them)
-      if(refresh&&mf.purge){data.lights={};data.inspections={};data.reports={};data.register={}}
       const todo=refresh?m:m.filter(e=>!(data[e.collection]&&data[e.collection][e.doc_id]));
-      await Promise.all(todo.map(async e=>{const d=await (await fetch("seed/"+e.file,{cache:"no-cache"})).json();(data[e.collection]=data[e.collection]||{})[e.doc_id]=d}));
-      if(refresh||todo.length){data.seedVersion=ver;save()}}catch(e){}
+      const docs=await Promise.all(todo.map(async e=>({...e,data:await (await fetch("seed/"+e.file,{cache:"no-cache"})).json()})));
+      if(refresh||todo.length)seedData={purge:refresh&&mf.purge,ver,docs}}catch(e){return}
+    if(seedData)commit(next=>{if(seedData.purge){next.lights={};next.inspections={};next.reports={};next.register={}}
+      for(const e of seedData.docs)(next[e.collection]=next[e.collection]||{})[e.doc_id]=e.data;next.seedVersion=seedData.ver});
   };
-  return{seed,collection:c=>query(c),doc:path=>{const [c,id]=path.split("/");return{
-    set:async rec=>{(data[c]=data[c]||{})[id]=rec;save()},
+  const commitMany=async ops=>commit(next=>{for(const op of ops){const [c,id]=op.path.split("/");const col=next[c]=next[c]||{};col[id]=op.merge?{...(col[id]||{}),...copy(op.data)}:copy(op.data)}});
+  return{seed,commitMany,collection:c=>query(c),doc:path=>{const [c,id]=path.split("/");return{
+    set:async rec=>commit(next=>{(next[c]=next[c]||{})[id]=copy(rec)}),
     get:async()=>{const d=(data[c]||{})[id];return{id,exists:!!d,data:()=>d}},
-    update:async patch=>{data[c][id]=Object.assign(data[c][id]||{},patch);save()},
-    delete:async()=>{if(data[c])delete data[c][id];save()}}}};
+    update:async patch=>commit(next=>{const col=next[c]=next[c]||{};col[id]={...(col[id]||{}),...copy(patch)}}),
+    delete:async()=>commit(next=>{if(next[c])delete next[c][id]})}}};
 }
 /* Registry: the light list ships with the page (data/lights.json, converted from getPoint.json).
    The shared "lights" collection only holds what changes in the field — status, last inspection —
@@ -598,7 +617,14 @@ function mergeLights(){
 }
 function onLights(snap){OV={};snap.docs.forEach(d=>{OV[d.id]=d.data()});mergeLights()}
 // write field changes for one light without touching the registry fields
-function patchLight(id,patch){const cur={...(OV[id]||{})};delete cur.id;return db.doc("lights/"+id).set({...cur,...patch})}
+async function patchLight(id,patch){
+  const ref=db.doc("lights/"+id);const changes={...patch};delete changes.id;
+  if(FB)return ref.set(changes,{mergeFields:Object.keys(changes)});
+  // The artifact API supports get/update/set, but not merge options or transactions.
+  const snap=await ref.get();const current=snap&&(typeof snap.data==="function"?snap.data():snap);
+  if(current&&snap.exists!==false)return ref.update(changes);
+  return ref.set(changes);
+}
 /* ---------- Firebase mode (GitHub Pages + firebase-config.js): Google sign-in, Firestore with the same collection
    layout, roles enforced by firestore.rules, offline writes queued by the SDK ---------- */
 let FB=null;
@@ -612,11 +638,12 @@ async function fbBoot(cfg){
   const u=FB.auth.currentUser;
   if(!u){S.me=null;S.fbSignedOut=true;setSync(false,"로그인 필요");render();return}
   S.me=u.uid;S.fbSignedOut=false;
-  try{await fs.collection("users").doc(u.uid).set({name:u.displayName||u.email||"직원",email:u.email||"",photo:u.photoURL||"",at:Date.now()},{merge:true})}catch(e){}
+  // This optional profile write may wait for the server while offline. Start cached reads immediately.
+  fs.collection("users").doc(u.uid).set({name:u.displayName||u.email||"직원",email:u.email||"",photo:u.photoURL||"",at:Date.now()},{merge:true}).catch(()=>{});
   db=fs;
   user={id:async()=>u.uid,can:async()=>true,profiles:async ids=>{const out={};await Promise.all(ids.map(async id=>{try{const d=await fs.collection("users").doc(id).get();if(d.exists)out[id]={name:d.data().name}}catch(e){}}));return out}};
   dl={save:async({filename,data})=>{const a=document.createElement("a");a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data],{type:"text/csv"}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)}};
-  const sub=(q,key,map)=>q.onSnapshot(snap=>{if(key==="lights")onLights(snap);else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));if(map)map();S.live=true;setSync(!snap.metadata.fromCache,snap.metadata.fromCache?"오프라인":"실시간");render();resolveNames()},err=>{if(err&&err.code==="permission-denied"){setSync(false,"권한 없음")}else setSync(false,"연결 끊김")});
+  const sub=(q,key,map)=>q.onSnapshot({includeMetadataChanges:true},snap=>{if(key==="lights")onLights(snap);else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));if(map)map();S.live=true;setSync(!snap.metadata.fromCache,snap.metadata.fromCache?"오프라인":"실시간");render();resolveNames()},err=>{if(err&&err.code==="permission-denied"){setSync(false,"권한 없음")}else setSync(false,"연결 끊김")});
   sub(fs.collection("lights"),"lights");
   sub(fs.collection("inspections").orderBy("date","desc").limit(40),"insp");
   sub(fs.collection("reports").orderBy("createdAt","desc").limit(100),"reports");
@@ -626,15 +653,17 @@ async function fbBoot(cfg){
 async function fbSignIn(){const prov=new firebase.auth.GoogleAuthProvider();try{await FB.auth.signInWithPopup(prov);location.reload()}catch(e){if(e&&/popup/.test(e.code||"")){await FB.auth.signInWithRedirect(prov)}else toast("로그인하지 못했어요: "+(e&&e.code||""))}}
 async function fbSignOut(){try{await FB.auth.signOut()}catch(e){}location.reload()}
 function vSignIn(){return `<div class="panel" style="margin-top:12px"><h3>직원 로그인</h3><p class="muted">구청 Google 계정으로 로그인하면 점검·순찰 기록이 공유 저장소에 저장돼요. 역할(관리자·점검자)은 관리자가 지정해요.</p><button class="btn sodium block" id="fbSignIn">Google로 로그인</button></div>`}
+function vConnectionError(){return `<div class="panel" style="margin-top:12px"><h3>공유 저장소에 연결하지 못했어요</h3><p class="muted">인터넷 연결을 확인한 뒤 다시 열어 주세요. 문제가 계속되면 관리자에게 연결 설정을 확인해 달라고 하세요.</p><button class="btn sodium block" id="fbRetry">다시 연결</button></div>`}
 async function boot(){
   await loadRegistry();
-  if((!window.claude||!window.claude.use)&&window.FIREBASE_CONFIG&&window.FIREBASE_CONFIG.projectId){
-    setSync(false,"연결 중");try{await fbBoot(window.FIREBASE_CONFIG);return}catch(e){toast("Firebase에 연결하지 못했어요. 체험 모드로 열어요.")}
+  if((!window.claude||!window.claude.use)&&window.FIREBASE_CONFIG!=null){
+    const cfg=window.FIREBASE_CONFIG;setSync(false,"연결 중");
+    try{if(typeof cfg.projectId!=="string"||!cfg.projectId.trim()||typeof cfg.apiKey!=="string"||!cfg.apiKey.trim())throw new Error("Firebase configuration is incomplete");await fbBoot(cfg)}catch(e){db=null;user=null;S.canWrite=false;S.fbError=true;setSync(false,"연결 실패");render()}return;
   }
   if(!window.claude||!window.claude.use){
     db=localDb();S.me="local";setSync(false,"이 기기에만 저장");
     const o=$("#sync");o.title="공유 서버 없이 이 브라우저에만 저장되는 체험 모드예요.";
-    await db.seed();
+    try{await db.seed()}catch(e){toast("체험 데이터를 저장하지 못했어요. 기기 저장 공간을 확인하세요.")}
     const sub=(q,key,map)=>q.onSnapshot(snap=>{if(key==="lights")onLights(snap);else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));if(map)map();S.live=true;render()});
     sub(db.collection("lights"),"lights");
     sub(db.collection("inspections").orderBy("date","desc").limit(40),"insp");
@@ -695,7 +724,7 @@ async function resolveNames(){
 const ROLE_LABEL={admin:"관리자",inspector:"점검자",resident:"주민(열람 불가)"};
 function rolesReady(){return S.roles.some(r=>r.role==="admin")}
 function myRole(){if(S.me==="local")return S.demoRole||"admin";if(!rolesReady())return "admin";const r=S.roles.find(r=>r.id===S.me);return r?r.role:"resident"}
-function can(p){const r=myRole();if(p==="admin")return r==="admin";if(p==="inspect")return r==="admin"||r==="inspector";return true}
+function can(p){if(S.fbError)return false;const r=myRole();if(p==="admin")return r==="admin";if(p==="inspect")return r==="admin"||r==="inspector";return true}
 function need(p){if(can(p))return true;toast(p==="admin"?"관리자만 할 수 있어요.":"점검자 이상만 할 수 있어요.");return false}
 function myDongs(){const r=S.roles.find(x=>x.id===S.me);return (r&&Array.isArray(r.dongs)?r.dongs:[])}
 function inMyDongs(l){const ds=myDongs();if(!ds.length)return true;const a=adongOf(l);return ds.some(d=>a===d||(a.endsWith("(1·2)")&&adongGroup(a)===adongGroup(d)))}
@@ -715,7 +744,7 @@ function roleSection(){
   <p class="muted" style="margin:10px 0 0">내 사용자 ID: <code>${esc(me||"")}</code> · 새 사용자는 이 링크를 열고 한 번이라도 신고·점검을 하면 위 목록에 떠요. 공유 설정에서 "참여자"로 초대해야 저장이 돼요.</p>
   ${FB?`<p class="muted" style="margin:8px 0 0">Firebase 모드 · 역할은 서버 규칙(firestore.rules)으로 강제돼요. 로그인 계정: ${esc((FB.auth.currentUser||{}).email||"")} <button class="btn ghost sm" id="fbSignOut">로그아웃</button></p>`:""}
   <div class="split"><input class="f-in" id="roleAddId" placeholder="사용자 ID 직접 입력" style="flex:1;min-width:160px"><select class="f-in" id="roleAddRole" style="flex:0 0 auto">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select><button class="btn ghost sm" id="roleAdd">추가</button></div>
-  <details class="help" style="margin-top:8px"><summary>한계</summary><p style="margin:6px 0 0">역할은 화면에서만 구분돼요. 공유 데이터베이스 자체는 "참여자는 쓰기 가능"만 알기 때문에, 기술적으로는 참여자가 화면을 우회해 기록을 바꿀 수 있어요. 신뢰하는 사람만 참여자로 초대하세요.</p></details>`;
+  ${!FB&&S.me!=="local"?`<details class="help" style="margin-top:8px"><summary>공유 권한 안내</summary><p style="margin:6px 0 0">이 공유 환경의 역할은 화면에서 구분돼요. 공유 데이터베이스 자체는 "참여자는 쓰기 가능"만 알기 때문에, 참여자가 화면을 우회해 기록을 바꿀 수 있어요. 신뢰하는 사람만 참여자로 초대하세요.</p></details>`:""}`;
 }
 async function setRole(id,role){
   const cur=S.roles.find(r=>r.id===id);
@@ -729,7 +758,7 @@ async function write(fn,okMsg){
   catch(e){
     if(e&&e.code==="permission-denied"){toast("권한이 없어요. 관리자에게 역할을 요청하세요.")}
     else if(e&&e.code==="invalid_argument"){S.canWrite=false;toast("저장 권한이 없어요. 공유 설정에서 참여자 이상 권한이 필요해요.")}
-    else if(e&&e.code==="quota_exceeded")toast("저장 공간이 가득 찼어요. 오래된 기록을 정리해 주세요.");
+    else if(e&&(e.code==="quota_exceeded"||e.name==="QuotaExceededError"||e.code==="resource-exhausted"))toast("저장 공간이 가득 찼어요. 작성 내용은 유지돼요. 공간을 확보하고 다시 저장하세요.");
     else toast("저장하지 못했어요. 잠시 후 다시 시도해 주세요.");
     render();return false;
   }
@@ -758,8 +787,8 @@ function render(){
   document.querySelector("nav.tabs").hidden=Object.values(allowed).filter(Boolean).length<2;
   const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<select id="demoRole" aria-label="체험 역할" title="체험 역할 바꾸기">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v.replace(/\(.*\)/,"")}</option>`).join("")}</select>`:S.me?`<b title="${rolesReady()?"내 역할":"관리자를 아직 지정하지 않았어요"}">${rolesReady()?ROLE_LABEL[myRole()].replace(/\(.*\)/,""):"권한 설정 전"}</b>`:"";
   const v=$("#view");
-  v.innerHTML=S.fbSignedOut?vSignIn():S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():S.tab==="report"?vReport():vNoAccess();
-  if(S.fbSignedOut)document.querySelector("nav.tabs").hidden=true;
+  v.innerHTML=S.fbError?vConnectionError():S.fbSignedOut?vSignIn():S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():S.tab==="report"?vReport():vNoAccess();
+  if(S.fbSignedOut||S.fbError)document.querySelector("nav.tabs").hidden=true;
   refreshAdminSection();
 }
 function vNoAccess(){
@@ -1014,28 +1043,59 @@ function suggestResult(){
   if(r&&!draft.manual){draft.result=r;document.querySelectorAll("#resSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.res===r))}
   const h=$("#resHint");if(h)h.textContent=severe?"점등·누전·등주 불량은 고장으로 제안돼요.":bad.length?`불량 ${bad.length}개 항목이 있어요.`:"불량 항목을 체크하면 결과가 자동으로 제안돼요.";
 }
+const INSPECTION_JOBS=new WeakMap(),INSPECTION_BUSY=new Set();
+function inspectionDraftKey(d){return JSON.stringify({checks:d.checks,result:d.result,memo:(d.memo||"").trim().slice(0,1000),tilt:d.tilt,photo:d.photo,photos:d.photos||[]})}
+function newInspectionJob(l,source){
+  const d=JSON.parse(JSON.stringify(source)),now=Date.now();
+  const id="insp-"+(globalThis.crypto&&crypto.randomUUID?crypto.randomUUID():now.toString(36)+Math.random().toString(36).slice(2));
+  const rec={lightId:l.id,code:l.code,dong:l.dong,date:now,checks:{...d.checks},faults:CHECKS.filter(([k])=>d.checks[k]==="bad").map(([,t])=>t),result:d.result,memo:(d.memo||"").trim().slice(0,1000),inspector:S.me||null};
+  if(typeof d.tilt==="number")rec.tiltDeg=d.tilt;
+  if(d.pos){rec.pos={lat:+d.pos.lat.toFixed(6),lng:+d.pos.lng.toFixed(6),acc:d.pos.acc||0};if(typeof d.posDist==="number")rec.posDist=d.posDist}
+  if(d.photo)rec.photo=d.photo;
+  const photos=(d.photos||[]).map((ph,i)=>({id:id+"-p"+i,data:{lightId:l.id,code:l.code,dong:l.dong,inspId:id,label:ph.label,note:ph.note||"",data:ph.data,w:ph.w,h:ph.h,at:now,by:S.me||null,kind:"inspection"},thumb:ph.thumb}));
+  if(photos.length){rec.thumbs=photos.map(p=>({id:p.id,label:p.data.label,t:p.thumb}));rec.photoN=photos.length}
+  const reps=repSlots(l),fill=[];
+  for(const k of ["전경","표찰"]){const ph=photos.find(p=>p.data.label===k);if(!reps[k]&&ph){reps[k]={id:ph.id,at:now,by:S.me||null};fill.push(k)}}
+  return{id,rec,photos,reps,fill,key:inspectionDraftKey(d),patch:null};
+}
+async function commitInspectionJob(job){
+  if(!job.patch){const pending=Object.fromEntries(job.photos.map(p=>[p.id,p.data]));const rep=job.fill.length?await repPatchFor(job.reps,pending):{};
+    job.patch={...rep,status:job.rec.result,lastInspected:job.rec.date,lastResult:job.rec.result,redoNote:null,updatedAt:job.rec.date}}
+  const ops=[...job.photos.map(p=>({path:"photos/"+p.id,data:p.data})),{path:"inspections/"+job.id,data:job.rec},{path:"lights/"+job.rec.lightId,data:job.patch,merge:true}];
+  if(FB){const batch=FB.fs.batch();for(const op of ops)batch.set(FB.fs.doc(op.path),op.data,{mergeFields:Object.keys(op.data)});await batch.commit()}
+  else if(S.me==="local"&&typeof db.commitMany==="function")await db.commitMany(ops);
+  else{
+    // Artifact writes are sequential; stable IDs and frozen payloads make retries idempotent.
+    for(const op of ops){if(op.merge)await patchLight(job.rec.lightId,op.data);else{
+      const ref=db.doc(op.path),snap=await ref.get(),current=snap&&(typeof snap.data==="function"?snap.data():snap);
+      if(current&&snap.exists!==false)await ref.update(op.data);else await ref.set(op.data);
+    }}
+  }
+  for(const ph of job.photos)GAL[ph.id]={id:ph.id,...ph.data};
+}
 async function saveInspection(){
-  const l=byId(draft.lightId);if(!l)return;
-  const done=Object.keys(draft.checks).length;
-  if(done<CHECKS.length){const left=CHECKS.length-done;if(!confirm(`점검표 ${left}개 항목이 비어 있어요. 나머지를 '양호'로 기록하고 저장할까요?`))return;CHECKS.forEach(([k])=>{if(!draft.checks[k])draft.checks[k]="ok"});if(!draft.result)suggestResult()}
-  if(!draft.result){toast("점검 결과를 선택해 주세요.");return}
-  const btn=$("#saveInsp");btn.disabled=true;btn.textContent="저장 중…";
-  const now=Date.now();
-  const faults=CHECKS.filter(([k])=>draft.checks[k]==="bad").map(([,t])=>t);
-  const rec={lightId:l.id,code:l.code,dong:l.dong,date:now,checks:{...draft.checks},faults,result:draft.result,memo:($("#iMemo").value||"").trim().slice(0,1000),inspector:S.me||null};
-  if(typeof draft.tilt==="number")rec.tiltDeg=draft.tilt;
-  if(draft.pos){rec.pos={lat:+draft.pos.lat.toFixed(6),lng:+draft.pos.lng.toFixed(6),acc:draft.pos.acc||0};if(typeof draft.posDist==="number")rec.posDist=draft.posDist}
-  if(draft.photo)rec.photo=draft.photo;
-  const photos=draft.photos||[];
-  // empty 전경/표찰 대표 슬롯 → this inspection's photo with that label fills it
-  const reps0=repSlots(l);const fill={};for(const k of ["전경","표찰"]){if(!reps0[k]){const ph=photos.find(p=>p.label===k);if(ph)fill[k]=ph}}
-  const repPh=Object.keys(fill).length?fill:null;let repPatch=null;
-  const ok=await write(async()=>{
-    if(photos.length){rec.thumbs=[];for(const ph of photos){const ref=await db.collection("photos").add({lightId:l.id,code:l.code,dong:l.dong,label:ph.label,note:ph.note||"",data:ph.data,w:ph.w,h:ph.h,at:now,by:S.me||null,kind:"inspection"});rec.thumbs.push({id:ref.id,label:ph.label,t:ph.thumb});GAL[ref.id]={id:ref.id,lightId:l.id,code:l.code,label:ph.label,data:ph.data,at:now,by:S.me||null};if(repPh)for(const k in fill)if(fill[k]===ph)reps0[k]={id:ref.id,at:now,by:S.me||null}}rec.photoN=photos.length;if(repPh)repPatch=await repPatchFor(reps0)}
-    const iref=await db.collection("inspections").add(rec);
-    if(rec.thumbs)for(const t of rec.thumbs)try{await db.doc("photos/"+t.id).update({inspId:iref.id})}catch(e){}
-    await patchLight(l.id,{status:draft.result,lastInspected:now,lastResult:draft.result,redoNote:null,updatedAt:now,...(repPatch||{})})},repPh?`점검 결과를 저장했어요. ${Object.keys(repPh).map(k=>"'"+k+"'").join("·")} 사진을 대표 사진으로 넣었어요.`:"점검 결과를 저장했어요.");
-  if(ok){delete DRAFTS[l.id];draft=null;closeSheet()}else if(btn){btn.disabled=false;btn.textContent="점검 결과 저장"}
+  const source=draft;if(!source)return;const l=byId(source.lightId);if(!l)return;
+  if(INSPECTION_BUSY.has(l.id)){toast("이 등의 점검 결과를 저장 중이에요.");return}
+  let job=INSPECTION_JOBS.get(source);
+  if(!job){const done=Object.keys(source.checks).length;
+    if(done<CHECKS.length){const left=CHECKS.length-done;if(!confirm(`점검표 ${left}개 항목이 비어 있어요. 나머지를 '양호'로 기록하고 저장할까요?`))return;CHECKS.forEach(([k])=>{if(!source.checks[k])source.checks[k]="ok"});if(!source.result)suggestResult()}
+    if(!source.result){toast("점검 결과를 선택해 주세요.");return}
+    source.memo=($("#iMemo")||{}).value??source.memo??"";
+    job=newInspectionJob(l,source);INSPECTION_JOBS.set(source,job);
+  }
+  const btn=$("#saveInsp");if(btn){btn.disabled=true;btn.textContent="저장 중…"}
+  INSPECTION_BUSY.add(l.id);DRAFTS[l.id]=source;
+  const ok=await write(()=>commitInspectionJob(job),job.fill.length?`점검 결과를 저장했어요. ${job.fill.map(k=>"'"+k+"'").join("·")} 사진을 대표 사진으로 넣었어요.`:"점검 결과를 저장했어요.");
+  INSPECTION_BUSY.delete(l.id);
+  if(ok){INSPECTION_JOBS.delete(source);
+    if(draft===source&&$("#iMemo"))source.memo=$("#iMemo").value;
+    const unchanged=inspectionDraftKey(source)===job.key;
+    if(unchanged&&DRAFTS[l.id]===source)delete DRAFTS[l.id];
+    if(draft===source&&unchanged){draft=null;closeSheet()}
+    else if(!unchanged)toast("점검 결과를 저장했어요. 이후 수정한 내용은 초안으로 유지돼요.");
+    render();
+  }
+  if(draft===source){const current=$("#saveInsp");if(current){current.disabled=false;current.textContent="점검 결과 저장"}}
 }
 
 /* ---------- events ---------- */
@@ -1078,6 +1138,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="saveInsp"){if(need("inspect"))saveInspection();return}
   if(t.id==="fbSignIn"){fbSignIn();return}
   if(t.id==="fbSignOut"){fbSignOut();return}
+  if(t.id==="fbRetry"){location.reload();return}
   if(t.id==="pwaInstall"){if(PWA.prompt){PWA.prompt.prompt();PWA.prompt.userChoice.then(r=>{if(r.outcome==="accepted"){PWA.canInstall=false;PWA.prompt=null;render()}})}return}
   if(t.id==="pwaDismiss"){PWA.canInstall=false;PWA.iosHint=false;try{localStorage.setItem("dg-pwa-dismiss",String(Date.now()))}catch(e){}render();return}
   if(t.id==="pwaReload"){if(PWA.waiting)PWA.waiting.postMessage("skipWaiting");location.reload();return}
@@ -1195,12 +1256,12 @@ document.addEventListener("click",async e=>{
     scan.found={code,kind:k,how:"plate",raw:"",plate:live.snap&&live.box?cropTo(live.snap,live.box,480).toDataURL("image/jpeg",.7):null,pick:code?null:{kind:k,num:n,dong:"",road:"",auto:true}};stopCam(false);showScanResult(scan.found);return}
   if(t.id==="camBack"){backToCam();return}
   if(t.id==="pkGo"){confirmPick();return}
-  if(t.dataset.cand){const c=byId(t.dataset.cand);if(!c)return;const prev=scan.found||{};const code=c.kind==="가로등"?{kind:"가로등",road:c.road||"",main:c.main,sub:c.sub}:{kind:c.kind,dong:c.dong,num:c.num};
+  if(t.dataset.cand){const c=byId(t.dataset.cand);if(!c)return;const prev=scan.found||{};const code=plateRef(c);
     showScanResult({...prev,code,kind:c.kind,raw:"",pick:prev.pick?{...prev.pick,kind:c.kind,dong:c.dong||"",road:c.road||"",num:c.kind==="가로등"?`${c.main}${c.sub?"-"+c.sub:""}`:c.num}:null});return}
 });
 $("#sheetBg").addEventListener("click",()=>closeSheet());
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheet").classList.contains("open"))closeSheet()});
-document.addEventListener("input",e=>{if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;renderList()}});
+document.addEventListener("input",e=>{if(e.target.id==="ibNum"){delete e.target.dataset.lightId;delete e.target.dataset.lightCode;return}if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;renderList()}});
 document.addEventListener("change",async e=>{
   if(e.target.id==="rvNoLight"){S.rvNoLight=e.target.checked;render();return}
   if(e.target.id==="ibOnly"){IB.only=e.target.checked;render();return}
@@ -1258,7 +1319,7 @@ async function addLight(){
   if(!addr&&!(isFinite(lat)&&isFinite(lng))){toast("설치 위치를 적거나 현재 위치를 넣어 주세요.");return}
   const pole=$("#nPole").value.trim().toUpperCase().replace(/\s+/g,"");
   const rec={code,dong,kind,num:p&&p.num||null,road:p&&p.road||null,main:p&&p.main||null,sub:p&&p.sub||null,poleNo:pole||null,address:addr.slice(0,200),lampType:$("#nType").value,status:"정상",lastInspected:null,
-    reg:"미등록",noPlate:noPlate||undefined,note:($("#nNote").value||"").trim().slice(0,300)||null,foundAt:Date.now(),foundBy:S.me||null,updatedAt:Date.now()};
+    reg:"미등록",noPlate:!!noPlate,note:($("#nNote").value||"").trim().slice(0,300)||null,foundAt:Date.now(),foundBy:S.me||null,updatedAt:Date.now()};
   if(window.__nPhoto)rec.photo=window.__nPhoto;
   if(isFinite(lat)&&isFinite(lng)){rec.lat=lat;rec.lng=lng;if(window.__nAcc)rec.acc=window.__nAcc}
   if(await write(()=>db.doc("lights/"+id).set(rec),`${code}을(를) 미등록으로 저장했어요.`)){window.__nPhoto=null;render()}
@@ -1324,7 +1385,12 @@ function inboxSection(){
 }
 /* ---------- stage 2: pull citizen reports from Firestore (staff Google sign-in), file them in the inbox ---------- */
 function fsReady(){const c=window.REPORT_CONFIG;return !!(c&&c.backend==="firestore"&&c.firestore&&c.firestore.projectId&&c.firestore.apiKey)}
-function loadScript(src){return new Promise((res,rej)=>{if(document.querySelector(`script[src="${src}"]`))return res();const sc=document.createElement("script");sc.src=src;sc.onload=res;sc.onerror=()=>rej(new Error("load "+src));document.head.appendChild(sc)})}
+const SCRIPT_LOADS=new Map();
+function loadScript(src){
+  if(SCRIPT_LOADS.has(src))return SCRIPT_LOADS.get(src);
+  const pending=new Promise((res,rej)=>{const sc=document.createElement("script");sc.src=src;sc.onload=()=>res();sc.onerror=()=>{sc.remove();SCRIPT_LOADS.delete(src);rej(new Error("load "+src))};document.head.appendChild(sc)});
+  SCRIPT_LOADS.set(src,pending);return pending;
+}
 async function fsApp(){
   if(FB&&FB.auth.currentUser)return FB.fs;
   const c=window.REPORT_CONFIG.firestore;const V="10.12.2";
@@ -1341,8 +1407,9 @@ async function importCitizenReports(){
     const snap=await fs.collection(c.collection||"citizen_reports").where("imported","==",false).limit(100).get();
     for(const d of [...snap.docs].sort((x,y)=>(y.data().at||0)-(x.data().at||0))){const x=d.data();
       if(S.reports.some(r=>r.ext===d.id)){skipped++;continue}
-      let l=null,code=x.code||"";if(code){const p=parseCode(code);if(p){l=lookup(p);code=l?l.code:labelText(p)}}
-      if(!l&&typeof x.lat==="number"){const G=lightGrid();const me=G.toXY({lat:x.lat,lng:x.lng});const nb=G.near(me.x,me.y,40).filter(o=>!o.it.l.removed).sort((a,b)=>a.d-b.d)[0];if(nb&&!code){l=nb.it.l}}
+      const hasLightId=typeof x.lightId==="string"&&x.lightId.length>0;
+      let l=hasLightId?byId(x.lightId):null,code=x.code||"";if(l)code=l.code;else if(!hasLightId&&code){const p=parseCode(code);if(p){l=lookup(p);code=l?l.code:labelText(p)}}
+      if(!hasLightId&&!l&&typeof x.lat==="number"){const G=lightGrid();const me=G.toXY({lat:x.lat,lng:x.lng});const nb=G.near(me.x,me.y,40).filter(o=>!o.it.l.removed).sort((a,b)=>a.d-b.d)[0];if(nb&&!code){l=nb.it.l}}
       const rec={issue:x.issue||"기타",location:[x.desc?"":"",typeof x.lat==="number"?`${x.lat}, ${x.lng} (±${x.acc||"?"}m)`:""].filter(Boolean).join(" "),dong:l?l.dong:"",code,lightId:l?l.id:null,desc:(x.desc||"").slice(0,1000),via:"QR 신고 페이지",receipt:x.receipt||"",contact:x.contact||"",photo:x.photo||null,lat:x.lat??null,lng:x.lng??null,status:"접수",createdAt:x.at||Date.now(),importedAt:Date.now(),ext:d.id,reporterId:null};
       await db.collection("reports").add(rec);
       try{await d.ref.update({imported:true,importedAt:Date.now(),contact:firebase.firestore.FieldValue.delete(),photo:firebase.firestore.FieldValue.delete()})}catch(e){}
@@ -1354,7 +1421,9 @@ async function importCitizenReports(){
 }
 async function addInboxReport(btn){
   const issue=(document.querySelector("#ibIssue button[aria-pressed='true']")||{}).dataset?.ibissue||"기타";
-  const num=$("#ibNum").value.trim();let l=null,code="";if(num){const p=parseCode(num);if(p){l=lookup(p);code=l?l.code:labelText(p)}else code=num}
+  const input=$("#ibNum"),num=input.value.trim();let l=null,code=num;
+  if(num){if(input.dataset.lightId&&input.dataset.lightCode===num){l=byId(input.dataset.lightId);if(l)code=l.code}
+    else{const p=parseCode(num);if(p){l=lookup(p);code=l?l.code:labelText(p)}}}
   const loc=$("#ibLoc").value.trim(),desc=$("#ibDesc").value.trim();
   if(!code&&!loc){toast("등 번호나 위치 설명 중 하나는 적어 주세요.");return}
   const rec={issue,location:loc.slice(0,200),dong:l?l.dong:"",code,lightId:l?l.id:null,desc:desc.slice(0,1000),via:$("#ibVia").value,receipt:$("#ibRc").value.trim().slice(0,20),contact:$("#ibContact").value.trim().slice(0,40),status:"접수",createdAt:Date.now(),reporterId:S.me||null};
@@ -1370,7 +1439,7 @@ async function exportReportsCSV(){
 }
 /* ---------- QR labels: one QR per plate, pointing at the public report page with the plate number ---------- */
 const QR={dong:"전체",kind:"전체",q:"",size:"m"};
-function qrUrl(l){return `${REPORT_URL}?c=${encodeURIComponent(l.code)}`}
+function qrUrl(l){return `${REPORT_URL}?c=${encodeURIComponent(l.code)}&lid=${encodeURIComponent(l.id)}`}
 function qrSvg(text,px){try{const q=qrcode(0,"M");q.addData(text);q.make();return q.createSvgTag({cellSize:Math.max(1,Math.floor(px/q.getModuleCount())),margin:0,scalable:true})}catch(e){return ""}}
 function qrSection(){
   if(typeof qrcode!=="function")return `<div class="empty">QR 생성 라이브러리를 불러오지 못했어요. 네트워크를 확인하고 다시 열어 주세요.</div>`;
@@ -1435,22 +1504,28 @@ async function repLoad(){if(REP.loading||!db)return;REP.loading=true;REP.err="";
   try{const snap=await db.collection("inspections").orderBy("date","desc").limit(1000).get();REP.data={insp:snap.docs.map(d=>({id:d.id,...d.data()})),at:Date.now()}}catch(e){REP.err="점검 기록을 불러오지 못했어요."}
   REP.loading=false;render();resolveNames();}
 function repMonthKey(t){const d=new Date(t);return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}`}
-function reportSection(){
-  if(!REP.data&&!REP.loading&&!REP.err)setTimeout(repLoad,0);
+// One selection drives the on-screen report, shared summary and CSV.
+function reportData(){
   const {a,b}=repRange();const inD=l=>!!l&&inDong(l,REP.dong);
   const lights=S.lights.filter(l=>!l.removed&&inD(l));
-  const ins=(REP.data?REP.data.insp:S.insp).filter(i=>i.date>=a&&i.date<=b&&inD(byId(i.lightId)||{dong:i.dong}));
-  const cnt=r=>ins.filter(i=>i.result===r).length;
+  const all=(REP.data?REP.data.insp:S.insp).filter(i=>inD(byId(i.lightId)||{dong:i.dong}));
+  const ins=all.filter(i=>i.date>=a&&i.date<=b);
   const open=lights.filter(l=>l.status!=="정상");
-  const pats=S.patrols.filter(p=>p.start>=a&&p.start<=b&&(REP.dong==="전체"||p.dong===REP.dong||p.dong==="전체"));
+  const pats=S.patrols.filter(p=>p.start>=a&&p.start<=b&&(REP.dong==="전체"||p.dong===REP.dong||[...(p.passed||[]),...(p.marks||[]).map(m=>m.id)].some(id=>inD(byId(id)))));
   const pend=S.lights.filter(l=>l.reg&&l.foundAt>=a&&l.foundAt<=b&&inD(l));
   const edits=S.lights.flatMap(l=>(l.edits||[]).filter(e=>e.at>=a&&e.at<=b&&!e.undone&&inD(l)).map(e=>({l,e})));
-  const aKeys=[...new Set(S.lights.filter(l=>!l.removed).map(adongOf).filter(Boolean))].sort((x,y)=>adongOrder(x)-adongOrder(y));
-  const byDong=aKeys.map(d=>{const ls=S.lights.filter(l=>!l.removed&&adongOf(l)===d);if(!ls.length)return null;const ii=ins.filter(i=>adongOf(byId(i.lightId))===d);return{d,n:ls.length,insp:ii.length,bad:ii.filter(i=>i.result==="고장").length,open:ls.filter(l=>l.status!=="정상").length}}).filter(Boolean).filter(r=>REP.dong==="전체"||!!S.lights.find(l=>adongOf(l)===r.d&&inDong(l,REP.dong))).sort((x,y)=>y.insp-x.insp||y.n-x.n);
-  const byWho=[...new Set(ins.map(i=>i.inspector).filter(Boolean))].map(w=>{const ii=ins.filter(i=>i.inspector===w);return{w,n:ii.length,bad:ii.filter(i=>i.result!=="정상").length,ph:ii.reduce((s,i)=>s+(i.photoN||(i.photo?1:0)),0),pt:ii.filter(i=>i.patrol).length}}).sort((x,y)=>y.n-x.n);
+  const aKeys=[...new Set(lights.map(adongOf).filter(Boolean))].sort((x,y)=>adongOrder(x)-adongOrder(y));
+  const byDong=aKeys.map(d=>{const ls=lights.filter(l=>adongOf(l)===d),ii=ins.filter(i=>adongOf(byId(i.lightId)||{dong:i.dong})===d);return{d,n:ls.length,insp:ii.length,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length,open:ls.filter(l=>l.status!=="정상").length}}).sort((x,y)=>y.insp-x.insp||y.n-x.n);
+  const byWho=[...new Set(ins.map(i=>i.inspector).filter(Boolean))].map(w=>{const ii=ins.filter(i=>i.inspector===w);return{w,n:ii.length,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,fault:ii.filter(i=>i.result==="고장").length,bad:ii.filter(i=>i.result!=="정상").length,ph:ii.reduce((s,i)=>s+(i.photoN||(i.photo?1:0)),0),pt:ii.filter(i=>i.patrol).length}}).sort((x,y)=>y.n-x.n);
+  return{a,b,lights,ins,all,open,pats,pend,edits,byDong,byWho};
+}
+function reportSection(){
+  if(!REP.data&&!REP.loading&&!REP.err)setTimeout(repLoad,0);
+  const {a,b,lights,ins,all,open,pats,pend,edits,byDong,byWho}=reportData();
+  const cnt=r=>ins.filter(i=>i.result===r).length;
   const faults={};ins.forEach(i=>(i.faults||[]).forEach(f=>faults[f]=(faults[f]||0)+1));const faultTop=Object.entries(faults).sort((x,y)=>y[1]-x[1]).slice(0,6);
   // 6-month trend from everything loaded (not just the period)
-  const all=(REP.data?REP.data.insp:S.insp).filter(i=>inD(byId(i.lightId)||{dong:i.dong}));const months=[];for(let k=5;k>=0;k--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-k);months.push(repMonthKey(d.getTime()))}
+  const months=[];for(let k=5;k>=0;k--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-k);months.push(repMonthKey(d.getTime()))}
   const trend=months.map(m=>{const ii=all.filter(i=>repMonthKey(i.date)===m);return{m,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length}});const tmax=Math.max(1,...trend.map(t=>t.ok+t.warn+t.bad));
   const found=ins.filter(i=>i.result!=="정상").slice(0,100);
   const title=`${dongLabel(REP.dong)} 가로등·보안등 점검 보고서`;
@@ -1508,13 +1583,13 @@ async function printSheet(btn){
   if(btn){btn.disabled=false;btn.textContent=t0}
   window.print();
 }
-function repSummaryText(){const {a,b}=repRange();const ins=(REP.data?REP.data.insp:S.insp).filter(i=>i.date>=a&&i.date<=b);const open=S.lights.filter(l=>!l.removed&&l.status!=="정상"&&inDong(l,REP.dong));
-  return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${fmtD(a)}~${fmtD(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${S.patrols.filter(p=>p.start>=a&&p.start<=b).length}회`}
+function repSummaryText(){const {a,b,ins,open,pats}=reportData();
+  return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${fmtD(a)}~${fmtD(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${pats.length}회`}
 async function exportReportCSV(){
-  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;const {a,b}=repRange();const ins=(REP.data?REP.data.insp:S.insp).filter(i=>i.date>=a&&i.date<=b);
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;const {a,b,byDong,byWho}=reportData();
   const rows=[["구분","항목","등 수","점검","정상","점검필요","고장","현재 조치 필요"]];
-  for(const d of [...new Set(S.lights.map(adongOf).filter(Boolean))]){const ls=S.lights.filter(l=>!l.removed&&adongOf(l)===d);if(!ls.length)continue;const ii=ins.filter(i=>adongOf(byId(i.lightId))===d);rows.push(["행정동",d,ls.length,ii.length,ii.filter(i=>i.result==="정상").length,ii.filter(i=>i.result==="점검필요").length,ii.filter(i=>i.result==="고장").length,ls.filter(l=>l.status!=="정상").length])}
-  for(const w of [...new Set(ins.map(i=>i.inspector).filter(Boolean))]){const ii=ins.filter(i=>i.inspector===w);rows.push(["점검자",S.names[w]||w,"",ii.length,ii.filter(i=>i.result==="정상").length,ii.filter(i=>i.result==="점검필요").length,ii.filter(i=>i.result==="고장").length,""])}
+  for(const r of byDong)rows.push(["행정동",r.d,r.n,r.insp,r.ok,r.warn,r.bad,r.open]);
+  for(const r of byWho)rows.push(["점검자",S.names[r.w]||r.w,"",r.n,r.ok,r.warn,r.fault,""]);
   const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
   try{await dl.save({filename:`동구가로등_보고서_${fmtD(a).replace(/\./g,"")}-${fmtD(b).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
 }
@@ -1633,11 +1708,11 @@ function thumbOf(src,max,q){const w=src.width||src.naturalWidth,h=src.height||sr
 function loadImg(url){return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error("img"));i.src=url})}
 async function makeRep(file){const img=await decodeFile(file);const w=img.width||img.naturalWidth,h=img.height||img.naturalHeight;const data=thumbOf(img,1000,.7);if(img.close)img.close();const r=Math.min(1,1000/Math.max(w,h));return{data,w:Math.round(w*r),h:Math.round(h*r)}}
 // the light-record patch for a new slot map: primary = first filled slot in 전경·표찰·주변 order, its thumb regenerated
-async function repPatchFor(reps){
+async function repPatchFor(reps,pending={}){
   const prim=REP_SLOTS.map(k=>reps[k]).find(x=>x&&x.id);
   const patch={reps:Object.fromEntries(REP_SLOTS.filter(k=>reps[k]&&reps[k].id).map(k=>[k,{id:reps[k].id,at:reps[k].at||null,by:reps[k].by||null}])),updatedAt:Date.now()};
   if(!prim){Object.assign(patch,{photoId:null,photoT:null,photoAt:null,photoBy:null});return patch}
-  const r=await getPhoto(prim.id);let t=null;if(r)try{t=thumbOf(await loadImg(r.data),112,.55)}catch(e){}
+  const r=pending[prim.id]||await getPhoto(prim.id);let t=null;if(r)try{t=thumbOf(await loadImg(r.data),112,.55)}catch(e){}
   Object.assign(patch,{photoId:prim.id,photoT:t,photoAt:prim.at||null,photoBy:prim.by||null});return patch;
 }
 async function setRepPhoto(id,file,slot){
@@ -1818,7 +1893,7 @@ let leMap=null,leMarker=null;
 function leMoveMarker(){const la=+$("#leLat").value,ln=+$("#leLng").value;if(!leMap||!leMarker||!la||!ln)return;leMarker.setLatLng([la,ln]);leMap.panTo([la,ln])}
 function openLightEdit(id){
   const l=byId(id);if(!l)return;
-  const sel=(id,opts,cur)=>`<select class="f-in" id="${id}">${[...opts,...(cur&&!opts.includes(cur)?[cur]:[]),""].map(o=>`<option value="${esc(o)}" ${o===(cur||"")?"selected":""}>${o||"(없음)"}</option>`).join("")}</select>`;
+  const sel=(id,opts,cur)=>`<select class="f-in" id="${id}">${[...opts,...(cur&&!opts.includes(cur)?[cur]:[]),""].map(o=>`<option value="${esc(o)}" ${o===(cur||"")?"selected":""}>${esc(o||"(없음)")}</option>`).join("")}</select>`;
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">등 정보 수정 <span class="muted">${esc(l.code)}</span></h3><div class="muted">대장 원본은 그대로 두고 바뀐 값만 기록해요. 누가 언제 무엇을 바꿨는지 이력이 남아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="grid2"><div><label class="f" for="leLamp">광원</label>${sel("leLamp",LAMP_OPTS,l.lampType)}</div><div><label class="f" for="lePole">등주</label>${sel("lePole",POLE_OPTS,l.pole)}</div></div>
     <div class="grid2"><div><label class="f" for="leSw">점멸기</label>${sel("leSw",SW_OPTS,l.sw)}</div><div><label class="f" for="lePoleNo">전주번호</label><input class="f-in" id="lePoleNo" value="${esc(l.poleNo||"")}" placeholder="예: 9792C742"></div></div>
@@ -1838,7 +1913,7 @@ function openLightEdit(id){
   const ll=typeof l.lat==="number"?[l.lat,l.lng]:(S.pos?[S.pos.lat,S.pos.lng]:[35.146,126.923]);
   leMap=L.map("leMapBox",{zoomControl:false,attributionControl:true,tap:true}).setView(ll,18);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(leMap);
-  for(const o of S.lights)if(o!==l&&typeof o.lat==="number"&&distM(l.lat?l:{lat:ll[0],lng:ll[1]},o)<120)L.circleMarker([o.lat,o.lng],{radius:5,color:"#fff",weight:1.5,fillColor:KIND_COL[o.kind]||"#888",fillOpacity:.9}).bindTooltip(o.code).addTo(leMap);
+  for(const o of S.lights)if(o!==l&&typeof o.lat==="number"&&distM(l.lat?l:{lat:ll[0],lng:ll[1]},o)<120)L.circleMarker([o.lat,o.lng],{radius:5,color:"#fff",weight:1.5,fillColor:KIND_COL[o.kind]||"#888",fillOpacity:.9}).bindTooltip(esc(o.code)).addTo(leMap);
   leMarker=L.marker(ll,{draggable:true,autoPan:true,icon:L.divIcon({className:"lepin",html:'<div class="lepin-dot"></div>',iconSize:[30,30],iconAnchor:[15,15]})}).addTo(leMap);
   leMarker.on("dragend",()=>{const q=leMarker.getLatLng();$("#leLat").value=q.lat.toFixed(6);$("#leLng").value=q.lng.toFixed(6);$("#leAcc").textContent="지도에서 옮김"});
   setTimeout(()=>leMap&&leMap.invalidateSize(),250);
@@ -2270,6 +2345,7 @@ function mapLocate(){if(ME.follow&&ME.pos){ME.follow=false;const b=$("#mapLoc");
 /* ---------- AR finder: lights around you, over the camera view ---------- */
 const AR_FOV=62,AR_RANGES=[50,100,200,500];
 let ar={on:false,stream:null,pos:null,acc:null,heading:null,raw:null,offset:0,pitch:90,watch:null,lastDraw:0,range:200,onlyOpen:false,kind:"전체",courseDiff:null,lastEvt:0,target:null,compassOk:null,gpsHeading:null,arrived:false};
+function stopMediaStream(stream){if(stream)stream.getTracks().forEach(t=>t.stop())}
 const toRad=d=>d*Math.PI/180;
 function distM(a,b){const R=6371000,dLat=toRad(b.lat-a.lat),dLng=toRad(b.lng-a.lng),s=Math.sin(dLat/2)**2+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.sqrt(s))}
 function bearing(a,b){const y=Math.sin(toRad(b.lng-a.lng))*Math.cos(toRad(b.lat)),x=Math.cos(toRad(a.lat))*Math.sin(toRad(b.lat))-Math.sin(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.cos(toRad(b.lng-a.lng));return (Math.atan2(y,x)*180/Math.PI+360)%360}
@@ -2283,9 +2359,19 @@ function ptIndex(){PT_LAST={};for(const p of S.patrols.slice().reverse()){for(co
 const pt={on:false,watch:null,track:[],passed:new Map(),marks:[],spots:[],start:0,dist:0,pos:null,heading:null,speed:0,last:null,voice:false,wake:null,sel:null,ahead:[],paused:false,spoken:new Set(),key:"",dong:"전체",total:0,rec:null,listen:false,acc:null};
 const PT_DAYS=30; // a light counts as "patrolled" if a car passed it within this many days
 function ptHide(){const f=$("#ptFull");if(f&&!f.hidden){f.hidden=true;f.innerHTML="";if(!$("#sheet").classList.contains("open"))document.body.style.overflow=""}if(pt.hist){pt.hist=false;try{history.back()}catch(e){}}}
-function ptReset(){ptHide();if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;ptListen(false);if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;pt.cam=null;pt.view="none";if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}pt.track=[];pt.passed=new Map();pt.marks=[];pt.spots=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key="";pt.total=0;pt.acc=null}
+function ptReset(){ptHide();if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;ptListen(false);ptStopCam();pt.cam=null;pt.view="none";if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;ptWakeRelease();pt.track=[];pt.passed=new Map();pt.marks=[];pt.spots=[];pt.dist=0;pt.pos=null;pt.heading=null;pt.last=null;pt.sel=null;pt.ahead=[];pt.paused=false;pt.spoken=new Set();pt.key="";pt.total=0;pt.acc=null}
 function ptWatch(){if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=navigator.geolocation.watchPosition(ptPos,()=>{const a=$("#ptAhead");if(a)a.innerHTML=`<div class="empty">위치 권한이 없어요. 설정에서 허용해 주세요.</div>`},{enableHighAccuracy:true,maximumAge:0,timeout:20000})}
-document.addEventListener("visibilitychange",()=>{if(pt.on&&document.visibilityState==="visible"){ptWatch();if(navigator.wakeLock&&!pt.wake)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});if(pt.listen)ptListen(true)}});
+async function ptWakeAcquire(){
+  if(!pt.on||document.visibilityState!=="visible"||!navigator.wakeLock||pt.wakePending||(pt.wake&&!pt.wake.released))return;
+  const run=pt.wakeRun||0;pt.wakePending=true;
+  try{
+    const wake=await navigator.wakeLock.request("screen");
+    if(!pt.on||document.visibilityState!=="visible"||(pt.wakeRun||0)!==run){await wake.release();return}
+    pt.wake=wake;wake.addEventListener("release",()=>{if(pt.wake===wake)pt.wake=null});
+  }catch(e){}finally{if((pt.wakeRun||0)===run)pt.wakePending=false}
+}
+function ptWakeRelease(){pt.wakeRun=(pt.wakeRun||0)+1;pt.wakePending=false;const wake=pt.wake;pt.wake=null;if(wake)try{Promise.resolve(wake.release()).catch(()=>{})}catch(e){}}
+document.addEventListener("visibilitychange",()=>{if(!pt.on)return;if(document.visibilityState==="visible"){ptWatch();ptWakeAcquire();if(pt.listen)ptListen(true)}else ptWakeRelease()});
 /* voice commands (Chrome/Android; Safari partial): 꺼짐·고장 / 깜빡·어두 / 켜져·정상 / 취소 / 여기 */
 function ptListen(on){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -2330,7 +2416,7 @@ function openPatrol(dong){
   toast("운전자는 조작하지 마세요. 동승자가 보면서 꺼진 등을 누르세요.");
   if(!navigator.geolocation){$("#ptAhead").innerHTML=`<div class="empty">이 기기는 위치를 쓸 수 없어요.</div>`;return}
   ptWatch();
-  if(navigator.wakeLock)navigator.wakeLock.request("screen").then(w=>pt.wake=w).catch(()=>{});
+  ptWakeAcquire();
 }
 function ptPos(p){
   if(!pt.on)return;
@@ -2418,7 +2504,7 @@ function ptMapDraw(force){
   if(pt.track.length>1)pt.mapTrack.setLatLngs(pt.track.slice(-600));
   // nearby lights: refreshed when the car has moved 80 m from the last refresh
   if(force||!pt.mapCenter||distM(pt.mapCenter,pt.pos)>80){pt.mapCenter={lat:pt.pos.lat,lng:pt.pos.lng};pt.mapLights.clearLayers();const G=lightGrid();const me=G.toXY(pt.pos);
-    for(const {it} of G.near(me.x,me.y,320)){const l=it.l;if(l.removed)continue;const m=L.circleMarker([l.lat,l.lng],{radius:l.status==="정상"?5:7,color:KIND_COL[l.kind]||"#fff",weight:2,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});m.bindTooltip(l.code);m.addTo(pt.mapLights)}}
+    for(const {it} of G.near(me.x,me.y,320)){const l=it.l;if(l.removed)continue;const m=L.circleMarker([l.lat,l.lng],{radius:l.status==="정상"?5:7,color:KIND_COL[l.kind]||"#fff",weight:2,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});m.bindTooltip(esc(l.code));m.addTo(pt.mapLights)}}
   const key=[...pt.passed.keys()].length+"|"+pt.marks.map(m=>m.id+m.result).join(",")+"|"+pt.spots.length+"|"+(pt.sel||"")+"|"+pt.ahead.map(a=>a.l.id).join(",");
   if(force||key!==pt.mapKey){pt.mapKey=key;pt.mapMarks.clearLayers();
     const marked=new Map(pt.marks.map(m=>[m.id,m.result]));
@@ -2429,12 +2515,19 @@ function ptMapDraw(force){
     pt.ahead.forEach((a,i)=>{const l=a.l;if(typeof l.lat!=="number")return;const m=L.marker([l.lat,l.lng],{icon:L.divIcon({className:"ptmapnum "+(fid===l.id?"sel":""),html:`<div>${i+1}</div>`,iconSize:[26,26],iconAnchor:[13,13]}),zIndexOffset:500});m.on("click",()=>{pt.sel=pt.sel===l.id?null:l.id;ptDraw(true)});m.addTo(pt.mapMarks)});
   }
 }
+function ptStopCam(){pt.camRun=(pt.camRun||0)+1;stopMediaStream(pt.stream);pt.stream=null;pt.camOn=false;const v=$("#ptCam");if(v)v.srcObject=null}
 async function ptCam(on){
+  ptStopCam();
   const wrap=$("#ptCamWrap"),v=$("#ptCam"),b=$("#ptCamBtn");if(!wrap)return;
-  if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}
-  pt.camOn=!!on;if(b)b.setAttribute("aria-pressed",pt.camOn);wrap.hidden=!pt.camOn;pt.camKeys=null;
+  pt.camOn=!!on&&pt.on&&!!v;if(b)b.setAttribute("aria-pressed",pt.camOn);wrap.hidden=!pt.camOn;pt.camKeys=null;
   if(!pt.camOn)return;
-  try{pt.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});v.srcObject=pt.stream;await v.play();wrap.classList.remove("nocam")}catch(e){wrap.classList.add("nocam")}
+  const run=pt.camRun,current=()=>pt.on&&pt.camOn&&pt.camRun===run&&$("#ptCam")===v;
+  let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
+    if(!current()){stopMediaStream(stream);return}pt.stream=stream;v.srcObject=stream;await v.play();
+    if(!current()){stopMediaStream(stream);return}wrap.classList.remove("nocam");
+  }catch(e){stopMediaStream(stream);if(!current())return;if(pt.stream===stream)pt.stream=null;v.srcObject=null;wrap.classList.add("nocam")}
   ptCamDraw();
 }
 function ptCamDraw(){
@@ -2464,8 +2557,8 @@ function ptSpot(){
 const fmtT=t=>{const d=new Date(t);return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`};
 function ptFinish(){
   pt.hist=false;ptHide();
-  if(pt.stream){pt.stream.getTracks().forEach(t=>t.stop());pt.stream=null}pt.camOn=false;if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;
-  if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;pt.end=Date.now();if(pt.wake){try{pt.wake.release()}catch(e){}pt.wake=null}
+  ptStopCam();if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;
+  if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;pt.end=Date.now();ptListen(false);ptWakeRelease();
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">순찰 결과</h3><div class="muted">표시한 등을 확인하고 저장하세요. 저장하면 표시한 등은 점검 기록·상태가 바뀌고, 지나간 등은 "순찰 통과(점등 확인)"로 남아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div><div id="ptSumm"></div>`);
   ptSummary();
 }
@@ -2528,7 +2621,7 @@ function openPatrolMap(id){
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(gmap);
   gmapLayer=L.layerGroup().addTo(gmap);gmapPts=[];meStop();setTimeout(()=>{if(gmap&&$("#mapLoc"))meStart(false)},300);
   const line=L.polyline(p.track,{color:"#2F5DA8",weight:5,opacity:.8}).addTo(gmapLayer);
-  for(const id of passed){const l=byId(id);if(l&&typeof l.lat==="number"&&!marks.some(m=>m.id===id))L.circleMarker([l.lat,l.lng],{radius:4,color:"#fff",weight:1,fillColor:"#2E8B57",fillOpacity:.9}).bindTooltip(l.code).addTo(gmapLayer)}
+  for(const id of passed){const l=byId(id);if(l&&typeof l.lat==="number"&&!marks.some(m=>m.id===id))L.circleMarker([l.lat,l.lng],{radius:4,color:"#fff",weight:1,fillColor:"#2E8B57",fillOpacity:.9}).bindTooltip(esc(l.code)).addTo(gmapLayer)}
   for(const sp of (p.spots||[]))L.circleMarker([sp.lat,sp.lng],{radius:8,color:"#fff",weight:2,fillColor:"#5B4B9E",fillOpacity:1}).bindPopup(`<b>어두운 지점</b><br>${sp.lat.toFixed(5)}, ${sp.lng.toFixed(5)}${sp.near?"<br>"+esc(sp.near)+" 근처":""}`).addTo(gmapLayer);
   for(const m of marks){const l=byId(m.id);if(l&&typeof l.lat==="number")L.circleMarker([l.lat,l.lng],{radius:8,color:"#fff",weight:2,fillColor:m.result==="고장"?"#C2372B":m.result==="정상"?"#2E8B57":"#E89A0C",fillOpacity:1}).bindPopup(`<b>${esc(l.code)}</b> ${esc(m.result)}<br><button class="btn sm" style="margin-top:6px" data-light="${esc(l.id)}">열기</button>`).addTo(gmapLayer)}
   gmap.fitBounds(line.getBounds().pad(.1));
@@ -2553,17 +2646,23 @@ function openAR(){
 async function arStart(){
   arBindGuide();arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;ar.offset=0;ar.raw=null;ar.courseDiff=null;ar.lastEvt=0;ar.cacc=null;ar.badSince=0;ar.goodSince=0;ar.calMuted=0;
   clearInterval(ar.staleTimer);ar.staleTimer=setInterval(()=>{if(ar.on)arCalCheck()},2500);
-  const v=$("#arCam"),wrap=$("#arwrap");if(!v)return;
-  try{ar.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});v.srcObject=ar.stream;await v.play();wrap.classList.remove("nocam")}
-  catch(e){wrap.classList.add("nocam")}
+  const v=$("#arCam"),wrap=$("#arwrap");if(!v||!wrap){arStop();return}
+  const run=ar.run,current=()=>ar.on&&ar.run===run&&$("#arCam")===v;
+  let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
+    if(!current()){stopMediaStream(stream);return}ar.stream=stream;v.srcObject=stream;await v.play();
+    if(!current()){stopMediaStream(stream);return}wrap.classList.remove("nocam");
+  }catch(e){stopMediaStream(stream);if(!current())return;if(ar.stream===stream)ar.stream=null;v.srcObject=null;wrap.classList.add("nocam")}
   if(window.DeviceOrientationEvent){
     let ok=true;
     if(typeof DeviceOrientationEvent.requestPermission==="function"){try{ok=(await DeviceOrientationEvent.requestPermission())==="granted"}catch(e){ok=false}}
+    if(!current())return;
     if(ok){if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",onHeading);window.addEventListener("deviceorientation",onHeading)}
     else{const h=$("#arHead");if(h)h.textContent="나침반 권한 없음"}
   }
   if(!navigator.geolocation){const g=$("#arGps");if(g)g.textContent="위치 사용 불가";return}
-  ar.watch=navigator.geolocation.watchPosition(onPosition,()=>{const g=$("#arGps");if(g)g.textContent="위치 권한이 없어요";const l=$("#arList");if(l)l.innerHTML=`<div class="empty">위치 권한을 허용하면 가까운 등을 보여드려요.</div>`},
+  ar.watch=navigator.geolocation.watchPosition(p=>{if(current())onPosition(p)},()=>{if(!current())return;const g=$("#arGps");if(g)g.textContent="위치 권한이 없어요";const l=$("#arList");if(l)l.innerHTML=`<div class="empty">위치 권한을 허용하면 가까운 등을 보여드려요.</div>`},
   {enableHighAccuracy:true,maximumAge:2000,timeout:15000});
 }
 function onHeading(e){
@@ -2651,7 +2750,7 @@ function arDraw(){
   let er=layer.querySelector(".aredge.r");if(right){if(!er){er=document.createElement("button");er.className="aredge r";er.dataset.turn="r";layer.appendChild(er)}const t=`${right} ▶`;if(er.textContent!==t)er.textContent=t}else if(er)er.remove();
   if(radar)radar.innerHTML=`<i class="me"></i>`+near.map(({l,d,b})=>{const a=toRad(angDiff(H,b)-90),r=Math.min(d,ar.range)/ar.range*42;return`<i class="st-${esc(l.status)} ${ar.target===l.id?"tgt":""}" style="left:${(50+Math.cos(a)*r).toFixed(1)}%;top:${(50+Math.sin(a)*r).toFixed(1)}%"></i>`}).join("");
   if(guide){
-    if(!tgt&&ar.target){const l=byId(ar.target);const d=l&&ar.pos?distM(ar.pos,l):null;guide.hidden=false;guide.innerHTML=`<b>${esc(l?l.code:"")}</b> <span>${d!=null?Math.round(d)+"m":""} · 범위 밖이에요</span><button class="gx" data-ar-target="" aria-label="안내 해제">×</button>`}
+    if(!tgt&&ar.target){const l=byId(ar.target);const d=l&&ar.pos?distM(ar.pos,l):null;guide.hidden=false;guide.dataset.for="";guide.innerHTML=`<b>${esc(l?l.code:"")}</b> <span>${d!=null?Math.round(d)+"m":""} · 범위 밖이에요</span><button class="gx" data-ar-target="" aria-label="안내 해제">×</button>`}
     else if(tgt){const {l,d,b}=tgt;const diff=angDiff(H,b);const near8=d<=Math.max(8,(ar.acc||0)*.6);
       if(near8&&!ar.arrived){ar.arrived=true;if(navigator.vibrate)navigator.vibrate([60,40,60])}
       guide.hidden=false;const gc="arguide st-"+esc(l.status)+(near8?" here":"");if(guide.className!==gc)guide.className=gc;
@@ -2692,15 +2791,14 @@ function arSetTarget(id){const same=id&&ar.target===id;const had=!!ar.target;ar.
 function arBindGuide(){const g=$("#arGuide"),layer=$("#arLayer");if(g&&!g.dataset.bound){g.dataset.bound="1";g.addEventListener("click",e=>{const b=e.target.closest("[data-ar-target]");if(b&&b.dataset.arTarget===""){e.preventDefault();e.stopPropagation();arSetTarget("")}},true)}
   const wrap=$("#arwrap");if(wrap&&!wrap.dataset.bound){wrap.dataset.bound="1";wrap.addEventListener("click",e=>{if((e.target===wrap||e.target.id==="arCam"||e.target===layer)&&ar.target){arSetTarget("")}})}}
 function arStop(reset=true){
-  ar.on=false;clearInterval(ar.staleTimer);
-  if(ar.stream){ar.stream.getTracks().forEach(t=>t.stop());ar.stream=null}
+  ar.on=false;ar.run=(ar.run||0)+1;clearInterval(ar.staleTimer);
+  stopMediaStream(ar.stream);ar.stream=null;const v=$("#arCam");if(v)v.srcObject=null;
   if(ar.watch!=null){navigator.geolocation.clearWatch(ar.watch);ar.watch=null}
   window.removeEventListener("deviceorientation",onHeading);window.removeEventListener("deviceorientationabsolute",onHeading);
 }
 
 /* ---------- on-device OCR fallback (Tesseract.js) for plain hosting ---------- */
 let ocrWorker=null;const ocrWorkers={},ocrLoading={}; // ocrWorker: the kor+eng one (photo path); ocrWorkers.eng: digits only, ~2.5× faster, used by the live viewfinder
-function loadScript(src){return new Promise((res,rej)=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=()=>rej(new Error("load "+src));document.head.appendChild(s)})}
 async function getOcr(onProgress,langs="kor+eng"){
   if(ocrWorkers[langs])return ocrWorkers[langs];
   if(!ocrLoading[langs])ocrLoading[langs]=(async()=>{
@@ -2942,7 +3040,7 @@ function liveShow({num,kind,plate,cands,nearby}){
 function onLiveCand(id){
   const c=byId(id);if(!c)return;
   if(!c.num&&c.kind!=="가로등"){stopCam(false);if(scan.ctx==="report"||scan.ctx==="inbox"){toast("표찰 없는 등이에요. 등을 열어 확인하세요.")}openLight(c.id);return}
-  const code=c.kind==="가로등"?{kind:"가로등",road:c.road||"",main:c.main,sub:c.sub}:{kind:c.kind,dong:c.dong,num:c.num};
+  const code=plateRef(c);
   scan.found={code,kind:c.kind,how:"plate",raw:"",plate:live.snap&&live.box?cropTo(live.snap,live.box,480).toDataURL("image/jpeg",.7):null};
   stopCam(false);showScanResult(scan.found);
 }
@@ -2955,11 +3053,12 @@ async function liveDetail(){
   await readLabelPhoto(new File([blob],"plate.jpg",{type:"image/jpeg"}));
 }
 /* ---------- label scanner ---------- */
-let scan={ctx:null,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null,pos:null};
-function scanLocate(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(p=>{scan.pos={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy};if(scan.found&&!lookup(scan.found.code))showScanResult(scan.found)},()=>{},{enableHighAccuracy:true,maximumAge:15000,timeout:8000})}
+let scan={ctx:null,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null,pos:null,active:false};
+let scanCamRun=0;
+function scanLocate(){if(!navigator.geolocation)return;const session=scan,box=$("#scanResult");navigator.geolocation.getCurrentPosition(p=>{if(scan!==session||!session.active||$("#scanResult")!==box)return;scan.pos={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy};if(scan.found&&!lookup(scan.found.code))showScanResult(scan.found)},()=>{},{enableHighAccuracy:true,maximumAge:15000,timeout:8000})}
 let sampleNs=null;
 async function openScanner(ctx){
-  scan={ctx,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null};
+  stopCam(false);scan={ctx,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null,active:true};
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">표찰 스캔</h3><div class="muted">QR이나 표찰을 비추면 그 등이 화면 위에 바로 떠요. 표찰은 틀이 잡히면 자동으로 번호를 읽어요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div id="camPanel"><div class="panel" style="padding:0;overflow:hidden;position:relative;background:#000"><video id="cam" playsinline muted style="width:100%;max-height:52vh;display:block;object-fit:cover"></video>
       <canvas id="plateOv"></canvas><div class="reticle"></div><div id="camOv" class="ov"></div>
@@ -2979,14 +3078,17 @@ async function openScanner(ctx){
 async function startCam(){
   stopCam(false);scan.liveKey=null;const o=$("#camOv");if(o)o.className="ov";const lr=$("#liveRes");if(lr)lr.innerHTML="";
   {const cp=$("#camPanel"),st=$("#photoStage"),pk=$("#photoPick");if(cp)cp.hidden=false;if(st)st.hidden=true;if(pk)pk.hidden=false}
-  const v=$("#cam"),hint=$("#camHint");if(!v)return;
+  const v=$("#cam"),hint=$("#camHint");if(!v||!scan.active)return;
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){hint.textContent="이 기기에서는 카메라를 쓸 수 없어요. 아래에서 사진으로 읽어 주세요.";return}
+  const run=scanCamRun,session=scan,current=()=>scan===session&&session.active&&scanCamRun===run&&$("#cam")===v;
+  let stream;
   try{
-    scan.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1920}},audio:false});
-    v.srcObject=scan.stream;await v.play();hint.textContent=LIVE_AUTO?"QR이나 표찰을 비춰 주세요 · 표찰은 틀이 잡히면 자동으로 읽어요":"QR이나 표찰을 비춰 주세요 · 표찰이 잡히면 '읽기'를 눌러요";live={last:null,stable:0,cool:0,t:0,reading:false,key:null,snap:null,box:null};
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1920}},audio:false});
+    if(!current()){stopMediaStream(stream);return}session.stream=stream;v.srcObject=stream;await v.play();
+    if(!current()){stopMediaStream(stream);return}hint.textContent=LIVE_AUTO?"QR이나 표찰을 비춰 주세요 · 표찰은 틀이 잡히면 자동으로 읽어요":"QR이나 표찰을 비춰 주세요 · 표찰이 잡히면 '읽기'를 눌러요";live={last:null,stable:0,cool:0,t:0,reading:false,key:null,snap:null,box:null};
     const c=document.createElement("canvas"),g=c.getContext("2d",{willReadFrequently:true});
     const tick=()=>{
-      if(!scan.stream)return;
+      if(!current()||session.stream!==stream)return;
       if(v.readyState>=2&&window.jsQR){
         const s=Math.min(v.videoWidth,v.videoHeight,640);c.width=c.height=s;
         g.drawImage(v,(v.videoWidth-s)/2,(v.videoHeight-s)/2,s,s,0,0,s,s);
@@ -2997,17 +3099,18 @@ async function startCam(){
       scan.raf=requestAnimationFrame(tick);
     };
     scan.raf=requestAnimationFrame(tick);
-  }catch(e){hint.textContent="카메라 권한이 없어요. 아래에서 사진으로 읽어 주세요."}
+  }catch(e){stopMediaStream(stream);if(!current())return;if(session.stream===stream)session.stream=null;v.srcObject=null;hint.textContent="카메라 권한이 없어요. 아래에서 사진으로 읽어 주세요."}
 }
 function stopCam(updateHint=true){
+  scanCamRun++;
   cancelAnimationFrame(scan.raf);
-  if(scan.stream){scan.stream.getTracks().forEach(t=>t.stop());scan.stream=null}
+  stopMediaStream(scan.stream);scan.stream=null;
   const v=$("#cam");if(v)v.srcObject=null;
   const pc=$("#plateOv");if(pc)pc.getContext("2d").clearRect(0,0,pc.width,pc.height);
   const h=$("#camHint");if(h&&updateHint)h.textContent="카메라가 꺼져 있어요";
 }
 function onLive(text){
-  const p=parseCode(text);const key=p?labelText(p):"raw:"+text;
+  const p=parseCode(text);const key=p?`${p.lightId||""}:${labelText(p)}`:"raw:"+text;
   if(scan.liveKey===key)return;scan.liveKey=key;
   const ov=$("#camOv");if(!ov)return;
   const pole=parsePole(text);
@@ -3027,7 +3130,6 @@ function onLive(text){
 }
 function onDecoded(text,how){
   stopCam(false);
-  try{if(/^https?:\/\//i.test(text)){const u=new URL(text);const c=u.searchParams.get("c");if(c)text=c}}catch(e){}
   const p=parseCode(text),pole=parsePole(text);
   showScanResult({code:p,pole,raw:text,how});
 }
@@ -3092,7 +3194,7 @@ function applyScan(what){
     if(!rec.dong){const near=S.lights.filter(x=>typeof x.lat==="number").map(x=>({x,d:distM(scan.pos,x)})).sort((a,b)=>a.d-b.d)[0];if(near)rec.dong=near.x.dong}
     write(()=>db.doc("lights/"+id).set(rec),`${txt}을(를) 미등록으로 저장했어요. 관리 현황에서 확인하세요.`).then(ok=>{if(ok){closeSheet();S.tab="admin";render();openAdminSection("pend")}});return}
   stopCam(false);closeSheet();
-  if(what==="inbox"||scan.ctx==="inbox"){closeSheet();S.tab="admin";render();openAdminSection("inbox");const x=$("#ibNum");if(x)x.value=txt;toast(`${txt} 번호를 넣었어요.`);return}
+  if(what==="inbox"||scan.ctx==="inbox"){closeSheet();S.tab="admin";render();openAdminSection("inbox");const x=$("#ibNum");if(x){x.value=txt;x.dataset.lightId=p.lightId||(l&&l.id)||"";x.dataset.lightCode=txt.trim()}toast(`${txt} 번호를 넣었어요.`);return}
   if(what==="report"){S.tab="report";render();$("#rNum").value=p.kind==="가로등"?txt:p.num;if(p.dong)$("#rDong").value=p.dong;else if(l)$("#rDong").value=l.dong;$("#rLoc").focus();toast(`${txt} 번호를 넣었어요.`);return}
   if(what==="register"){S.tab="admin";render();openAdminSection("reg");const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
     $("#nNoPlate").checked=false;["nNum","nRoad"].forEach(x=>{const el=$("#"+x);if(el)el.disabled=false});
@@ -3168,7 +3270,7 @@ async function readLabelPhoto(file){
   }finally{scan.busy=false}
 }
 document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"||e.target.id==="scanPhotoLib"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
-const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;repConfirmClose();posCheckStop();stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){meStop();gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
+const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;repConfirmClose();posCheckStop();scan.active=false;stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){meStop();gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
 
 render();
 try{if(localStorage.getItem("dg-near")==="1"){S.near=false;nearToggle()}}catch(e){}

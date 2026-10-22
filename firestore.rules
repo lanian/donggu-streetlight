@@ -7,6 +7,57 @@ service cloud.firestore {
     function isAdmin(){ return myRole() == "admin"; }
     function isStaff(){ return myRole() == "admin" || myRole() == "inspector"; }
     function setupDone(){ return exists(/databases/$(db)/documents/meta/setup); }
+    function validStatus(value){ return value in ['정상','점검필요','고장','수리중']; }
+    function optionalText(data, key, max){ return data.get(key, '') is string && data.get(key, '').size() <= max; }
+
+    // 점검자는 상태·표찰·대표 사진과 좌표 제안만 바꿀 수 있다.
+    // 좌표 원본, 광원, 철거, 대장반영, 변경 이력 등은 관리자가 처리한다.
+    function lightFieldKeys(){
+      return ['status','lastInspected','lastResult','updatedAt','redoNote',
+        'code','kind','dong','num','road','main','sub','plateFixed','plateFixedAt',
+        'posSuggest','reps','photoId','photoT','photoAt','photoBy','photo'];
+    }
+    function validLightFields(data){
+      return (!('status' in data) || validStatus(data.status))
+        && (!('lastResult' in data) || data.lastResult == null || validStatus(data.lastResult))
+        && (!('code' in data) || optionalText(data, 'code', 200))
+        && (!('updatedAt' in data) || data.updatedAt is int)
+        && (!('lastInspected' in data) || data.lastInspected == null || data.lastInspected is int)
+        && (!('posSuggest' in data) || data.posSuggest == null || (data.posSuggest is map
+          && data.posSuggest.lat is number && data.posSuggest.lng is number));
+    }
+    function ownPositionSuggestion(data){
+      return data.get('posSuggest', null) is map
+        && data.posSuggest.by == request.auth.uid;
+    }
+    function newFieldLight(id, data){
+      // 배포 대장(p...)에 임의의 좌표·철거 정보를 생성하는 우회를 막는다.
+      return id.matches('(np|bd|gl)-.+')
+        && data.keys().hasOnly(['code','dong','kind','num','road','main','sub','poleNo',
+          'address','lampType','status','lastInspected','reg','noPlate','note',
+          'foundAt','foundBy','updatedAt','photo','lat','lng','acc'])
+        && data.reg == '미등록' && data.foundBy == request.auth.uid
+        && data.code is string && data.code.size() > 0 && data.code.size() <= 200
+        && data.foundAt is int && data.updatedAt is int
+        && data.status == '정상' && data.lastInspected == null
+        && (!('lat' in data) || (data.lat is number && data.lat >= -90 && data.lat <= 90))
+        && (!('lng' in data) || (data.lng is number && data.lng >= -180 && data.lng <= 180));
+    }
+    function inspectionFields(){
+      return ['lightId','code','dong','date','checks','faults','result','memo','inspector',
+        'tiltDeg','pos','posDist','photo','thumbs','photoN','patrol'];
+    }
+    function validInspection(data){
+      return data.keys().hasOnly(inspectionFields())
+        && data.inspector == request.auth.uid
+        && data.lightId is string && data.date is int
+        && data.checks is map && data.faults is list && validStatus(data.result);
+    }
+    function ownUnreviewedInspection(inspId, lightId){
+      let inspection = getAfter(/databases/$(db)/documents/inspections/$(inspId)).data;
+      return inspId is string && inspection.inspector == request.auth.uid
+        && inspection.lightId == lightId && inspection.get('reviewedAt', null) == null;
+    }
 
     // 처음 한 번: 아직 setup 문서가 없을 때 로그인한 사람이 자기 자신을 관리자로 등록할 수 있음 → 앱이 곧바로 meta/setup을 씀
     match /roles/{uid} {
@@ -19,32 +70,73 @@ service cloud.firestore {
     // 사용자 표시 이름: 본인만 쓰고, 직원은 읽음
     match /users/{uid} { allow read: if isStaff(); allow write: if signedIn() && request.auth.uid == uid; }
 
-    // 대장 덮어쓰기(상태·표찰·미등록·정보 수정): 직원 쓰기, 삭제·정보 수정 이력은 관리자
+    // 신규 대장 덮어쓰기에도 같은 필드 제한을 적용한다. delete/set로 이력을 지울 수 없다.
     match /lights/{id} {
       allow read: if isStaff();
-      allow create, update: if isStaff() && (!("edits" in request.resource.data) || isAdmin() || request.resource.data.edits == resource.data.edits);
+      allow create: if isAdmin() || (isStaff() && (
+        (request.resource.data.keys().hasOnly(lightFieldKeys()) && validLightFields(request.resource.data)
+          && request.resource.data.get('redoNote', null) == null
+          && request.resource.data.get('photo', null) == null
+          && (!('posSuggest' in request.resource.data) || ownPositionSuggestion(request.resource.data)))
+        || newFieldLight(id, request.resource.data)));
+      allow update: if isAdmin() || (isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(lightFieldKeys())
+        && validLightFields(request.resource.data)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['redoNote'])
+          || request.resource.data.get('redoNote', null) == null)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['photo'])
+          || request.resource.data.get('photo', null) == null)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['posSuggest'])
+          || ownPositionSuggestion(request.resource.data)));
       allow delete: if isAdmin();
     }
     match /inspections/{id} {
       allow read: if isStaff();
-      allow create: if isAdmin() || (isStaff() && request.resource.data.inspector == request.auth.uid);
-      allow update: if isAdmin() || (isStaff() && resource.data.inspector == request.auth.uid && !("reviewedAt" in request.resource.data.diff(resource.data).affectedKeys()));
+      // 검수·재점검 관리 필드는 점검자 생성 요청에도 넣을 수 없다.
+      allow create: if isAdmin() || (isStaff() && validInspection(request.resource.data));
+      // 저장된 점검은 불변. 통신 재시도의 완전히 동일한 쓰기만 허용한다.
+      allow update: if isAdmin() || (isStaff() && resource.data.inspector == request.auth.uid
+        && request.resource.data == resource.data);
       allow delete: if isAdmin();
     }
     match /reports/{id} { allow read, create: if isStaff(); allow update: if isAdmin(); allow delete: if isAdmin(); }
     match /patrols/{id} { allow read: if isStaff(); allow create: if isAdmin() || (isStaff() && request.resource.data.by == request.auth.uid); allow update, delete: if isAdmin(); }
-    match /photos/{id} { allow read, create: if isStaff(); allow update: if isStaff(); allow delete: if isAdmin(); }
+    match /photos/{id} {
+      allow read: if isStaff();
+      allow create: if isAdmin() || (isStaff()
+        && request.resource.data.keys().hasOnly(['lightId','code','dong','inspId','label','note','data','w','h','at','by','kind'])
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.lightId is string && request.resource.data.data is string
+        && request.resource.data.at is int
+        && (!('inspId' in request.resource.data)
+          || ownUnreviewedInspection(request.resource.data.inspId, request.resource.data.lightId)));
+      // 작성자도 증빙 사진 내용을 덮어쓸 수 없다. 구버전의 최초 점검 연결만 허용한다.
+      allow update: if isAdmin() || (isStaff() && resource.data.by == request.auth.uid && (
+        request.resource.data == resource.data
+        || (resource.data.get('inspId', null) == null
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['inspId'])
+          && ownUnreviewedInspection(request.resource.data.inspId, resource.data.lightId))));
+      allow delete: if isAdmin();
+    }
     match /roads/{id} { allow read: if isStaff(); allow write: if isAdmin(); }
 
     // ---- 주민 신고 페이지(report/): 누구나 새로 만들기만, 읽기·수정은 직원
     match /citizen_reports/{id} {
-      allow create: if request.resource.data.keys().hasOnly(['code','issue','desc','lat','lng','acc','photo','contact','consent','at','ua','receipt','imported'])
+      allow create: if request.resource.data.keys().hasOnly(['code','lightId','issue','desc','lat','lng','acc','photo','contact','consent','at','ua','receipt','imported'])
         && request.resource.data.imported == false
-        && request.resource.data.issue is string && request.resource.data.issue.size() <= 40
-        && request.resource.data.desc is string && request.resource.data.desc.size() <= 500
-        && (!('code' in request.resource.data) || request.resource.data.code.size() <= 40)
-        && (!('photo' in request.resource.data) || request.resource.data.photo.size() <= 220000)
-        && (!('contact' in request.resource.data) || request.resource.data.contact.size() <= 40)
+        && request.resource.data.issue is string && request.resource.data.issue.size() > 0 && request.resource.data.issue.size() <= 40
+        && optionalText(request.resource.data, 'desc', 500)
+        && optionalText(request.resource.data, 'code', 40)
+        && optionalText(request.resource.data, 'lightId', 120)
+        && optionalText(request.resource.data, 'photo', 220000)
+        && optionalText(request.resource.data, 'contact', 40)
+        && optionalText(request.resource.data, 'receipt', 40)
+        && optionalText(request.resource.data, 'ua', 80)
+        && request.resource.data.get('consent', false) is bool
+        && (request.resource.data.get('contact', '') == '' || request.resource.data.get('consent', false) == true)
+        && (!('lat' in request.resource.data) || (request.resource.data.lat is number && request.resource.data.lat >= -90 && request.resource.data.lat <= 90))
+        && (!('lng' in request.resource.data) || (request.resource.data.lng is number && request.resource.data.lng >= -180 && request.resource.data.lng <= 180))
+        && (!('acc' in request.resource.data) || (request.resource.data.acc is number && request.resource.data.acc >= 0))
         && request.resource.data.at is int;
       allow read, update, delete: if isStaff();
     }
