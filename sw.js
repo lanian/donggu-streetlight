@@ -1,10 +1,10 @@
 /* 동구 가로등 점검 — service worker
-   App shell is cached on install; index.html is served from cache and refreshed in the background;
+   App shell is cached on install; HTML/JS use a short network-first request with a cache fallback;
    map tiles and OCR assets are cached as they are used so a patrol in a known area works without signal. */
-const VERSION="v10";
+const VERSION="v11";
 const SHELL="dg-shell-"+VERSION, RUNTIME="dg-runtime-"+VERSION, TILES="dg-tiles-"+VERSION;
 const SHELL_FILES=["./","./index.html","./manifest.webmanifest","./firebase-config.js","./report/config.js","./data/lights.json","./seed/manifest.json","./vendor/jsQR.js","./vendor/leaflet.js","./vendor/qrcode.js","./icons/icon-192.png","./icons/icon-512.png","./icons/maskable-512.png","./icons/apple-touch-icon.png"];
-const TILE_MAX=600, RUNTIME_HOSTS=["cdn.jsdelivr.net","unpkg.com","cdnjs.cloudflare.com","fonts.googleapis.com","fonts.gstatic.com","tessdata.projectnaptha.com"];
+const TILE_MAX=600, RUNTIME_HOSTS=["cdn.jsdelivr.net","unpkg.com","cdnjs.cloudflare.com","fonts.googleapis.com","fonts.gstatic.com","www.gstatic.com","tessdata.projectnaptha.com"];
 
 self.addEventListener("install",e=>{e.waitUntil(caches.open(SHELL).then(c=>c.addAll(SHELL_FILES)).then(()=>self.skipWaiting()))});
 self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k.startsWith("dg-")&&![SHELL,RUNTIME,TILES].includes(k)).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
@@ -15,7 +15,7 @@ async function trim(name,max){const c=await caches.open(name);const keys=await c
 self.addEventListener("fetch",e=>{
   const req=e.request;if(req.method!=="GET")return;
   const url=new URL(req.url);
-  // app shell: stale-while-revalidate so a deploy shows up on the next open
+  // HTML/JS use network first; registry/images use stale-while-revalidate.
   if(url.origin===location.origin){
     const shellish=/\/$|\.html$|\.js$|\.webmanifest$/.test(url.pathname);
     e.respondWith(caches.open(SHELL).then(async c=>{

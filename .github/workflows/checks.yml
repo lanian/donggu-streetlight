@@ -1,0 +1,38 @@
+name: App and rules checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check source, registry, and regressions
+        run: node scripts/check.mjs
+
+  firestore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install isolated emulator test tools
+        run: npm install --prefix "$RUNNER_TEMP/donggu-tools" --no-audit --no-fund --ignore-scripts firebase-tools@15.34.1 @firebase/rules-unit-testing@3.0.3 firebase@10.12.2
+      - name: Verify access rules with an isolated demo project
+        env:
+          NODE_PATH: ${{ runner.temp }}/donggu-tools/node_modules
+        run: '"$RUNNER_TEMP/donggu-tools/node_modules/.bin/firebase" emulators:exec --only firestore --project demo-donggu-streetlight "node --test scripts/tests/firestore-rules.emulator.cjs"'
