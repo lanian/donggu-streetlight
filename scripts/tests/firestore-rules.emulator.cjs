@@ -31,6 +31,18 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
     reg: '미등록', foundAt: 1000, foundBy: 'inspector-a', updatedAt: 1000, lat: 35.15, lng: 126.92, ...extra
   });
   const citizen = (extra = {}) => ({ issue: '불이 꺼져 있어요', desc: '', imported: false, at: 1000, ...extra });
+  const lighting = (extra = {}) => ({ schemaVersion: 1, kind: 'source', label: '인접 공원 조명', category: 'other_public', operator: '다른 관리기관',
+    lat: 35.15, lng: 126.92, radius: 20, strength: 'medium', status: 'on', level: 'unknown', schedule: 'hours',
+    startMinute: 1080, endMinute: 360, observedAt: 1000, validDays: 90, nightConfirmed: true, lux: null, instrument: '',
+    note: '', linkedLightId: '', distinct: true, removed: false, createdAt: 1000, createdBy: 'inspector-a',
+    updatedAt: 1000, updatedBy: 'inspector-a', revision: 1, operationId: 'lighting-create', ...extra });
+  function lightingWrite(client, recordId, record, receiptPatch = {}) {
+    const receipt = { schemaVersion: 1, recordId, by: record.updatedBy, at: record.updatedAt, revision: record.revision, requestHash: 'a'.repeat(64), ...receiptPatch };
+    const batch = writeBatch(client);
+    batch.set(doc(client, 'lightingContext/' + recordId), record);
+    batch.set(doc(client, 'lightingOperations/' + record.operationId), receipt);
+    return batch.commit();
+  }
   async function seed(records) {
     await env.withSecurityRulesDisabled(async context => {
       const db = context.firestore();
@@ -320,6 +332,83 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       await assertSucceeds(setDoc(doc(admin(),'inventory/item'),stock));
       await assertFails(updateDoc(doc(admin(),'inventory/item'),{quantity:2}));
       await assertSucceeds(updateDoc(doc(admin(),'inventory/item'),{quantity:2,revision:2}));
+    });
+
+    test('lighting context and operation receipts are visible only to staff and require an atomic pair', async () => {
+      const db = staff(), record = lighting();
+      await assertFails(setDoc(doc(db, 'lightingContext/external'), record));
+      await assertFails(setDoc(doc(admin(), 'lightingContext/external'), lighting({ createdBy: 'admin', updatedBy: 'admin' })));
+      await assertSucceeds(lightingWrite(db, 'external', record));
+      await assertSucceeds(getDoc(doc(otherStaff(), 'lightingContext/external')));
+      for (const client of [anonymous(), env.authenticatedContext('outsider').firestore(), env.authenticatedContext('anonymous-user', { firebase: { sign_in_provider: 'anonymous' } }).firestore()]) {
+        await assertFails(getDoc(doc(client, 'lightingContext/external')));
+        await assertFails(getDoc(doc(client, 'lightingOperations/lighting-create')));
+        await assertFails(lightingWrite(client, 'new-record', lighting({ operationId: 'outsider-create' })));
+      }
+      for (const client of [db, admin()]) await assertFails(deleteDoc(doc(client, 'lightingContext/external')));
+    });
+
+    test('lighting edits require ownership or admin while preserving creation metadata and strict revisions', async () => {
+      await assertSucceeds(lightingWrite(staff(), 'external', lighting()));
+      const edited = lighting({ operationId: 'lighting-edit', updatedAt: 2000, revision: 2, label: '확인한 명칭' });
+      await assertFails(lightingWrite(otherStaff(), 'external', { ...edited, updatedBy: 'inspector-b' }));
+      await assertFails(lightingWrite(staff(), 'external', { ...edited, revision: 3 }));
+      await assertFails(lightingWrite(staff(), 'external', { ...edited, createdBy: 'inspector-b' }));
+      await assertFails(lightingWrite(admin(), 'external', { ...edited, updatedBy: 'admin', createdBy: 'admin' }));
+      await assertFails(lightingWrite(admin(), 'external', { ...edited, updatedBy: 'admin', createdAt: 500 }));
+      await assertSucceeds(lightingWrite(admin(), 'external', { ...edited, updatedBy: 'admin' }));
+      const removed = { ...edited, operationId: 'lighting-remove', updatedAt: 3000, revision: 3, removed: true };
+      await assertSucceeds(lightingWrite(staff(), 'external', removed));
+      assert.equal((await getDoc(doc(staff(), 'lightingContext/external'))).data().removed, true);
+      // Even byte-identical direct overwrites must not bypass the receipt/revision protocol.
+      await assertFails(setDoc(doc(staff(), 'lightingContext/external'), removed));
+    });
+
+    test('lighting schema bounds reject invalid coordinates, unchecked lux, future times and malformed schedules', async () => {
+      const invalid = [{ label: '' }, { category: 'not-a-category' }, { lat: NaN }, { lng: 181 }, { radius: 81 },
+        { kind: 'observation', radius: 31 }, { validDays: 0 }, { validDays: 366 }, { validDays: 1.5 },
+        { schedule: 'hours', startMinute: 0, endMinute: 0 }, { startMinute: 1440 }, { nightConfirmed: 'yes' },
+        { lux: 0, instrument: '' }, { lux: -1, instrument: '조도계' }, { lux: 200001, instrument: '조도계' },
+        { observedAt: 301001 }, { observedAt: Date.now() + 600000 }, { updatedAt: Date.now() + 600000 },
+        { note: 'x'.repeat(1001) }, { removed: true }, { unknownField: true }];
+      for (let i = 0; i < invalid.length; i++) await assertFails(lightingWrite(staff(), 'invalid-' + i, lighting({ ...invalid[i], operationId: 'invalid-operation-' + i })));
+      const zero = lighting({ kind: 'observation', category: 'field', lux: 0, instrument: '조도계', validDays: 30, operationId: 'zero-lux' });
+      await assertSucceeds(lightingWrite(staff(), 'measured-zero', zero));
+      await assertSucceeds(lightingWrite(staff(), 'unknown-hours', lighting({ schedule: 'unknown', startMinute: 0, endMinute: 0, operationId: 'unknown-hours' })));
+      for (const id of ['prototype', 'constructor']) await assertFails(lightingWrite(staff(), id, lighting({ operationId: 'reserved-' + id })));
+    });
+
+    test('lighting receipts cannot be detached, forged, edited, deleted or reused for another revision', async () => {
+      const db = staff(), record = lighting();
+      const receipt = { schemaVersion: 1, recordId: 'external', by: 'inspector-a', at: 1000, revision: 1, requestHash: 'a'.repeat(64) };
+      await assertFails(setDoc(doc(db, 'lightingOperations/detached'), receipt));
+      for (const invalid of [{ by: 'inspector-b' }, { revision: 2 }, { at: 999 }, { recordId: 'different' }, { requestHash: 'not-a-hash' }, { extra: true }]) await assertFails(lightingWrite(db, 'external', record, invalid));
+      await assertSucceeds(lightingWrite(db, 'external', record));
+      for (const client of [db, admin()]) {
+        await assertFails(updateDoc(doc(client, 'lightingOperations/lighting-create'), { requestHash: 'b'.repeat(64) }));
+        await assertFails(deleteDoc(doc(client, 'lightingOperations/lighting-create')));
+      }
+      await assertFails(lightingWrite(db, 'external', { ...record, revision: 2, updatedAt: 2000 }));
+      await assertFails(setDoc(doc(db, 'lightingOperations/detached'), { ...receipt, revision: 2 }));
+    });
+
+    test('actual lighting transactions deduplicate concurrent submissions and old retries after newer edits', async () => {
+      const commands = require('../../app/lighting-commands.js'), client = staff();
+      const adapter = { doc: key => doc(client, key), runTransaction: fn => runTransaction(client, fn) };
+      const context = { db: adapter, fb: adapter, user: 'inspector-a', admin: false };
+      const raw = lighting();
+      const first = { id: 'actual-create', recordId: 'actual-record', actor: 'inspector-a', at: 1000, expectedRevision: 0, data: raw };
+      const results = await Promise.all([commands.execute(first, context), commands.execute(first, context)]);
+      assert.equal(results.filter(result => result.alreadyApplied).length, 1);
+      const edited = { ...first, id: 'actual-edit', at: 2000, expectedRevision: 1, data: { ...raw, status: 'off' } };
+      await commands.execute(edited, context);
+      await commands.execute({ ...edited, id: 'actual-remove', at: 3000, expectedRevision: 2, data: { ...edited.data, removed: true } }, context);
+      assert.equal((await commands.execute(first, context)).alreadyApplied, true);
+      assert.equal((await commands.execute(edited, context)).alreadyApplied, true);
+      const latest = (await getDoc(doc(client, 'lightingContext/actual-record'))).data();
+      assert.equal(latest.removed, true); assert.equal(latest.status, 'off'); assert.equal(latest.revision, 3);
+      await assert.rejects(commands.execute({ ...edited, data: { ...raw, label: '다른 요청' } }, context), { code: 'conflict' });
+      await assert.rejects(commands.execute({ ...edited, id: 'stale-update' }, context), { code: 'conflict' });
     });
 
     test('users without staff roles cannot read or write staff records or self-assign a role after setup', async () => {

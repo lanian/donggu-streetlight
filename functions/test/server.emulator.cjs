@@ -67,4 +67,14 @@ if(!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||'')){
     for(const key of ['reports/private','citizen_reports/raw']){const value=(await db.doc(key).get()).data();assert.equal(value.contact,undefined);assert.equal(value.photo,undefined);assert.equal(value.lat,undefined);assert.ok(value.privacyPurgedAt);}
     assert.equal((await db.doc('staffInvites/expired').get()).exists,false);
   });
+  test('lighting context changes receive a server-owned audit without copying observation text or locations',async()=>{
+    const ref=db.doc('lightingContext/external');
+    await ref.set({kind:'observation',label:'현장 관찰',revision:1,status:'on',note:'private-observation-note',operator:'private-operator',lat:35.15,lng:126.92});
+    const event={id:'lighting-cloud-event',time:new Date().toISOString(),authId:'inspector',authType:'user',params:{collection:'lightingContext',id:'external'},data:{before:{exists:false},after:await ref.get()}};
+    await handlers.recordAudit.run(event);await handlers.recordAudit.run(event);
+    const logs=await db.collection('auditEvents').get();assert.equal(logs.size,1);
+    const value=logs.docs[0].data();assert.equal(value.by,'inspector');assert.equal(value.path,'lightingContext/external');assert.equal(value.after.revision,1);
+    assert.doesNotMatch(JSON.stringify(value),/private-observation-note|private-operator|35\.15|126\.92/);
+    assert.ok(value.changedFields.includes('note'));
+  });
 }

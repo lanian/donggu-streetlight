@@ -92,9 +92,11 @@ Firebase의 보수·재고·대장 갱신은 최신 상태를 확인하는 trans
 3. 기존 문서는 기본적으로 건너뜁니다. 필요한 경우에만 덮어쓰기와 사용자 역할 복원을 별도로 선택합니다. 계정 UID가 달라지면 역할을 새 계정에 맞춰 확인합니다.
 4. **검토한 내용 가져오기**를 실행합니다. 실패가 있으면 내려받은 실패 목록을 확인한 뒤 같은 파일로 다시 시도합니다.
 
-대상 컬렉션은 `lights`, `lightFields`, `inspections`, `reports`, `patrols`, `roles`, `photos`, `workOrders`, `workEvents`, `auditEvents`, `settings`, `inventory`, `inventoryMoves`입니다. 사진은 선택 사항입니다. 배포 대장, 도로 캐시, 초안·대기함, `users`, `meta`, 직원 신청·초대와 주민 접수 원본은 이 백업에 포함되지 않습니다.
+대상 컬렉션은 `lights`, `lightFields`, `inspections`, `reports`, `patrols`, `roles`, `photos`, `workOrders`, `workEvents`, `auditEvents`, `settings`, `inventory`, `inventoryMoves`, `lightingContext`, `lightingOperations`입니다. 사진은 선택 사항입니다. 배포 대장, 도로 캐시, 초안·대기함, `users`, `meta`, 직원 신청·초대와 주민 접수 원본은 이 백업에 포함되지 않습니다.
 
 Firebase 복원은 서버 감사 이력과 아티팩트 변경 로그를 제외하고, 로그를 합친 시설 상태를 사용합니다. 역할은 명시적으로 선택할 때만 복원합니다. 아티팩트에는 안전한 최초 생성 API가 없어 **기존 문서를 보호하는 무덮어쓰기 복원은 실행할 수 없습니다**. 덮어쓰기를 선택하면 기존 값이 교체되므로 대상 환경을 먼저 확인합니다.
+
+외부 광원·현장 관찰(`lightingContext`)은 기기 저장 또는 Firebase에서 현재 revision을 확인한 새 명령으로 복원합니다. 기존 문서의 생성자는 유지하고 새 문서는 복원한 계정으로 생성합니다. 동시에 다른 변경이 있으면 실패 목록에 남겨 최신 내용을 다시 확인합니다. 대상에 없는 제외 기록은 되살리지 않으며, 변경 불가 처리 영수증(`lightingOperations`)은 어느 모드에서도 직접 복원하지 않습니다. 새 복원 명령이 새 영수증을 만듭니다.
 
 백업은 여러 컬렉션을 순서대로 조회하며 전체 데이터베이스의 한 시점 스냅샷은 아닙니다. 복원도 문서별로 처리하므로 일부 성공 후 실패할 수 있습니다. 복원 파일에는 연락처·사진 등 운영 자료가 들어갈 수 있으며 서버의 보관 기간 정리 작업이 외부 파일까지 지우지는 않습니다.
 

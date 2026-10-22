@@ -24,7 +24,7 @@ window.DG_HAS_UNSAVED_WORK = async () => boolean;
 window.DG_HAS_UNSAVED_WORK_SYNC = () => boolean; // 선택: beforeunload용 메모리 상태
 ```
 
-비동기 콜백은 미동기화 작업(`DGOffline.jobs()`의 `state !== "synced"`)과 `draft`, `patrol`, `workDraft`, `workCompletion`의 저장 중인 내용을 포함해야 한다. 콜백 오류는 안전하게 업데이트 보류로 처리한다. 네이티브 페이지 종료 경고는 동기 상태만 확인할 수 있으므로 콜백을 생략하더라도 초안의 내구성 저장을 별도로 유지해야 한다.
+비동기 콜백은 미동기화 작업(`DGOffline.jobs()`의 `state !== "synced"`)과 `draft`, `patrol`, `workDraft`, `workCompletion`, `lightingDraft`의 저장 중인 내용을 포함해야 한다. 콜백 오류는 안전하게 업데이트 보류로 처리한다. 네이티브 페이지 종료 경고는 동기 상태만 확인할 수 있으므로 콜백을 생략하더라도 초안의 내구성 저장을 별도로 유지해야 한다.
 
 최종 릴리스에서 새로 추가하는 모든 필수 스크립트는 `sw.js`의 `SHELL_FILES`와 Pages 공개 파일 목록에 함께 추가한다. 한 파일이라도 없으면 설치가 완료되지 않는다. API 응답, 개인 사진, 인증 데이터와 POST 요청은 이 서비스 워커의 공개 캐시에 저장하지 않는다.
 

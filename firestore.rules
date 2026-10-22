@@ -229,6 +229,69 @@ service cloud.firestore {
         && request.resource.data.updatedAt is int && request.resource.data.updatedBy==request.auth.uid));
       allow delete: if isAdmin() && id!='operations';
     }
+    function lightingId(value){return value is string && value.matches('[A-Za-z0-9_-]{1,180}')
+      && !(value in ['__proto__','prototype','constructor']);}
+    function lightingText(value,max){return value is string && value.size()<=max;}
+    function validLighting(data){
+      return data.keys().hasOnly(['schemaVersion','kind','label','category','operator','lat','lng','radius','strength','status','level',
+        'schedule','startMinute','endMinute','observedAt','validDays','nightConfirmed','lux','instrument','note','linkedLightId','distinct','removed',
+        'createdAt','createdBy','updatedAt','updatedBy','revision','operationId'])
+        && data.schemaVersion==1 && data.kind in ['source','observation']
+        && lightingText(data.label,100) && data.label.size()>0 && lightingText(data.operator,100)
+        && data.category in ['other_public','private','shop','building','unknown','field']
+        && data.lat is number && data.lat>=-90 && data.lat<=90 && data.lng is number && data.lng>=-180 && data.lng<=180
+        && data.radius is number && data.radius>=5 && data.radius<=(data.kind=='source'?80:30)
+        && data.strength in ['low','medium','high'] && data.status in ['on','off','unknown']
+        && data.level in ['bright','adequate','dark','unknown'] && data.schedule in ['always','hours','unknown']
+        && data.startMinute is int && data.startMinute>=0 && data.startMinute<=1439
+        && data.endMinute is int && data.endMinute>=0 && data.endMinute<=1439
+        && (data.schedule!='hours' || data.startMinute!=data.endMinute)
+        && data.observedAt is int && data.observedAt>0 && data.observedAt<=request.time.toMillis()+300000
+        && data.observedAt<=data.updatedAt+300000 && data.validDays is int && data.validDays>=1 && data.validDays<=365
+        && data.nightConfirmed is bool && data.distinct is bool && data.removed is bool
+        && (data.lux==null || (data.lux is number && data.lux>=0 && data.lux<=200000 && data.instrument.size()>0))
+        && lightingText(data.instrument,100) && lightingText(data.note,1000) && lightingText(data.linkedLightId,180)
+        && data.createdAt is int && data.createdAt>0 && data.updatedAt is int && data.updatedAt>=data.createdAt
+        && data.updatedAt<=request.time.toMillis()+300000 && lightingText(data.createdBy,128) && data.createdBy.size()>0
+        && data.updatedBy==request.auth.uid && data.revision is int && data.revision>=1 && data.revision<=9007199254740991
+        && lightingId(data.operationId);
+    }
+    function lightingReceiptMatches(receipt,data,id){
+      return receipt.recordId==id && receipt.by==request.auth.uid && receipt.by==data.updatedBy
+        && receipt.at==data.updatedAt && receipt.revision==data.revision;
+    }
+    function newLightingReceipt(id,data){
+      let ref=/databases/$(db)/documents/lightingOperations/$(data.operationId);
+      return !exists(ref) && lightingReceiptMatches(getAfter(ref).data,data,id);
+    }
+    match /lightingContext/{id} {
+      allow read: if isStaff();
+      allow create: if isStaff() && lightingId(id) && validLighting(request.resource.data)
+        && request.resource.data.createdBy==request.auth.uid && request.resource.data.createdAt==request.resource.data.updatedAt
+        && request.resource.data.revision==1 && request.resource.data.removed==false
+        && newLightingReceipt(id,request.resource.data);
+      allow update: if isStaff() && lightingId(id) && validLighting(request.resource.data)
+        && (isAdmin() || resource.data.createdBy==request.auth.uid)
+        && request.resource.data.createdBy==resource.data.createdBy && request.resource.data.createdAt==resource.data.createdAt
+        && request.resource.data.revision==resource.data.revision+1 && newLightingReceipt(id,request.resource.data);
+      // Keep an auditable tombstone. A deleted observation cannot silently reappear on retry.
+      allow delete: if false;
+    }
+    function validLightingOperation(id,data){
+      let ref=/databases/$(db)/documents/lightingContext/$(data.recordId);
+      let after=getAfter(ref).data;
+      let previous=exists(ref)?get(ref).data:{'revision':0};
+      return data.keys().hasOnly(['schemaVersion','recordId','by','at','revision','requestHash']) && data.schemaVersion==1
+        && lightingId(data.recordId) && lightingId(id) && data.by==request.auth.uid && data.at is int && data.revision is int
+        && data.requestHash is string && data.requestHash.matches('[a-f0-9]{64}')
+        && after.operationId==id && lightingReceiptMatches(data,after,data.recordId)
+        && after.revision==previous.revision+1;
+    }
+    match /lightingOperations/{id} {
+      allow read: if isStaff();
+      allow create: if isStaff() && validLightingOperation(id,request.resource.data);
+      allow update,delete: if false;
+    }
     function workVisible(data){let role=myRole();return role=='admin' || (role=='inspector' && data.assignedTo==request.auth.uid);}
     function ownWorkPhoto(data){
       let work=getAfter(/databases/$(db)/documents/workOrders/$(data.workId)).data;

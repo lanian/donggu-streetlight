@@ -5,6 +5,7 @@ function initializeOperations() {
     byId, inDong, dongValues: () => ADONGS.map(d => 'a:' + d), dongOptions,
     render: () => render(), toast, readAll: (...args) => listAllRecords(...args), getPhoto,
     registry: () => BASE, overrides: () => OV,
+    invalidateLighting: reason => invalidateLightingReview(reason),
     download: async options => {
       if (dl) return dl.save(options);
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([options.data], { type: 'text/csv;charset=utf-8' })); a.download = options.filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
@@ -54,7 +55,7 @@ function initializeOperations() {
   const originalPhotos = renderPhotoStrip;
   renderPhotoStrip = function () { originalPhotos(); DGIntegration.scheduleDraft(); };
   const originalAdmin = openAdminSection;
-  openAdminSection = function (key) { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; return originalAdmin(key); };
+  openAdminSection = function (key) { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; if (key === 'outbox') DGOperations.refreshQueue().catch(e => toast(e.message)); return originalAdmin(key); };
   refreshAdminSection = function () {
     const key = S.asec, body = $('#asecBody'); if (!key || !body || !$('#sheet').classList.contains('open')) return;
     const section = ADMIN_SECTIONS[key]; if (!section) return;
@@ -89,6 +90,7 @@ function initializeOperations() {
     operationsettings: { t: '업무 기준·보관 기간', d: '점검 주기·연락처 파기·기기 저장', admin: true, body: () => DGManagement.settingsView() },
     audit: { t: '변경 감사 기록', d: '서버 변경 이벤트·행위자·처리 이력', admin: true, body: () => DGManagement.auditView() }
   });
+  ADMIN_SECTIONS.lightingcontext = { t: '대장 밖 광원·현장 밝기', d: '다른 기관 조명·상가 조명·현장 관찰·실측', write: true, body: () => DGLighting.view() };
   // Never turn the discarded patrol into a hidden recovery draft.
   document.addEventListener('click', e => {
     if (e.target.closest('#ptDiscard') && !pt.track.length && !pt.marks.length && DGOffline.ready) DGOffline.remove('patrol', 'current').catch(error => toast(error.message));
