@@ -5,13 +5,15 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '../..');
-const source = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const lightingReviewSource = fs.readFileSync(path.join(root, 'app/lighting-review.js'), 'utf8');
+const source = lightingReviewSource + '\n' + fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const registry = JSON.parse(fs.readFileSync(path.join(root, 'data/lights.json'), 'utf8'));
 const lights = registry.rows.map(row => ({
   ...Object.fromEntries(registry.cols.map((key, i) => [key, row[i]])), status: '정상'
 }));
 const printable = lights.filter(l => !l.removed && !l.noPlate && l.code);
 const field = require('../../app/field.js');
+const lightingModel = require('../../app/lighting-model.js');
 
 // Compile the actual application functions, without evaluating its boot code or contacting a backend.
 function functionSource(name) {
@@ -39,6 +41,42 @@ function qrContext(extra = {}) {
   }), ['plateRef', 'lookup', 'parseCode', 'parseTyped', 'parseCodeFuzzy', 'qrUrl', 'parsePole'],
   ['DONGS', 'DONGS_M', 'dongRe', 'codeOf', 'glCode', 'labelText', 'nrm', 'plateKey', 'isPlateDong', 'ROAD_RE', 'GL_RE']);
 }
+function reviewGrid(base = 0, managed = []) {
+  const radians = Math.PI / 180, kx = 6371000 * radians * Math.cos(35.14 * radians), ky = 6371000 * radians;
+  const toXY = p => ({ x: (p.lng - 126.93) * kx, y: (p.lat - 35.14) * ky });
+  const items = managed.map(l => ({ l, ...toXY(l), on: l.status === '고장' ? 0 : 1, r: 20 }));
+  return { items, toXY, toLL: (x, y) => ({ lat: 35.14 + y / ky, lng: 126.93 + x / kx }),
+    near: (x, y, radius) => items.map(it => ({ it, d: Math.hypot(it.x - x, it.y - y) })).filter(n => n.d <= radius),
+    lightAt: typeof base === 'function' ? base : () => base };
+}
+function lightingContext({ grid = reviewGrid(), records = [], ...extra } = {}) {
+  const state = { lights: [], rvMinute: 1260, rvRevision: 0, ...extra.S };
+  const lighting = { state: { records, loaded: true, error: '' },
+    context: options => lightingModel.createContext(records, state.lights, options),
+    classification: key => key, reason: key => key, categories: {}, levels: {},
+    minuteText: minute => String(Math.floor(minute / 60)).padStart(2, '0') + ':' + String(minute % 60).padStart(2, '0'),
+    kstTime: time => String(time), recordSummary: record => record.label };
+  const context = vm.createContext({
+    DongguField: field, DGLightingModel: lightingModel, DGLighting: lighting,
+    ROADS: { ways: [], areas: [] }, LIGHT_MODEL: { weak: .3, pairMax: {}, gapFactor: 1.15 },
+    ROAD_SKIP_SERVICE: /^parking_aisle$/, ROAD_LABEL: {}, lightGrid: () => grid, inDong: () => true,
+    document: { getElementById: () => null, addEventListener() {} }, window: {},
+    closeSheet() {}, toast() {}, esc: String, onOf: l => l.status === '고장' ? 0 : 1,
+    setTimeout() {}, clearTimeout() {}, ...extra, S: state
+  });
+  // Load the real review module, so helper changes are exercised without duplicating its logic.
+  vm.runInContext(lightingReviewSource, context);
+  return load(context, ['roadAreas']);
+}
+function lightingRecord(grid, kind, x, y, extra = {}) {
+  return { id: kind + '-1', kind, label: kind === 'source' ? '별도 기관 조명' : '현장 관찰',
+    category: kind === 'source' ? 'other_public' : 'field', operator: '', ...grid.toLL(x, y),
+    radius: kind === 'source' ? 80 : 10, strength: 'medium', status: 'on', level: kind === 'source' ? 'unknown' : 'bright',
+    schedule: 'hours', startMinute: 1080, endMinute: 360, observedAt: Date.now() - 1000,
+    validDays: kind === 'source' ? 90 : 30, nightConfirmed: true, lux: null, instrument: '', note: '',
+    linkedLightId: '', distinct: true, removed: false, ...extra };
+}
+function roadPoints(grid, points) { return points.map(([x, y]) => { const p = grid.toLL(x, y); return [p.lat, p.lng]; }); }
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -447,12 +485,11 @@ test('AR projects the physical rear camera with beta and gamma and does not add 
 });
 
 test('road review length and score are independent of OSM vertex density and include short tails', () => {
-  const grid = { toXY: p => ({ x: p.lng, y: p.lat }), toLL: (x, y) => ({ lat: y, lng: x }), near: () => [], lightAt: () => 0 };
-  const c = load(vm.createContext({ DongguField: field, ROADS: { ways: [], areas: [] }, LIGHT_MODEL: { weak: .3 }, ROAD_SKIP_SERVICE: /^parking_aisle$/, ROAD_LABEL: {}, lightGrid: () => grid, inDong: () => true }), ['roadAreas', 'roadReview']);
-  const check = points => { c.ROADS.ways = [{ name: 'road', type: 'residential', pts: points }]; return c.roadReview('전체', '전체')[0]; };
-  const coarse = check([[0, 0], [0, 24]]), dense = check(Array.from({ length: 13 }, (_, i) => [0, i * 2]));
-  assert.equal(coarse.len, 24); assert.equal(dense.len, 24); assert.equal(coarse.score, dense.score);
-  assert.equal(check([[0, 0], [0, 29]]).len, 29);
+  const grid = reviewGrid(), c = lightingContext({ grid });
+  const check = points => { c.ROADS.ways = [{ name: 'road', type: 'residential', pts: roadPoints(grid, points) }]; return c.roadReview('전체', '전체')[0]; };
+  const coarse = check([[0, 0], [24, 0]]), dense = check(Array.from({ length: 13 }, (_, i) => [i * 2, 0]));
+  assert.equal(coarse.len, 24); assert.equal(dense.len, 24); assert.ok(Math.abs(coarse.score - dense.score) < 1e-6);
+  assert.equal(check([[0, 0], [29, 0]]).len, 29);
   const samples = field.sampleLine([{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 5 }]);
   assert.equal(samples.reduce((s, p) => s + p.length, 0), 8);
 });
@@ -474,17 +511,102 @@ test('road area holes remain eligible for review, and administrative-dong map fi
   const c = load(vm.createContext({ DongguField: field, ROADS: { areas: [area] } }), ['roadAreas']);
   const projected = c.roadAreas({ toXY: ({ lat, lng }) => ({ x: lng, y: lat }) })[0];
   assert.equal(field.inPolygon(2, 2, projected), true); assert.equal(field.inPolygon(5, 5, projected), false);
-  let lampMarkers = 0;
+  let lampCircles = 0, candidateMarkers = 0;
   const layer = () => ({ addTo() { return this; }, on() { return this; }, bindPopup() { return this; }, pad() { return this; } });
-  const L = { map: () => ({ fitBounds() {} }), layerGroup: layer, circle: layer,
-    circleMarker() { lampMarkers++; return layer(); }, marker: layer, polyline: layer, divIcon: x => x, latLngBounds: layer };
+  const L = { map: () => ({ fitBounds() {} }), layerGroup: layer,
+    circle() { lampCircles++; return layer(); }, circleMarker() { candidateMarkers++; return layer(); },
+    marker: layer, polyline: layer, divIcon: x => x, latLngBounds: layer };
   const l = { id: 'one', lat: 35, lng: 126, dong: '금동', status: '정상' };
-  const map = load(vm.createContext({ S: { review: { mode: 'roads', dong: 'a:충장동', cands: [] }, lights: [l] },
-    rvList: () => [{ pts: [], mid: l, near: [], len: 24, E: 0 }], inDong: (x, d) => x.dong === '금동' && d === 'a:충장동',
+  const context = { base: 0, adjusted: 0, external: 0, classification: 'model_weak',
+    coverage: { total: 24, bright: 0, dark: 0, conflict: 0, external: 0, unobserved: 24, unit: 'm' }, sources: [], hints: [], observations: [] };
+  const candidate = { name: 'road', pts: [l], mid: l, near: [l], len: 24, E: 0, context };
+  const map = lightingContext({ S: { review: { mode: 'roads', dong: 'a:충장동', cands: [candidate], inputRevision: 0, validUntil: Infinity, minute: 1260 }, lights: [l, { ...l, id: 'other', dong: '지원동' }] },
+    inDong: (x, d) => x.dong === '금동' && d === 'a:충장동',
     openSheet() {}, window: { L }, L, DongguPWA: { tileLayer: layer }, gmap: null, gmapLayer: null, gmapPts: [],
     meStop() {}, setTimeout() {}, onOf: () => 1, reachOf: () => 20, kindBadge: () => '', esc: String
-  }), ['openReviewMap']);
-  map.openReviewMap('all'); assert.equal(lampMarkers, 1);
+  });
+  map.openReviewMap('all'); assert.equal(lampCircles, 1); assert.equal(candidateMarkers, 1);
+});
+
+test('partial roadside field circles never classify the whole road as observed bright', () => {
+  const grid = reviewGrid(), records = [4, 12, 20].map((y, i) => lightingRecord(grid, 'observation', 4.9, y, { id: 'obs-' + i, radius: 5 }));
+  const c = lightingContext({ grid, records });
+  c.ROADS.ways = [{ name: 'road', type: 'residential', pts: roadPoints(grid, [[0, 0], [0, 24]]) }];
+  const result = c.roadReview('전체', '전체')[0];
+  assert.equal(result.len, 24); assert.equal(result.context.classification, 'partial_supported');
+  assert.ok(Math.abs(result.context.coverage.bright - 3 * 2 * Math.sqrt(25 - 4.9 ** 2)) < .001);
+  assert.ok(result.context.coverage.unobserved > 18); assert.equal(result.context.adjusted, 0);
+});
+
+test('circle coverage follows original road vertices instead of the chord of a turning 8 m fragment', () => {
+  const grid = reviewGrid(), record = lightingRecord(grid, 'observation', -4.9, 0, { radius: 5 });
+  const c = lightingContext({ grid, records: [record] });
+  c.ROADS.ways = [{ name: 'turning road', type: 'residential', pts: roadPoints(grid, [[0, 0], [4, 0], [0, 0], [4, 0], [0, 0], [4, 0], [0, 0]]) }];
+  const result = c.roadReview('전체', '전체')[0];
+  assert.equal(result.len, 24); assert.equal(result.context.classification, 'partial_supported');
+  assert.ok(Math.abs(result.context.coverage.bright - .6) < .001);
+  assert.ok(result.context.coverage.unobserved > 23);
+});
+
+test('evidence-circle subdivision cannot move the road midpoint or change its administrative filter', () => {
+  const grid = reviewGrid(), records = [], c = lightingContext({ grid, records });
+  c.ROADS.ways = [{ name: 'road', type: 'residential', pts: roadPoints(grid, [[0, 0], [0, 80]]) }];
+  c.ROADS.bounds = [{ name: 'selected', polygons: [{ outer: roadPoints(grid, [[-10, 30], [10, 30], [10, 90], [-10, 90], [-10, 30]]), holes: [] }] }];
+  const before = c.roadReview('전체', '전체')[0];
+  assert.equal(c.roadReview('a:selected', '전체').length, 1);
+  for (let i = 0; i < 10; i++) records.push(lightingRecord(grid, 'observation', 4.9, 1 + i * 2, { id: 'obs-' + i, radius: 5 }));
+  const after = c.roadReview('전체', '전체')[0];
+  assert.ok(Math.abs(grid.toXY(after.mid).y - grid.toXY(before.mid).y) < .001);
+  assert.ok(Math.abs(grid.toXY(after.mid).y - 40) < .001);
+  assert.equal(c.roadReview('a:selected', '전체').length, 1);
+});
+
+test('separate dark observations remain candidates even where the registry model is bright and no road qualifies', () => {
+  const grid = reviewGrid(1), records = [0, 100].map((x, i) => lightingRecord(grid, 'observation', x, 0, { id: 'dark-' + i, level: 'dark', radius: 5 }));
+  const c = lightingContext({ grid, records });
+  for (const candidates of [c.roadReview('전체', '전체'), c.lightReview('전체', '전체')]) {
+    assert.equal(candidates.length, 2);
+    assert.ok(candidates.every(x => x.point && x.context.classification === 'observed_dark' && x.context.base === 1));
+  }
+  c.ROADS.ways = [{ name: 'private path', type: 'service', priv: true, pts: roadPoints(grid, [[0, 0], [24, 0]]) }];
+  assert.equal(c.roadReview('전체', '전체').length, 2);
+});
+
+test('operating hours change supplemental evidence while retaining the same registry-model candidates', () => {
+  const grid = reviewGrid(), c = lightingContext({ grid, records: [lightingRecord(grid, 'source', 12, 0)] });
+  c.ROADS.ways = [{ name: 'road', type: 'residential', pts: roadPoints(grid, [[0, 0], [24, 0]]) }];
+  const night = c.roadReview('전체', '전체');
+  assert.equal(night.length, 1); assert.equal(night[0].context.classification, 'external_supported');
+  c.S.review = { cands: night }; assert.equal(c.rvList(c.S.review).length, 1);
+  c.S.rvMinute = 720; const day = c.roadReview('전체', '전체');
+  assert.equal(day.length, 1); assert.equal(day[0].context.external, 0);
+  assert.equal(day[0].context.base, night[0].context.base);
+  assert.equal(day[0].context.hints[0].reason, 'outside_schedule');
+});
+
+test('expired review snapshots cannot be mapped, exported or copied into facility registration', async () => {
+  let downloaded = 0, opened = 0, copied = 0, messages = 0;
+  const c = lightingContext({ dl: { save() { downloaded++; } }, openSheet() { opened++; },
+    openAdminSection() { copied++; }, toast() { messages++; }, $() { assert.fail('expired reviews must not access a form'); } });
+  const expired = () => { c.S.review = { cands: [], inputRevision: c.S.rvRevision, validUntil: Date.now() - 1 }; };
+  expired(); c.openReviewMap('all'); assert.equal(c.S.review, null);
+  expired(); await c.exportReviewCSV(); assert.equal(c.S.review, null);
+  expired(); c.reviewToForm(0); assert.equal(c.S.review, null);
+  assert.equal(downloaded, 0); assert.equal(opened, 0); assert.equal(copied, 0); assert.equal(messages, 3);
+});
+
+test('the review expiry timer refreshes an open result without a storage event', () => {
+  let clock = 1000, callback, delay, rendered = 0, closed = 0;
+  const c = lightingContext({ Date: { now: () => clock },
+    document: { getElementById: () => ({}), addEventListener() {} },
+    setTimeout(fn, ms) { callback = fn; delay = ms; return 1; }, clearTimeout() {},
+    render() { rendered++; }, closeSheet() { closed++; } });
+  c.S.review = { cands: [], inputRevision: 0, validUntil: 1100 };
+  c.rvExpireAt(1100); assert.ok(delay >= 100 && delay <= 150);
+  clock = 1120; callback();
+  assert.equal(c.S.review, null); assert.equal(rendered, 1); assert.equal(closed, 1);
+  c.S.review = { cands: [], inputRevision: c.S.rvRevision, validUntil: clock + 90 * 86400000 };
+  c.rvExpireAt(c.S.review.validUntil); assert.ok(delay <= 2147483647);
 });
 
 test('late photo decoding cannot stop or write into a replacement scanner', async () => {

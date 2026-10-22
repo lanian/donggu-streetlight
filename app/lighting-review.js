@@ -1,0 +1,229 @@
+/* Review scenarios: registry model, supplemental sources, and field evidence are shown separately. */
+function invalidateLightingReview(reason) {
+  S.rvRevision = (S.rvRevision || 0) + 1;
+  if (!S.review) return;
+  S.review = null; S.rvMessage = reason + ' 검토를 다시 실행해 주세요.';
+  if (document.getElementById('rvMapSummary')) { closeSheet(); toast(S.rvMessage); }
+}
+function rvFresh() {
+  const rv = S.review;
+  if (rv && (rv.inputRevision !== (S.rvRevision || 0) || Date.now() >= rv.validUntil)) invalidateLightingReview('자료 또는 재확인 기한이 바뀌었어요.');
+  return S.review;
+}
+function rvExpireAt(deadline) {
+  clearTimeout(rvExpireAt.timer);
+  if (!Number.isFinite(deadline)) return;
+  rvExpireAt.timer = setTimeout(() => {
+    if (S.review && Date.now() >= S.review.validUntil) { rvFresh(); render(); }
+    else if (S.review) rvExpireAt(S.review.validUntil);
+  }, Math.max(20, Math.min(2147483647, deadline - Date.now() + 20)));
+}
+function rvContext() { return DGLighting.context({ now: Date.now(), minute: S.rvMinute ?? 1260, weak: LIGHT_MODEL.weak }); }
+function rvEvaluate(ctx, G, point, base) {
+  const xy = G.toXY(point);
+  return DGLightingModel.evaluate(ctx, point, base, { registryNearby: G.near(xy.x, xy.y, 90).some(n => !n.it.l.removed) });
+}
+function rvAggregate(samples, unit = 'm') {
+  const coverage = { total: 0, bright: 0, dark: 0, conflict: 0, external: 0, unobserved: 0, supported: 0, unit };
+  const sources = new Map(), hints = new Map(), observations = new Map();
+  let base = 0, adjusted = 0, external = 0, registry = false;
+  for (const sample of samples) {
+    const e = sample.evidence, weight = sample.length || 1; coverage.total += weight;
+    base += e.base * weight; adjusted += e.adjusted * weight; external += e.external * weight;
+    if (e.classification !== 'data_gap') registry = true;
+    if (e.fieldLevel === 'bright' || e.fieldLevel === 'adequate') coverage.bright += weight;
+    else if (e.fieldLevel === 'dark') coverage.dark += weight;
+    else if (e.fieldLevel === 'conflict') coverage.conflict += weight;
+    else coverage.unobserved += weight;
+    if (e.base < LIGHT_MODEL.weak && e.adjusted >= LIGHT_MODEL.weak && e.external > 0) coverage.external += weight;
+    if (e.fieldLevel === 'bright' || e.fieldLevel === 'adequate' || e.adjusted >= LIGHT_MODEL.weak && !['dark', 'conflict'].includes(e.fieldLevel)) coverage.supported += weight;
+    for (const source of e.sources) { if (!sources.has(source.id) || sources.get(source.id).contribution < source.contribution) sources.set(source.id, source); }
+    for (const hint of e.hints) hints.set(hint.id + ':' + hint.reason, hint);
+    for (const observation of e.observations) observations.set(observation.id, observation);
+  }
+  const total = coverage.total || 1;
+  const classification = coverage.conflict ? 'conflict' : coverage.dark ? 'observed_dark' : coverage.bright >= total - .01 ? 'observed_bright' : coverage.supported >= total - .01 ? 'external_supported' : coverage.supported > 0 ? 'partial_supported' : !registry ? 'data_gap' : base / total < LIGHT_MODEL.weak ? 'model_weak' : 'model_lit';
+  return { base: base / total, adjusted: adjusted / total, external: external / total, classification, coverage, sources: [...sources.values()], hints: [...hints.values()], observations: [...observations.values()] };
+}
+function rvPriority(context) {
+  return { conflict: 280, observed_dark: 250, data_gap: 80, model_weak: 100, partial_supported: 30, external_supported: -150, observed_bright: -160, model_lit: -170 }[context.classification] || 0;
+}
+function rvPointInDong(point, dong, nearest) {
+  if (dong === '전체' || !dong) return true;
+  if (dong.startsWith('a:') && ROADS?.bounds?.length) {
+    const name = dong.slice(2);
+    return ROADS.bounds.some(b => b.name === name && (b.polygons || []).some(p => DongguField.inPolygon(point.lng, point.lat, { outer: p.outer.map(q => [q[1], q[0]]), holes: (p.holes || []).map(r => r.map(q => [q[1], q[0]])) })));
+  }
+  return !!nearest && inDong(nearest, dong);
+}
+function rvAddObservationPoints(out, dong, kind, ctx, G) {
+  const included = new Set(out.flatMap(c => c.context.observations.map(o => o.id))), seen = new Set();
+  for (const record of ctx.records) {
+    if (record.kind !== 'observation' || record.removed || included.has(record.id)) continue;
+    const xy = G.toXY(record), E = G.lightAt(xy.x, xy.y), evidence = rvEvaluate(ctx, G, record, E);
+    if (!['dark', 'conflict'].includes(evidence.fieldLevel) || !evidence.observations.some(o => o.id === record.id)) continue;
+    const near = G.near(xy.x, xy.y, 90).filter(n => !n.it.l.removed).sort((a, b) => a.d - b.d).slice(0, 3).map(n => n.it.l);
+    if (!rvPointInDong(record, dong, near[0]) || kind !== '전체' && near.length && !near.some(l => l.kind === kind)) continue;
+    const key = evidence.observations.map(o => o.id).sort().join('|'); if (seen.has(key)) continue; seen.add(key);
+    const context = rvAggregate([{ evidence, length: 1 }], 'point');
+    out.push({ point: true, name: record.label, typeLabel: '현장 관찰 지점', mid: { lat: record.lat, lng: record.lng }, E, context, near, dong: near[0]?.dong || '', nolight: !near.length, dark: near.some(l => onOf(l) === 0), score: rvPriority(context) + 20 });
+  }
+}
+function lightReview(dong, kind) {
+  const G = lightGrid(), ctx = rvContext(), seen = new Set(), cands = [];
+  const items = G.items.filter(it => inDong(it.l, dong) && (kind === '전체' || it.l.kind === kind) && !it.l.removed);
+  for (const a of items) for (const { it: b, d } of G.near(a.x, a.y, LIGHT_MODEL.pairMax[a.l.kind] || 62)) {
+    if (b === a || b.l.removed || b.l.id < a.l.id || kind !== '전체' && b.l.kind !== kind) continue;
+    const need = (a.r + b.r) * LIGHT_MODEL.gapFactor;
+    if (d <= need && a.on > 0 && b.on > 0) continue;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, E = G.lightAt(mx, my);
+    if (E >= LIGHT_MODEL.weak || G.near(mx, my, d * .35).some(({ it }) => it !== a && it !== b && it.on > 0)) continue;
+    const key = `${Math.round(mx / 15)},${Math.round(my / 15)}`; if (seen.has(key)) continue; seen.add(key);
+    const mid = G.toLL(mx, my), dark = a.on === 0 || b.on === 0, context = rvAggregate([{ evidence: rvEvaluate(ctx, G, mid, E), length: 1 }], 'point');
+    cands.push({ a: a.l, b: b.l, d: Math.round(d), need: Math.round(need), E, dark, mid, context, score: rvPriority(context) + Math.min(70, d - need) + (LIGHT_MODEL.weak - E) * 40, dong: a.l.dong });
+  }
+  rvAddObservationPoints(cands, dong, kind, ctx, G); cands.sort((a, b) => b.score - a.score); return cands;
+}
+function roadReview(dong, kind) {
+  const G = lightGrid(); if (!ROADS) return [];
+  const ctx = rvContext(), weak = LIGHT_MODEL.weak, out = [], areas = roadAreas(G), skip = { ways: 0, apt: 0, forest: 0 };
+  const inArea = (x, y) => { for (const a of areas) if (x >= a.x0 && x <= a.x1 && y >= a.y0 && y <= a.y1 && DongguField.inPolygon(x, y, a)) return a.t; return ''; };
+  for (const w of ROADS.ways) {
+    if (w.sv && ROAD_SKIP_SERVICE.test(w.sv) || w.priv || /아파트|APT|주차장/i.test(w.name || '')) { skip.ways++; continue; }
+    let acc = [];
+    const flush = () => {
+      const length = acc.reduce((sum, a) => sum + a.length, 0);
+      if (length >= 24 - 1e-6) {
+        let walked = 0, mid = acc[0];
+        for (const piece of acc) {
+          if (walked + piece.length >= length / 2) { const t = (length / 2 - walked) / piece.length; mid = { x: piece.start.x + (piece.end.x - piece.start.x) * t, y: piece.start.y + (piece.end.y - piece.start.y) * t }; break; }
+          walked += piece.length;
+        }
+        const midLL = G.toLL(mid.x, mid.y), nb = G.near(mid.x, mid.y, 90).filter(n => !n.it.l.removed).sort((a, b) => a.d - b.d), near = nb.slice(0, 3).map(n => n.it.l);
+        if ((kind === '전체' || !near.length || near.some(l => l.kind === kind)) && rvPointInDong(midLL, dong, near[0])) {
+          const context = rvAggregate(acc), dark = nb.some(n => n.d < 70 && n.it.on === 0);
+          out.push({ name: w.name || ROAD_LABEL[w.type] || w.type, type: w.type, typeLabel: ROAD_LABEL[w.type] || w.type, len: Math.round(length), mid: midLL, pts: [acc[0].start, ...acc.map(s => s.end)].map(p => G.toLL(p.x, p.y)), E: context.base, dark, nolight: !near.length, near, dong: near[0]?.dong || '', context,
+            score: rvPriority(context) + Math.min(length, 200) / 2 + (weak - context.base) * 40 });
+        }
+      }
+      acc = [];
+    };
+    // Keep original road corners, then cut every <=8m straight piece at evidence-circle
+    // boundaries. A small observed sliver must never mark an entire sample as observed.
+    const vertices = w.pts.map(([lat, lng]) => G.toXY({ lat, lng }));
+    for (let segment = 1; segment < vertices.length; segment++) for (const sample of DongguField.sampleLine([vertices[segment - 1], vertices[segment]], 8)) {
+      const startLL = G.toLL(sample.start.x, sample.start.y), endLL = G.toLL(sample.end.x, sample.end.y), E = G.lightAt(sample.x, sample.y);
+      for (const piece of DGLightingModel.splitSegment(ctx, startLL, endLL)) {
+        const point = G.toXY(piece.point), length = sample.length * piece.fraction;
+        const area = inArea(point.x, point.y); if (area) { skip[area] = (skip[area] || 0) + length; flush(); continue; }
+        const evidence = rvEvaluate(ctx, G, piece.point, E);
+        if (E >= weak && !['dark', 'conflict'].includes(evidence.fieldLevel)) { flush(); continue; }
+        acc.push({ ...point, start: G.toXY(piece.start), end: G.toXY(piece.end), length, E, evidence });
+      }
+    }
+    flush();
+  }
+  rvAddObservationPoints(out, dong, kind, ctx, G); out.sort((a, b) => b.score - a.score);
+  skip.apt = Math.round(skip.apt); skip.forest = Math.round(skip.forest); out.skip = skip; return out;
+}
+function rvList(rv) {
+  if (!rv) return [];
+  const filter = S.rvEvidence || 'all';
+  return rv.cands.filter(c => filter === 'all' || filter === 'supported' && ['external_supported', 'observed_bright', 'partial_supported'].includes(c.context.classification) || filter === 'attention' && !['external_supported', 'observed_bright', 'model_lit'].includes(c.context.classification) || filter === 'gap' && c.nolight);
+}
+function runLightingReview() {
+  S.rvDong = $('#rvDong').value; S.rvKind = $('#rvKind').value; S.rvMinute = DGLighting.parseMinute($('#rvTime').value);
+  if (!Number.isInteger(S.rvMinute) || S.rvMinute < 0 || S.rvMinute > 1439) return toast('검토할 한국 시간을 입력해 주세요.');
+  if (!DGLighting.state.loaded || DGLighting.state.error) return toast('추가 광원·현장 관찰 자료를 새로고침한 뒤 검토해 주세요.');
+  const mode = S.rvMode || (ROADS ? 'roads' : 'pairs'), button = $('#rvRun'); button.disabled = true; button.textContent = '계산 중…';
+  setTimeout(() => {
+    try {
+      const actualMode = mode === 'roads' && ROADS ? 'roads' : 'pairs', now = Date.now(), cands = actualMode === 'roads' ? roadReview(S.rvDong, S.rvKind) : lightReview(S.rvDong, S.rvKind);
+      const transitions = DGLighting.state.records.filter(r => !r.removed).flatMap(r => [r.observedAt, r.observedAt + r.validDays * 86400000]).filter(t => Number.isFinite(t) && t > now);
+      S.review = { mode: actualMode, dong: S.rvDong, kind: S.rvKind, minute: S.rvMinute, cands, show: 20, at: now, inputRevision: S.rvRevision || 0, validUntil: Math.min(Infinity, ...transitions), n: S.lights.filter(l => !l.removed && inDong(l, S.rvDong) && (S.rvKind === '전체' || l.kind === S.rvKind)).length };
+      rvExpireAt(S.review.validUntil); S.rvMessage = ''; render();
+    } catch (error) { toast('검토 계산을 완료하지 못했어요: ' + error.message); if (button.isConnected) { button.disabled = false; button.textContent = '검토 실행'; } }
+  }, 30);
+}
+function rvLabel(c) { const q = c.context.coverage; return (q.unit === 'm' && (q.dark > 0 && q.dark < q.total || q.conflict > 0 && q.conflict < q.total) ? '일부 ' : '') + DGLighting.classification(c.context.classification); }
+function rvColor(c) { return { conflict: '#9b278e', observed_dark: '#C2372B', observed_bright: '#176d66', external_supported: '#176d66', partial_supported: '#337fa5', data_gap: '#4A5873' }[c.context.classification] || '#b97900'; }
+function rvIndex(value) { return Number(value).toFixed(2); }
+function rvCoverage(c) {
+  const q = c.context.coverage;
+  if (q.unit !== 'm') return '지점 판단 · 관찰 반경 밖으로 확대하지 않음';
+  return '표본 길이 ' + Math.round(q.total) + 'm 중 밝음·보통 ' + Math.round(q.bright) + 'm / 어두움 ' + Math.round(q.dark) + 'm / 관찰 충돌 ' + Math.round(q.conflict) + 'm / 현장 미확인 ' + Math.round(q.unobserved) + 'm · 외부 광원으로 모델 보완 ' + Math.round(q.external) + 'm';
+}
+function rvEvidenceHTML(c, details = true) {
+  const e = c.context;
+  return '<p><b>대장 모델 ' + rvIndex(e.base) + ' → 외부 광원 반영 ' + rvIndex(e.adjusted) + '</b><span class="muted"> (상대 지수 · lux 아님)</span></p><p class="muted">' + esc(rvCoverage(c)) + '</p>' +
+    (c.dark ? '<p class="muted">주변에 고장·수리중 시설이 있어요. 구간 어두움의 원인으로 확정한 것은 아니에요.</p>' : '') +
+    (details ? '<details><summary>반영 근거·확인할 자료</summary>' +
+      (e.sources.length ? e.sources.map(s => '<p>외부 광원: ' + esc(s.label) + ' · ' + esc(s.operator || DGLighting.categories[s.category] || '관리 주체 미확인') + '</p>').join('') : '<p>수치에 반영한 외부 광원이 없어요.</p>') +
+      e.observations.map(o => '<p>현장: ' + esc(o.label) + ' · ' + esc(DGLighting.levels[o.level]) + ' · ' + esc(DGLighting.kstTime(o.observedAt)) + ' · 반경 ' + esc(o.radius) + 'm' + (o.lux != null ? ' · 실측 ' + esc(o.lux) + ' lux (' + esc(o.instrument) + ')' : '') + '</p>').join('') +
+      e.hints.map(h => '<p>확인 필요: ' + esc(h.label) + ' · ' + esc(DGLighting.reason(h.reason)) + '</p>').join('') +
+      '<p class="muted">반영되지 않은 기관 조명·건물 빛·가림·눈부심·임시 조명이 있을 수 있어요. 기록이 없다는 사실은 실제 어두움의 증거가 아니에요.</p></details>' : '');
+}
+function rvTitle(c) { return c.a ? c.a.code + ' ↔ ' + c.b.code : c.name; }
+function rvButtons(c, i) {
+  const point = ' data-lat="' + c.mid.lat + '" data-lng="' + c.mid.lng + '"';
+  return '<div class="split"><button class="btn sm" data-rvmap="' + i + '">지도</button><button class="btn ghost sm" data-lc="new-source"' + point + '>다른 기관·외부 광원 기록</button><button class="btn ghost sm" data-lc="new-observation"' + point + '>현장 밝기 기록</button><button class="btn ghost sm" data-rvreg="' + i + '">관리 시설 등록 양식</button></div>';
+}
+function reviewSection() {
+  const rv = rvFresh(), mode = S.rvMode || (ROADS ? 'roads' : 'pairs'), cs = rvList(rv), sk = rv?.cands.skip || {};
+  const active = DGLighting.state.records.filter(r => !r.removed);
+  return '<div class="panel"><h3>밝기 검토 · 주변 광원과 현장 근거</h3><p>대장에 표시되지 않은 등이나 건물 빛 때문에 실제로는 밝을 수 있어요. <b>대장 모델·외부 광원·현장 관찰</b>을 함께 확인하세요.</p>' +
+    '<div class="split"><button class="btn ghost sm" data-asec="lightingcontext">외부 광원·관찰 관리 (' + active.length + ')</button><button class="btn ghost sm" data-lc="new-source">외부 광원 추가</button><button class="btn ghost sm" data-lc="new-observation">현장 밝기 기록</button></div>' +
+    (DGLighting.state.error ? '<p class="notice">' + esc(DGLighting.state.error) + ' <button class="btn ghost sm" data-lc="reload">자료 다시 읽기</button></p>' : '') +
+    '<details class="help"><summary>계산과 한계</summary><p>대장 시설의 간격·종류·상태로 상대 지수를 계산해요. 0.30 미만 지점 또는 도로의 24m 이상 구간은 모델상 부족 후보로 남겨요. 외부 광원은 확인된 반경·점등 시간·재확인 기한 안에서 보완하고, 대장 시설과 중복되거나 야간·시간 정보가 불명확한 자료는 확인 대상으로 표시해요. 반경과 영향 정도는 모델 가정이에요.</p><p>현장 밝기와 조도계 lux는 별도 근거로 표시하며 모델에 더하지 않아요. 모델상 밝아도 현장 어두움 관찰이 있으면 검토 대상으로 남아요. 도로는 8m 이하 조각을 광원·관찰 반경의 경계에서 다시 나누어 집계해요. 표시 길이는 좌표와 입력 반경에 따른 근사치예요. 아파트·학교·숲·사유지 길은 도로 검토에서 제외하지만 현장 어두움 지점은 별도로 표시해요. 상대 지수는 밝기 백분율·실측 조도·법정 기준 충족률이 아니며 조명 설치 결정을 대신하지 않아요.</p></details>' +
+    '<div class="seg"><button data-rvmode="roads" aria-pressed="' + (mode === 'roads') + '" ' + (ROADS ? '' : 'disabled') + '>도로 따라 검토</button><button data-rvmode="pairs" aria-pressed="' + (mode === 'pairs') + '">등 간격으로 검토</button></div>' +
+    '<div class="split">' + (ROADS ? '<span class="muted">도로 ' + ROADS.ways.length.toLocaleString() + '개 · © OpenStreetMap contributors</span>' : '') + (!ROADS || can('admin') ? '<button class="btn ghost sm" id="rvRoads"' + (ROADS ? ' data-refetch="1"' : '') + '>' + (ROADS ? '도로망 다시 받기' : '도로망 불러오기') + '</button>' : '') + '<span class="muted" id="rvRoadsStat">' + esc(S.rvRoadsStat || '') + '</span></div>' +
+    '<div class="grid2"><div><label class="f" for="rvDong">검토 지역</label><select class="f-in" id="rvDong">' + dongOptions(S.rvDong || '전체', '모든 동') + '</select></div><div><label class="f" for="rvKind">관리 시설 종류</label><select class="f-in" id="rvKind">' + ['전체', ...KINDS].map(k => '<option' + (k === (S.rvKind || '전체') ? ' selected' : '') + '>' + esc(k) + '</option>').join('') + '</select></div></div>' +
+    '<label class="f" for="rvTime">검토할 야간 시간 (한국 시간 · KST)</label><input class="f-in" id="rvTime" type="time" value="' + DGLighting.minuteText(S.rvMinute ?? 1260) + '"><p class="muted">예: 21:00의 상가 빛과 02:00의 폐점 후 상황을 각각 검토할 수 있어요. 관찰의 최근성은 현재 날짜를 기준으로 확인해요.</p><button class="btn block" id="rvRun">검토 실행</button>' +
+    (S.rvMessage ? '<p class="notice" role="status">' + esc(S.rvMessage) + '</p>' : '') +
+    (rv ? '<p class="muted">' + esc(dongLabel(rv.dong)) + ' · ' + DGLighting.minuteText(rv.minute) + ' KST · 관리 대장 ' + rv.n.toLocaleString() + '개 · 검토 ' + esc(DGLighting.kstTime(rv.at)) + '</p><label class="f" for="rvEvidence">근거별 보기</label><select class="f-in" id="rvEvidence">' + Object.entries({ all: '전체 후보 · 보완된 곳도 유지', attention: '우선 현장 확인', supported: '외부 광원·밝음 관찰로 보완', gap: '90m 안 등록 광원 자료 부족' }).map(([v, t]) => '<option value="' + v + '"' + (v === (S.rvEvidence || 'all') ? ' selected' : '') + '>' + t + '</option>').join('') + '</select><p>표시 ' + cs.length + '곳 / 전체 ' + rv.cands.length + '곳' + (rv.mode === 'roads' ? ' · 도로 구간 ' + (cs.reduce((s, c) => s + (c.len || 0), 0) / 1000).toFixed(2) + 'km' : '') + '</p>' +
+      (sk.ways || sk.apt || sk.forest ? '<p class="muted">제외: 사유지·주차장 통로 ' + (sk.ways || 0) + '개 · 단지 ' + (sk.apt || 0) + 'm · 산·숲 ' + (sk.forest || 0) + 'm</p>' : '') +
+      (cs.length ? cs.slice(0, rv.show).map((c, i) => '<article class="panel rv-candidate" style="border-left:5px solid ' + rvColor(c) + '"><div class="split"><b>#' + (i + 1) + ' ' + esc(rvTitle(c)) + '</b><span class="chip">' + esc(rvLabel(c)) + '</span></div><p class="muted">' + esc(c.dong || '지역 확인 필요') + ' · ' + (c.point ? '현장 관찰 지점' : c.len != null ? esc(c.typeLabel) + ' · ' + c.len + 'm' : '시설 간격 ' + c.d + 'm · 대장 기준 간격 ' + c.need + 'm') + (c.nolight ? ' · 90m 안 등록 광원 자료 부족' : '') + '</p>' + rvEvidenceHTML(c) + rvButtons(c, i) + '</article>').join('') : '<p class="empty">현재 자료와 조건에서 표시할 후보가 없어요. 실제로 모두 밝다는 뜻은 아니에요.</p>') +
+      (cs.length > rv.show ? '<button class="btn ghost block" id="rvMore">더 보기 · ' + (cs.length - rv.show) + '곳 남음</button>' : '') + (cs.length ? '<div class="split"><button class="btn sm" data-rvmap="all">표시 후보 지도 (최대 200곳)</button><button class="btn ghost sm" id="csv4">현재 보기 CSV</button></div>' : '') : '') + '</div>';
+}
+async function exportReviewCSV() {
+  const rv = rvFresh(); if (!rv) return toast(S.rvMessage || '먼저 검토를 실행해 주세요.');
+  const rows = [['순위', '구분', '동', '장소', '유형', '길이m_지점은빈칸', '대장상대지수_lux아님', '외부반영상대지수_lux아님', '검토시각_KST', '자료기준시각_KST', '밝음보통관찰m', '어두움관찰m', '충돌관찰m', '현장미확인m', '외부보완m', '외부광원', '관찰기록', '실측lux_모델에합산안함', '확인할자료', '위도', '경도'], ...rvList(rv).map((c, i) => {
+    const e = c.context, q = e.coverage, meters = value => q.unit === 'm' ? Math.round(value) : '';
+    return [i + 1, rvLabel(c), c.dong, rvTitle(c), c.point ? '관찰 지점' : c.len != null ? '도로 구간' : '등 사이 중간 지점', c.len ?? '', rvIndex(e.base), rvIndex(e.adjusted), DGLighting.minuteText(rv.minute), DGLighting.kstTime(rv.at), meters(q.bright), meters(q.dark), meters(q.conflict), meters(q.unobserved), meters(q.external), e.sources.map(s => s.label + ' (' + (s.operator || '관리 미확인') + ')').join(' / '), e.observations.map(o => o.label + ': ' + DGLighting.levels[o.level] + ', ' + DGLighting.kstTime(o.observedAt) + ', 반경 ' + o.radius + 'm').join(' / '), e.observations.filter(o => o.lux != null).map(o => o.lux + ' lux / ' + o.instrument).join(' ; '), e.hints.map(h => h.label + ': ' + DGLighting.reason(h.reason)).join(' / '), c.mid.lat.toFixed(6), c.mid.lng.toFixed(6)];
+  })];
+  const csv = '\ufeff' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
+  try { if (dl) await dl.save({ filename: '동구가로등_밝기검토_' + fmtD(Date.now()).replace(/\./g, '') + '.csv', data: csv }); else toast('내려받기 기능을 준비하지 못했어요.'); } catch (e) { if (!['cancelled', 'declined'].includes(e.code)) toast('CSV를 내려받지 못했어요.'); }
+}
+function openReviewMap(idx) {
+  const rv = rvFresh(); if (!rv) return toast(S.rvMessage || '먼저 검토를 실행해 주세요.');
+  const all = rvList(rv), cs = idx === 'all' ? all.slice(0, 200) : [all[+idx]]; if (!cs[0]) return;
+  const center = idx === 'all' ? null : cs[0].mid;
+  openSheet('<div class="sheet-head"><div id="rvMapSummary"><h3>밝기 검토 지도 · ' + cs.length + '곳</h3><p>' + DGLighting.minuteText(rv.minute) + ' KST · 대장 모델과 외부 광원·현장 근거</p><p class="muted">선 색은 검토 구분이에요. 현장 관찰 범위는 파란 점선 원으로 표시해요. 구간 일부의 관찰을 전체로 확대하지 마세요.</p></div><button class="x" data-close aria-label="닫기">×</button></div><div class="gmap" id="gmap"><button class="btn sm locbtn" id="mapLoc" aria-pressed="false">내 위치</button></div><div class="maplegend">노랑: 대장 모델 · 청록: 외부 광원 · 파랑 점선: 관찰 범위 · <span id="mapNote"></span></div>');
+  if (!window.L) { $('#mapNote').textContent = '지도 라이브러리를 불러오지 못했어요.'; return; }
+  if (gmap) gmap.remove();
+  gmap = L.map('gmap', { preferCanvas: true }); DongguPWA.tileLayer(L).addTo(gmap); gmapLayer = L.layerGroup().addTo(gmap); gmapPts = []; meStop();
+  const pts = S.lights.filter(l => !l.removed && Number.isFinite(l.lat) && Number.isFinite(l.lng) && (center ? distM(center, l) <= Math.max(180, cs[0].len || 0) : inDong(l, rv.dong)));
+  for (const l of pts) L.circle([l.lat, l.lng], { radius: reachOf(l), color: onOf(l) ? '#9b7500' : '#C2372B', weight: 1, fillColor: '#F5C542', fillOpacity: onOf(l) ? .16 : .03 }).bindPopup(esc(l.code) + ' · ' + esc(l.status) + '<br>대장 모델 반경 ' + reachOf(l) + 'm<br><button class="btn sm" data-map-open="' + esc(l.id) + '">시설 열기</button>').addTo(gmapLayer);
+  for (const record of DGLighting.state.records) {
+    if (record.removed || !Number.isFinite(record.lat) || !Number.isFinite(record.lng) || Math.abs(record.lat) > 90 || Math.abs(record.lng) > 180 || !Number.isFinite(record.radius) || record.radius < 5 || record.radius > 80 || center && distM(center, record) > Math.max(200, cs[0].len || 0)) continue;
+    const source = record.kind === 'source';
+    L.circle([record.lat, record.lng], { radius: record.radius, color: source ? '#168174' : '#2466ba', dashArray: '4 5', weight: 2, fillOpacity: .04 }).bindPopup('<b>' + esc(record.label) + '</b><br>' + esc(DGLighting.recordSummary(record)) + '<br>' + esc(DGLighting.kstTime(record.observedAt)) + '<br>입력한 범위이며, 수치 반영 여부는 후보의 근거를 확인하세요.<br><button class="btn sm" data-lc="edit" data-id="' + esc(record.id) + '">기록 보기</button>').addTo(gmapLayer);
+  }
+  cs.forEach((c, i) => {
+    const index = idx === 'all' ? i : idx;
+    if (c.pts) L.polyline(c.pts.map(p => [p.lat, p.lng]), { color: rvColor(c), weight: 7, opacity: .8 }).addTo(gmapLayer);
+    else if (c.a) L.polyline([[c.a.lat, c.a.lng], [c.b.lat, c.b.lng]], { color: rvColor(c), weight: 3, dashArray: '6 5' }).addTo(gmapLayer);
+    L.circleMarker([c.mid.lat, c.mid.lng], { radius: 8, color: rvColor(c), fillOpacity: .9 }).bindPopup('<b>' + esc(rvTitle(c)) + '</b><p>' + esc(rvLabel(c)) + (c.len ? ' · ' + c.len + 'm' : '') + '</p>' + rvEvidenceHTML(c) + rvButtons(c, index)).addTo(gmapLayer);
+  });
+  if (center) gmap.setView([center.lat, center.lng], 18); else gmap.fitBounds(L.latLngBounds(cs.flatMap(c => c.pts || [c.mid]).map(p => [p.lat, p.lng])).pad(.1), { maxZoom: 17 });
+  setTimeout(() => { if (gmap) gmap.invalidateSize(); }, 250);
+}
+function reviewToForm(idx) {
+  const rv = rvFresh(), c = rv && rvList(rv)[+idx]; if (!c) return toast(S.rvMessage || '먼저 검토를 실행해 주세요.');
+  closeSheet(); S.tab = 'admin'; render(); openAdminSection('reg'); const dong = $('#nDong'); if (!dong) return toast('시설 등록 권한이 없어요.');
+  $('#nNoPlate').checked = true; for (const id of ['nNum', 'nRoad']) if ($('#' + id)) $('#' + id).disabled = true;
+  $('#nKind').value = c.a?.kind || c.near?.[0]?.kind || '보안등'; if (DONGS.includes(c.dong)) dong.value = c.dong;
+  $('#nAddr').value = rvTitle(c) + ' 검토 지점';
+  $('#nNote').value = '현장 확인용: ' + rvLabel(c) + ', 대장 모델 ' + rvIndex(c.context.base) + ' → 외부 반영 ' + rvIndex(c.context.adjusted) + ' (lux 아님), ' + DGLighting.minuteText(rv.minute) + ' KST. 실제 시설·관리기관 확인 후 등록. 신설 필요 판정 아님.';
+  $('#nLat').value = c.mid.lat.toFixed(6); $('#nLng').value = c.mid.lng.toFixed(6); toast('좌표와 검토 근거를 넣었어요. 실제 관리 시설이 있는지 확인 후 등록하세요.');
+}

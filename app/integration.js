@@ -101,7 +101,7 @@
   }
   async function hasUnsaved() {
     if (!root.DGOffline.ready) return hasUnsavedSync();
-    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'workDraft', 'workCompletion'].map(k => root.DGOffline.list(k))]);
+    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'workDraft', 'workCompletion', 'lightingDraft'].map(k => root.DGOffline.list(k))]);
     memoryPending = jobs.some(j => j.state !== 'synced') || drafts.some(values => values.length);
     return memoryPending || hasActiveDraft();
   }
@@ -117,7 +117,7 @@
     const saved = await root.DGOffline.list('draft');
     for (const entry of saved) if (entry.value && api.byId(entry.id) && !api.drafts()[entry.id]) api.drafts()[entry.id] = entry.value;
     for (const job of await root.DGOffline.jobs()) if (job.kind === 'patrol' && job.payload && job.state !== 'synced') api.rememberPatrolJob(job.payload);
-    await root.DGOperations.ready(); await hasUnsaved(); initialized = true; resolveReady(true); api.render();
+    await root.DGOperations.ready(); if (root.DGLighting) await root.DGLighting.ready(); await hasUnsaved(); initialized = true; resolveReady(true); api.render();
     if (saved.length || (await root.DGOffline.list('patrol')).length) api.toast('작성하던 내용이 있어요. 저장 대기함에서 이어 쓸 수 있어요.');
     root.DGOffline.flush().catch(warn);
     clearInterval(patrolTimer); patrolTimer = setInterval(() => persistPatrol().catch(warn), 2500);
@@ -151,7 +151,7 @@
   }
   function attach(context) {
     api = context; if (attached) return; attached = true;
-    root.DGOperations.attach(context); root.DGManagement.attach(context);
+    root.DGOperations.attach(context); root.DGManagement.attach(context); if (root.DGLighting) root.DGLighting.attach(context);
     root.DGOffline.register('inspection', job => api.commitInspectionJob(job));
     root.DGOffline.register('patrol', job => api.commitPatrolJob(job));
     root.DGOffline.subscribe(event => {
