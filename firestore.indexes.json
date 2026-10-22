@@ -1,0 +1,8 @@
+{
+  "indexes": [
+    {"collectionGroup":"inspections","queryScope":"COLLECTION","fields":[{"fieldPath":"lightId","order":"ASCENDING"},{"fieldPath":"date","order":"DESCENDING"}]},
+    {"collectionGroup":"photos","queryScope":"COLLECTION","fields":[{"fieldPath":"lightId","order":"ASCENDING"},{"fieldPath":"at","order":"DESCENDING"}]},
+    {"collectionGroup":"workEvents","queryScope":"COLLECTION","fields":[{"fieldPath":"workId","order":"ASCENDING"},{"fieldPath":"at","order":"DESCENDING"}]}
+  ],
+  "fieldOverrides": []
+}

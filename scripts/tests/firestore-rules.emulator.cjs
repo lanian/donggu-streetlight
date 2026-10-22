@@ -10,7 +10,7 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
   const address = new URL('http://' + process.env.FIRESTORE_EMULATOR_HOST);
   assert.ok(['127.0.0.1', 'localhost', '[::1]', '::1'].includes(address.hostname), 'Use a local emulator host.');
   const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
-  const { doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch } = require('firebase/firestore');
+  const { doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, runTransaction } = require('firebase/firestore');
   const projectId = 'demo-donggu-streetlight';
   let env;
   const staff = () => env.authenticatedContext('inspector-a').firestore();
@@ -143,6 +143,11 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       batch.set(doc(db, 'inspections/batch-inspection'), inspection({ thumbs, photoN: 6 }));
       batch.set(doc(db, 'lights/p1'), { status: '정상', lastInspected: 1000, lastResult: '정상', redoNote: null, updatedAt: 1000 });
       await assertSucceeds(batch.commit());
+      await assertSucceeds(updateDoc(doc(admin(),'inspections/batch-inspection'),{reviewedBy:'admin',reviewedAt:2000}));
+      const retry=writeBatch(db);
+      for(let index=0;index<6;index++)retry.set(doc(db,'photos/batch-photo-'+index),photo({inspId:'batch-inspection'}),{merge:true});
+      retry.set(doc(db,'inspections/batch-inspection'),inspection({thumbs,photoN:6}),{merge:true});
+      await assertSucceeds(retry.commit());
     });
 
     test('photo author cannot replace evidence and legacy initial inspection linking remains available', async () => {
@@ -172,17 +177,149 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       }
     });
 
-    test('anonymous reports accept an empty optional description and the stable QR id', async () => {
-      const db = anonymous();
-      await assertSucceeds(setDoc(doc(db, 'citizen_reports/blank'), citizen({ lightId: 'p2872307', code: '산수동 642' })));
-      const oldClient = citizen(); delete oldClient.desc;
-      await assertSucceeds(setDoc(doc(db, 'citizen_reports/legacy-empty'), oldClient));
-      await assertFails(getDoc(doc(db, 'citizen_reports/blank')));
-      await assertFails(updateDoc(doc(db, 'citizen_reports/blank'), { imported: true }));
-      await assertFails(setDoc(doc(db, 'citizen_reports/wrong-type'), citizen({ desc: 42 })));
-      await assertFails(setDoc(doc(db, 'citizen_reports/unknown-field'), citizen({ status: '완료' })));
-      await assertFails(setDoc(doc(db, 'citizen_reports/no-consent'), citizen({ contact: '01012345678', consent: false })));
-      await assertSucceeds(setDoc(doc(db, 'citizen_reports/with-consent'), citizen({ contact: '01012345678', consent: true })));
+    test('anonymous direct reports are blocked so gateway validation cannot be bypassed', async () => {
+      const db=anonymous();
+      await assertFails(setDoc(doc(db,'citizen_reports/direct'),citizen({lightId:'p1'})));
+      await seed({'citizen_reports/received':citizen({contact:'01012345678',consent:true})});
+      await assertFails(getDoc(doc(db,'citizen_reports/received')));
+      await assertFails(updateDoc(doc(db,'citizen_reports/received'),{imported:true}));
+    });
+
+    test('bootstrap is never open to arbitrary login accounts, even before setup exists', async()=>{
+      await env.clearFirestore();
+      for(const uid of ['first','racer'])await assertFails(setDoc(doc(env.authenticatedContext(uid).firestore(),'roles/'+uid),{role:'admin'}));
+      await assertFails(setDoc(doc(env.authenticatedContext('first').firestore(),'meta/setup'),{by:'first'}));
+    });
+
+    test('staff cannot mutate or hide raw reports, but atomic import clears PII and links the real report',async()=>{
+      await seed({'citizen_reports/raw':citizen({contact:'01012345678',consent:true,photo:'data:image/jpeg;base64,dGVzdA=='})});
+      const db=staff(),raw=doc(db,'citizen_reports/raw');
+      await assertFails(updateDoc(raw,{desc:'changed'}));
+      await assertFails(deleteDoc(raw));
+      await assertFails(updateDoc(raw,{imported:true,importedAt:2000,importedBy:'inspector-a',reportId:'missing',contact:deleteField(),photo:deleteField()}));
+      const copied={ext:'raw',issue:'불이 꺼져 있어요',desc:'',contact:'01012345678',photo:'data:image/jpeg;base64,dGVzdA==',status:'접수'};
+      const fake=writeBatch(db);fake.set(doc(db,'reports/forged'),{...copied,desc:'changed'});fake.update(raw,{imported:true,importedAt:2000,importedBy:'inspector-a',reportId:'forged',contact:deleteField(),photo:deleteField()});await assertFails(fake.commit());
+      const batch=writeBatch(db);batch.set(doc(db,'reports/imported'),copied);batch.update(raw,{imported:true,importedAt:2000,importedBy:'inspector-a',reportId:'imported',contact:deleteField(),photo:deleteField()});await assertSucceeds(batch.commit());
+      assert.equal((await getDoc(raw)).data().contact,undefined);
+    });
+
+    test('inspection types and all evidence references are validated before creation and review',async()=>{
+      const db=staff();
+      for(const thumbs of ['broken',[null],[{id:'missing',label:'전경',t:'data:image/jpeg;base64,dGVzdA=='}]])await assertFails(setDoc(doc(db,'inspections/malformed'),inspection({thumbs})));
+      // Existing legacy broken links cannot be approved; no late-bound unlinked photo can help.
+      await seed({'inspections/legacy-link':inspection({thumbs:[{id:'later',t:'data:image/jpeg;base64,dGVzdA=='}]})});
+      await assertFails(updateDoc(doc(admin(),'inspections/legacy-link'),{reviewedBy:'admin',reviewedAt:2000}));
+      await assertSucceeds(setDoc(doc(db,'photos/later'),photo({kind:'rep'})));
+      await assertFails(updateDoc(doc(admin(),'inspections/legacy-link'),{reviewedBy:'admin',reviewedAt:2000}));
+      await assertSucceeds(updateDoc(doc(db,'photos/later'),{inspId:'legacy-link'}));
+      await assertSucceeds(updateDoc(doc(admin(),'inspections/legacy-link'),{reviewedBy:'admin',reviewedAt:2000}));
+    });
+
+    test('inspection timestamps never go backwards except an explicit new admin restore',async()=>{
+      await seed({'lights/p1':{status:'고장',lastInspected:2000}});
+      for(const db of [staff(),admin()])await assertFails(updateDoc(doc(db,'lights/p1'),{status:'정상',lastInspected:1000}));
+      await assertSucceeds(updateDoc(doc(admin(),'lights/p1'),{status:'정상',lastInspected:1000,restoredAt:3000,restoredBy:'admin'}));
+      await assertFails(updateDoc(doc(admin(),'lights/p1'),{lastInspected:500,restoredAt:3000,restoredBy:'admin'}));
+    });
+
+    test('join requests belong to the user and only an admin can approve with a staff role',async()=>{
+      const outsider=env.authenticatedContext('joiner',{email:'joiner@example.invalid'}).firestore();
+      await assertSucceeds(setDoc(doc(outsider,'joinRequests/joiner'),{uid:'joiner',email:'joiner@example.invalid',name:'신청자',message:'현장 업무',status:'pending',createdAt:1000,updatedAt:1000}));
+      await assertFails(updateDoc(doc(outsider,'joinRequests/joiner'),{status:'approved'}));
+      await assertFails(updateDoc(doc(staff(),'joinRequests/joiner'),{status:'approved'}));
+      const db=admin(),batch=writeBatch(db);batch.set(doc(db,'roles/joiner'),{role:'inspector'});batch.update(doc(db,'joinRequests/joiner'),{status:'approved',reviewedBy:'admin',reviewedAt:2000,updatedAt:2000});await assertSucceeds(batch.commit());
+      for(const db of [outsider,staff(),admin()])await assertFails(setDoc(doc(db,'auditEvents/fake'),{by:'admin',action:'fake'}));
+    });
+
+    test('work orders enforce assignment, immutable identity, evidence and admin verification',async()=>{
+      const manager=admin(),db=staff();
+      const work={schemaVersion:1,lightId:'p1',code:'산수동 1',dong:'산수동',title:'수리',description:'',type:'수리',priority:'보통',status:'assigned',assignedTo:'inspector-a',dueAt:0,createdAt:1000,createdBy:'admin',updatedAt:1000,updatedBy:'admin',revision:1,reportIds:[],inspectionIds:[],beforePhotos:[],afterPhotos:[],completionNote:'',verificationNote:'',parts:[],costTotal:0,measurements:[],stockApplied:{}};
+      await assertSucceeds(setDoc(doc(manager,'workOrders/work'),work));
+      await assertFails(updateDoc(doc(otherStaff(),'workOrders/work'),{status:'in_progress',revision:2,updatedAt:2000,updatedBy:'inspector-b'}));
+      await assertSucceeds(updateDoc(doc(db,'workOrders/work'),{status:'in_progress',revision:2,updatedAt:2000,updatedBy:'inspector-a'}));
+      await assertFails(updateDoc(doc(db,'workOrders/work'),{revision:3,stockApplied:{item:1}}));
+      await assertFails(updateDoc(doc(manager,'workOrders/work'),{revision:3,updatedBy:'admin',stockApplied:{item:1}}));
+      await assertFails(updateDoc(doc(db,'workOrders/work'),{lightId:'p2',revision:3,updatedAt:3000}));
+      await assertFails(updateDoc(doc(db,'workOrders/work'),{status:'completed',revision:3,updatedAt:3000,completedBy:'inspector-a',completedAt:3000}));
+      const batch=writeBatch(db);batch.set(doc(db,'photos/work-after'),photo({kind:'work',workId:'work'}));batch.update(doc(db,'workOrders/work'),{status:'completed',revision:3,updatedAt:3000,completedBy:'inspector-a',completedAt:3000,afterPhotos:['work-after']});batch.set(doc(db,'workEvents/complete'),{workId:'work',lightId:'p1',fromStatus:'in_progress',toStatus:'completed',type:'complete',note:'수리 완료',at:3000,by:'inspector-a',revision:3});await assertSucceeds(batch.commit());
+      await assertFails(updateDoc(doc(db,'workOrders/work'),{status:'verified',revision:4,updatedAt:4000,verifiedBy:'inspector-a',verifiedAt:4000}));
+      await assertSucceeds(updateDoc(doc(manager,'workOrders/work'),{status:'verified',revision:4,updatedAt:4000,updatedBy:'admin',verifiedBy:'admin',verifiedAt:4000}));
+      await assertFails(updateDoc(doc(manager,'workEvents/complete'),{note:'rewritten'}));
+    });
+
+    test('maximum supported work verification atomically handles 12 evidence photos, 10 inventory items and 20 reports',async()=>{
+      const manager=admin(),db=staff(),workId='large-work';
+      const beforePhotos=Array.from({length:6},(_,i)=>'before-'+i),afterPhotos=Array.from({length:6},(_,i)=>'after-'+i);
+      const reportIds=Array.from({length:20},(_,i)=>'report-'+i),itemIds=Array.from({length:10},(_,i)=>'item-'+i);
+      const work={schemaVersion:1,lightId:'p1',code:'산수동 1',dong:'산수동',title:'여러 자재 수리',description:'',type:'수리',priority:'보통',status:'assigned',assignedTo:'inspector-a',dueAt:0,createdAt:1000,createdBy:'admin',updatedAt:1000,updatedBy:'admin',revision:1,reportIds,inspectionIds:[],beforePhotos,afterPhotos:[],completionNote:'',verificationNote:'',parts:itemIds.map(inventoryId=>({name:inventoryId,qty:1,unitCost:100,inventoryId})),costTotal:1000,accountedCost:0,measurements:[],stockApplied:{}};
+      await seed(Object.fromEntries([
+        ['lights/p1',{status:'고장',lastInspected:1000,updatedAt:1000}],
+        ...reportIds.map(id=>['reports/'+id,{lightId:'p1',status:'접수',contact:'private'}]),
+        ...itemIds.map(id=>['inventory/'+id,{name:id,unit:'개',quantity:20,unitCost:100,revision:1,updatedAt:1000,updatedBy:'admin'}])
+      ]));
+      const create=writeBatch(manager);create.set(doc(manager,'workOrders/'+workId),work);
+      for(const id of beforePhotos)create.set(doc(manager,'photos/'+id),photo({kind:'work',workId,by:'admin'}));
+      create.set(doc(manager,'workEvents/large-create'),{workId,lightId:'p1',fromStatus:'',toStatus:'assigned',type:'created',note:'',at:1000,by:'admin',revision:1,createdAt:1000,costTotal:1000,costDelta:0});await assertSucceeds(create.commit());
+      await assertSucceeds(updateDoc(doc(db,'workOrders/'+workId),{status:'in_progress',revision:2,updatedAt:2000,updatedBy:'inspector-a'}));
+      const complete=writeBatch(db);
+      for(const id of afterPhotos)complete.set(doc(db,'photos/'+id),photo({kind:'work',workId}));
+      complete.update(doc(db,'workOrders/'+workId),{status:'completed',revision:3,updatedAt:3000,completedBy:'inspector-a',completedAt:3000,afterPhotos});
+      complete.set(doc(db,'workEvents/large-complete'),{workId,lightId:'p1',fromStatus:'in_progress',toStatus:'completed',type:'transition',note:'',at:3000,by:'inspector-a',revision:3,createdAt:1000,costTotal:1000,costDelta:0});await assertSucceeds(complete.commit());
+      await assertSucceeds(runTransaction(manager,async transaction=>{
+        const paths=['workOrders/'+workId,'workEvents/large-verify','lights/p1',...beforePhotos.concat(afterPhotos).map(id=>'photos/'+id),...itemIds.map(id=>'inventory/'+id),...reportIds.map(id=>'reports/'+id)];
+        const records=new Map();for(const key of paths)records.set(key,(await transaction.get(doc(manager,key))).data());
+        assert.equal(records.get('workEvents/large-verify'),undefined);
+        for(const id of beforePhotos.concat(afterPhotos))assert.equal(records.get('photos/'+id).workId,workId);
+        for(const id of itemIds){transaction.update(doc(manager,'inventory/'+id),{quantity:19,revision:2,updatedAt:4000,updatedBy:'admin'});transaction.set(doc(manager,'inventoryMoves/large-verify-'+id),{itemId:id,delta:-1,reason:'작업 검수',at:4000,by:'admin',revision:2,workId});}
+        for(const id of reportIds)transaction.update(doc(manager,'reports/'+id),{status:'완료',contact:'',resolvedAt:4000,resolvedBy:'admin',workId});
+        transaction.update(doc(manager,'lights/p1'),{status:'정상',updatedAt:4000,lastRepairedAt:4000,lastWorkId:workId});
+        transaction.update(doc(manager,'workOrders/'+workId),{status:'verified',revision:4,updatedAt:4000,updatedBy:'admin',verifiedBy:'admin',verifiedAt:4000,accountedCost:1000,stockApplied:Object.fromEntries(itemIds.map(id=>[id,1]))});
+        transaction.set(doc(manager,'workEvents/large-verify'),{workId,lightId:'p1',fromStatus:'completed',toStatus:'verified',type:'transition',note:'',at:4000,by:'admin',revision:4,createdAt:1000,costTotal:1000,costDelta:1000});
+      }));
+      assert.equal((await getDoc(doc(manager,'inventory/item-9'))).data().quantity,19);
+      assert.equal((await getDoc(doc(manager,'reports/report-19'))).data().status,'완료');
+    });
+
+    test('accounted costs change only at admin verification and event snapshots preserve exact historical deltas',async()=>{
+      const manager=admin(),db=staff(),workId='cost-work';
+      const work={schemaVersion:1,lightId:'p1',code:'산수동 1',dong:'산수동',title:'수리',description:'',type:'수리',priority:'보통',status:'completed',assignedTo:'inspector-a',dueAt:0,createdAt:1000,createdBy:'admin',updatedAt:3000,updatedBy:'inspector-a',revision:3,reportIds:[],inspectionIds:[],beforePhotos:[],afterPhotos:['cost-photo'],completionNote:'완료',completedAt:3000,completedBy:'inspector-a',verificationNote:'',parts:[],costTotal:100,accountedCost:0,measurements:[],stockApplied:{}};
+      await seed({'workOrders/cost-work':work,'photos/cost-photo':photo({kind:'work',workId})});
+      await assertFails(updateDoc(doc(db,'workOrders/'+workId),{accountedCost:100,revision:4}));
+      await assertFails(updateDoc(doc(manager,'workOrders/'+workId),{accountedCost:100,revision:4,updatedBy:'admin'}));
+      function change(actor,id,old,target,patch={},eventPatch={}){
+        const client=actor==='admin'?manager:db,revision=old.revision+1,at=revision*1000;
+        const next={...old,...patch,status:target,revision,updatedAt:at,updatedBy:actor};
+        if(target==='verified'){next.verifiedBy=actor;next.verifiedAt=at;}
+        if(target==='completed'){next.completedBy=actor;next.completedAt=at;}
+        const event={workId,lightId:'p1',fromStatus:old.status,toStatus:target,type:'transition',note:'',at,by:actor,revision,createdAt:1000,costTotal:next.costTotal,costDelta:target==='verified'?next.costTotal-(old.accountedCost||0):0,...eventPatch};
+        const batch=writeBatch(client);batch.set(doc(client,'workOrders/'+workId),next);batch.set(doc(client,'workEvents/'+id),event);
+        return {next,event,commit:()=>batch.commit()};
+      }
+      await assertFails(change('admin','wrong-account',work,'verified',{accountedCost:99}).commit());
+      for(const invalid of [{createdAt:999},{costTotal:101},{costDelta:99},{costDelta:'100'},{fromStatus:'assigned'}])await assertFails(change('admin','invalid-event',work,'verified',{accountedCost:100},invalid).commit());
+      const first=change('admin','first-verify',work,'verified',{accountedCost:100});await assertSucceeds(first.commit());
+      for(const client of [manager,db])await assertFails(setDoc(doc(client,'workEvents/duplicate'),{...first.event,by:client===manager?'admin':'inspector-a',costDelta:0}));
+      await assertFails(change('admin','erase-accounted-cost',first.next,'assigned',{accountedCost:0}).commit());
+      const reopen=change('admin','reopen',first.next,'assigned');await assertSucceeds(reopen.commit());
+      await assertFails(change('inspector-a','forged-start',reopen.next,'in_progress',{}, {costDelta:1}).commit());
+      const start=change('inspector-a','start',reopen.next,'in_progress');await assertSucceeds(start.commit());
+      await assertFails(change('inspector-a','forged-completion',start.next,'completed',{costTotal:60,accountedCost:60}).commit());
+      const done=change('inspector-a','complete-again',start.next,'completed',{costTotal:60});await assertSucceeds(done.commit());
+      const second=change('admin','second-verify',done.next,'verified',{accountedCost:60});await assertSucceeds(second.commit());
+      assert.equal((await getDoc(doc(manager,'workEvents/first-verify'))).data().costTotal,100);
+      assert.equal((await getDoc(doc(manager,'workEvents/second-verify'))).data().costDelta,-40);
+      assert.equal((await getDoc(doc(manager,'workOrders/'+workId))).data().accountedCost,60);
+    });
+
+    test('operations retention settings and inventory revisions are bounded and admin-only',async()=>{
+      const value={schemaVersion:1,inspectionDays:180,privacyDays:3650,updatedAt:1000,updatedBy:'admin'};
+      await assertSucceeds(setDoc(doc(admin(),'settings/operations'),value));
+      await assertFails(updateDoc(doc(staff(),'settings/operations'),{privacyDays:1,updatedBy:'inspector-a'}));
+      await assertFails(updateDoc(doc(admin(),'settings/operations'),{privacyDays:3651}));
+      const stock={name:'전구',unit:'개',quantity:3,unitCost:10,revision:1,updatedAt:1000,updatedBy:'admin'};
+      await assertSucceeds(setDoc(doc(admin(),'inventory/item'),stock));
+      await assertFails(updateDoc(doc(admin(),'inventory/item'),{quantity:2}));
+      await assertSucceeds(updateDoc(doc(admin(),'inventory/item'),{quantity:2,revision:2}));
     });
 
     test('users without staff roles cannot read or write staff records or self-assign a role after setup', async () => {

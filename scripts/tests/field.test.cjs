@@ -11,6 +11,7 @@ const lights = registry.rows.map(row => ({
   ...Object.fromEntries(registry.cols.map((key, i) => [key, row[i]])), status: '정상'
 }));
 const printable = lights.filter(l => !l.removed && !l.noPlate && l.code);
+const field = require('../../app/field.js');
 
 // Compile the actual application functions, without evaluating its boot code or contacting a backend.
 function functionSource(name) {
@@ -278,7 +279,7 @@ function scannerContext(getUserMedia, play = async () => {}) {
     navigator: { mediaDevices: { getUserMedia } },
     document: { createElement: () => ({ getContext: () => ({}) }) }, window: {},
     requestAnimationFrame() { return ++counts.frames; }, cancelAnimationFrame() {}
-  }), ['stopMediaStream', 'stopCam', 'startCam']);
+  }), ['stopMediaStream', 'cancelScanPhoto', 'stopCam', 'startCam']);
   return { context, video, counts };
 }
 
@@ -403,4 +404,150 @@ test('visibility resume reacquires a released lock and does not duplicate a pend
   assert.equal(requests, 1);
   request.resolve(sentinel); await new Promise(setImmediate);
   assert.equal(context.pt.wake, sentinel);
+});
+
+test('long-axis tilt is invariant under rotation around a vertical phone, including landscape display', () => {
+  for (const gamma of [-80, -30, 0, 30, 80]) assert.ok(Math.abs(field.longAxisTilt(90, gamma)) < 1e-5);
+  assert.ok(Math.abs(field.longAxisTilt(85, 30) - 5) < 1e-6);
+  assert.equal(field.longAxisTilt(0, 0), 90);
+  assert.equal(field.longAxis(390, 844, 0), 'y');
+  assert.equal(field.longAxis(844, 390, 90), 'y');
+  assert.equal(field.longAxis(1024, 768, 0), 'x');
+  assert.ok(field.longAxisTilt(0, 90, 'x') < 1e-6);
+});
+
+test('tilt requires elapsed stability, supports a known vertical zero, and does not classify a fault automatically', () => {
+  const samples = Array.from({ length: 20 }, (_, i) => ({ at: i * 50, v: field.gravityVector(89, 0) }));
+  const reference = field.tiltWindow(samples);
+  assert.equal(reference.stable, true);
+  assert.equal(field.tiltWindow(samples.slice(0, 3)).stable, false);
+  assert.equal(field.tiltWindow(samples.map((s, i) => ({ ...s, v: field.gravityVector(i % 2 ? 85 : 90, 0) }))).stable, false);
+  assert.ok(field.tiltWindow(samples, reference.vector).value < 1e-6);
+  const owner = { checks: {}, photos: [], result: null }, memo = { value: '' };
+  const c = load(vm.createContext({ draft: owner, tilt: { owner, val: 3, stable: false, zero: reference.vector, spread: .1 }, TILT_WARN: 2, $: () => memo, toast() {}, stopTilt() {} }), ['keepTilt']);
+  c.keepTilt(); assert.equal(owner.tilt, undefined);
+  c.tilt.stable = true; c.keepTilt();
+  assert.equal(owner.tilt, 3); assert.equal(owner.checks.pole, undefined); assert.equal(owner.result, null);
+  assert.match(memo.value, /참고값.*영점/);
+});
+
+test('AR projects the physical rear camera with beta and gamma and does not add screen rotation', () => {
+  assert.equal(field.cameraHeading(0, 90, 30), 330);
+  assert.ok(Math.abs(field.cameraHeading(90, 90, 30) - 240) < 1e-6);
+  assert.equal(field.cameraHeading(0, 0, 0), null);
+  const c = load(vm.createContext({ DongguField: field,
+    ar: { on: true, heading: null, offset: 0, lastDraw: 0 }, window: { ondeviceorientationabsolute: null },
+    screen: { orientation: { angle: 90 } }, performance: { now: () => 1000 }, $: () => null,
+    arDraw() {}, arCalCheck() {}, toRad: v => v * Math.PI / 180, angDiff: (a, b) => (b - a + 540) % 360 - 180
+  }), ['onHeading']);
+  c.onHeading({ type: 'deviceorientationabsolute', alpha: 0, beta: 90, gamma: 30, absolute: true });
+  assert.equal(c.ar.heading, 330);
+  c.onHeading({ type: 'deviceorientationabsolute', alpha: 0, beta: 0, gamma: 0, absolute: true });
+  assert.equal(c.ar.heading, null);
+});
+
+test('road review length and score are independent of OSM vertex density and include short tails', () => {
+  const grid = { toXY: p => ({ x: p.lng, y: p.lat }), toLL: (x, y) => ({ lat: y, lng: x }), near: () => [], lightAt: () => 0 };
+  const c = load(vm.createContext({ DongguField: field, ROADS: { ways: [], areas: [] }, LIGHT_MODEL: { weak: .3 }, ROAD_SKIP_SERVICE: /^parking_aisle$/, ROAD_LABEL: {}, lightGrid: () => grid, inDong: () => true }), ['roadAreas', 'roadReview']);
+  const check = points => { c.ROADS.ways = [{ name: 'road', type: 'residential', pts: points }]; return c.roadReview('전체', '전체')[0]; };
+  const coarse = check([[0, 0], [0, 24]]), dense = check(Array.from({ length: 13 }, (_, i) => [0, i * 2]));
+  assert.equal(coarse.len, 24); assert.equal(dense.len, 24); assert.equal(coarse.score, dense.score);
+  assert.equal(check([[0, 0], [0, 29]]).len, 29);
+  const samples = field.sampleLine([{ x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 5 }]);
+  assert.equal(samples.reduce((s, p) => s + p.length, 0), 8);
+});
+
+test('OSM relation fragments join in either direction, exclude inner holes, and reject open chains', () => {
+  const g = coords => coords.map(([lat, lon]) => ({ lat, lon }));
+  const member = (coords, role = 'outer') => ({ type: 'way', role, geometry: g(coords) });
+  const members = [member([[10, 10], [0, 10]]), member([[0, 0], [10, 0]]), member([[10, 0], [10, 10]]), member([[0, 10], [0, 0]]), member([[4, 4], [4, 6], [6, 6], [6, 4], [4, 4]], 'inner')];
+  const result = field.relationPolygons(members);
+  assert.equal(result.incomplete, 0); assert.equal(result.polygons.length, 1);
+  assert.equal(field.inPolygon(2, 2, result.polygons[0]), true);
+  assert.equal(field.inPolygon(5, 5, result.polygons[0]), false);
+  const open = field.relationPolygons(members.slice(0, 3));
+  assert.equal(open.polygons.length, 0); assert.ok(open.incomplete > 0);
+});
+
+test('road area holes remain eligible for review, and administrative-dong map filters retain legal-dong lamps', () => {
+  const area = { t: 'forest', pts: [[0, 0], [0, 10], [10, 10], [10, 0], [0, 0]], holes: [[[4, 4], [4, 6], [6, 6], [6, 4], [4, 4]]] };
+  const c = load(vm.createContext({ DongguField: field, ROADS: { areas: [area] } }), ['roadAreas']);
+  const projected = c.roadAreas({ toXY: ({ lat, lng }) => ({ x: lng, y: lat }) })[0];
+  assert.equal(field.inPolygon(2, 2, projected), true); assert.equal(field.inPolygon(5, 5, projected), false);
+  let lampMarkers = 0;
+  const layer = () => ({ addTo() { return this; }, on() { return this; }, bindPopup() { return this; }, pad() { return this; } });
+  const L = { map: () => ({ fitBounds() {} }), layerGroup: layer, circle: layer,
+    circleMarker() { lampMarkers++; return layer(); }, marker: layer, polyline: layer, divIcon: x => x, latLngBounds: layer };
+  const l = { id: 'one', lat: 35, lng: 126, dong: '금동', status: '정상' };
+  const map = load(vm.createContext({ S: { review: { mode: 'roads', dong: 'a:충장동', cands: [] }, lights: [l] },
+    rvList: () => [{ pts: [], mid: l, near: [], len: 24, E: 0 }], inDong: (x, d) => x.dong === '금동' && d === 'a:충장동',
+    openSheet() {}, window: { L }, L, DongguPWA: { tileLayer: layer }, gmap: null, gmapLayer: null, gmapPts: [],
+    meStop() {}, setTimeout() {}, onOf: () => 1, reachOf: () => 20, kindBadge: () => '', esc: String
+  }), ['openReviewMap']);
+  map.openReviewMap('all'); assert.equal(lampMarkers, 1);
+});
+
+test('late photo decoding cannot stop or write into a replacement scanner', async () => {
+  const image = deferred(); let stopped = 0, results = 0;
+  const old = { active: true, busy: false, ctx: 'inspect' };
+  const c = load(vm.createContext({ scan: old, ocrState: {}, compressBlob: () => image.promise, $: () => null,
+    stopCam() { stopped++; }, showScanResult() { results++; }, toast() {}, window: {},
+  }), ['beginScanPhoto', 'readLabelPhoto']);
+  const task = c.readLabelPhoto({ type: 'image/png' });
+  const current = c.scan = { active: true, busy: true, ctx: 'inbox' };
+  image.resolve({ canvas: {} }); await task;
+  assert.equal(stopped, 1); assert.equal(results, 0); assert.equal(current.busy, true);
+});
+
+test('late OCR model loading and its progress cannot write or clear busy state in a new scanner', async () => {
+  const model = deferred(); let progress, changed = 0, recognized = 0;
+  const old = { active: true, busy: false };
+  const c = load(vm.createContext({ scan: old, ocrState: { src: { width: 100, height: 100 } },
+    $: () => null, findPlate: () => null, showStage() {}, cropTo: () => ({}), stageStatus() { changed++; },
+    getOcr: callback => { progress = callback; return model.promise; }, showScanResult() { changed++; }
+  }), ['beginScanPhoto', 'ocrLabel']);
+  const task = c.ocrLabel(null, null);
+  const current = c.scan = { active: true, busy: true };
+  const previous = changed; progress({ status: 'recognizing text', progress: .5 });
+  model.resolve({ recognize() { recognized++; } }); await task;
+  assert.equal(changed, previous); assert.equal(recognized, 0); assert.equal(current.busy, true);
+});
+
+test('photo editor decode finishing after draft navigation does not create an editor', async () => {
+  const decoded = deferred(); let closed = 0;
+  const c = load(vm.createContext({ photoEditor: null, photoEditorRun: 0, decodeFile: () => decoded.promise, toast() {} }), ['cancelPhotoEditor', 'openPhotoEditor']);
+  let current = true;
+  const task = c.openPhotoEditor({}, { code: 'old', onDone() { assert.fail('old photo must not attach'); }, isCurrent: () => current });
+  current = false; decoded.resolve({ close() { closed++; } });
+  assert.equal(await task, false); assert.equal(closed, 1);
+});
+
+test('voice intents separate a failed lamp from an unlit place', () => {
+  for (const text of ['꺼짐', '불이 없어', '불이 안 들어와', '고장']) assert.equal(field.voiceIntent(text), '고장');
+  for (const text of ['여기', '여기 어두움', '등 없는 지점']) assert.equal(field.voiceIntent(text), 'spot');
+  assert.equal(field.voiceIntent('깜빡여요'), '점검필요'); assert.equal(field.voiceIntent('켜져 있음'), '정상');
+  assert.equal(field.voiceIntent('없어'), null); assert.equal(field.voiceIntent('취소'), 'undo');
+});
+
+test('uncertain GPS does not record passage; out-of-area faults stay available', () => {
+  const lamps = ['동A', '동B'].map((dong, i) => ({ id: String(i), dong, status: '정상' }));
+  const near = lamps.map((l, i) => ({ d: i + 1, it: { l, x: 0, y: i + 1 } }));
+  const c = load(vm.createContext({ pt: { on: true, acc: null, last: null, track: [], passed: new Map(), spoken: new Set(), dong: '동A' },
+    $: () => null, lightGrid: () => ({ toXY: () => ({ x: 0, y: 0 }), near: () => near }), ptDraw() {}, AR_FOV: 62, Date,
+  }), ['ptPos']);
+  c.ptPos({ coords: { latitude: 35, longitude: 126, accuracy: 40 } });
+  assert.equal(c.pt.passed.size, 0); assert.equal(c.pt.ahead.length, 2);
+  c.pt.last = null;
+  c.ptPos({ coords: { latitude: 35, longitude: 126, accuracy: 10 } });
+  assert.equal(c.pt.passed.size, 2); assert.deepEqual(Array.from(c.pt.ahead, a => a.l.dong), ['동A', '동B']);
+});
+
+test('a normal lamp can be explicitly observed lit and a patrol report never infers lighting from GPS', () => {
+  const target = { id: 'normal', code: 'normal lamp', status: '정상' };
+  const c = load(vm.createContext({ pt: { on: true, sel: target.id, marks: [], pos: null, dong: '전체' },
+    byId: () => target, inDong: () => true, navigator: {}, toast() {}, ptDraw() {}, ptSay() {}, fmtDT: () => 'date'
+  }), ['ptMark', 'ptReportText']);
+  c.ptMark('정상'); assert.equal(c.pt.marks.length, 1);
+  const report = c.ptReportText({ start: 1, end: 60001, passed: [], marks: c.pt.marks });
+  assert.match(report, /GPS 통과 0개.*미확인/); assert.match(report, /직접 점등 확인 1건/); assert.doesNotMatch(report, /-1/);
 });

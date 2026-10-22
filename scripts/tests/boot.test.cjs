@@ -28,7 +28,7 @@ test('configured Firebase failure renders a connection error and cannot fall bac
     can: () => true, FEATURES: { reports: false },
     $: selector => selector === '#view' ? view : null,
     document: { querySelectorAll: () => [], querySelector: () => nav },
-    refreshAdminSection() {}
+    refreshAdminSection() {}, DongguPWA: { render() {} }
   };
   vm.createContext(sandbox);
   vm.runInContext(
@@ -87,15 +87,16 @@ test('an indefinitely pending profile write does not block Firebase cached liste
   };
   const auth = {
     currentUser: { uid: 'inspector-a', displayName: '점검자', email: 'staff@example.invalid' },
+    setPersistence: async mode => { assert.equal(mode, 'local'); },
     onAuthStateChanged(callback) { queueMicrotask(callback); return () => { unsubscribed++; }; },
     getRedirectResult: async () => null
   };
   const sandbox = {
-    S: {}, FB: null, db: null, user: null, dl: null,
+    window: { DG_DEVICE_TRUSTED: true }, S: {}, FB: null, db: null, user: null, dl: null,
     firebase: { apps: [{}], firestore: () => firestore, auth: () => auth },
     loadScript: async url => { scripts.push(url); },
     setSync: (...args) => sync.push(args),
-    render: () => { rendered++; }, onLights() {}, ptIndex() {}, resolveNames() {}
+    render: () => { rendered++; }, onLights() {}, ptIndex() {}, resolveNames() {}, dataChanged() {}
   };
   vm.createContext(sandbox);
   vm.runInContext(firebaseSource, sandbox);
@@ -118,6 +119,16 @@ test('an indefinitely pending profile write does not block Firebase cached liste
   lightListener.next({ docs: [], metadata: { fromCache: false } });
   assert.deepEqual(sync, [[false, '오프라인'], [true, '실시간']]);
   assert.equal(rendered, 2);
+});
+
+test('App Check is activated before Firestore and shared mode leaves persistence disabled', async () => {
+  const window = { DG_DEVICE_TRUSTED: false }, events = [];
+  const firestore = { enablePersistence() { assert.fail('Shared devices cannot enable the persistent cache'); } };
+  const auth = { currentUser: null, setPersistence: async mode => { assert.equal(mode, 'session'); }, onAuthStateChanged(callback) { queueMicrotask(callback); return () => {}; }, getRedirectResult: async () => null };
+  const sandbox = { window, S: {}, FB: null, firebase: { apps: [{}], appCheck: () => ({ activate(key, refresh) { assert.equal(key, 'local-site-key'); assert.equal(refresh, true); events.push('app-check'); } }), firestore: () => { assert.equal(window.DG_APP_CHECK_ACTIVE, true); events.push('firestore'); return firestore; }, auth: () => auth }, loadScript: async () => {}, setSync() {}, render() {} };
+  vm.createContext(sandbox); vm.runInContext(firebaseSource, sandbox);
+  await vm.runInContext('fbBoot({projectId:"demo",appCheckSiteKey:"local-site-key"})', sandbox);
+  assert.deepEqual(events, ['app-check', 'firestore']);
 });
 
 function loader() {

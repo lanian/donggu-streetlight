@@ -5,6 +5,10 @@ window.FIREBASE_CONFIG = null;
 window.FIREBASE_CONFIG = {
   apiKey: "AIza...",
   authDomain: "donggu-light.firebaseapp.com",
-  projectId: "donggu-light"
+  projectId: "donggu-light",
+  appId: "Firebase 웹 앱 ID",
+  functionsEnabled: false, // 서버 함수 배포 후 true
+  functionsRegion: "asia-northeast3",
+  appCheckSiteKey: ""
 };
 */
