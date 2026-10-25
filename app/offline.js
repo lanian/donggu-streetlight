@@ -40,6 +40,12 @@
         if (values.has(key)) return { value: copy(values.get(key)), created: false };
         values.set(key, copy(value)); return { value: copy(value), created: true };
       },
+      compareAndSet: async (key, expectedRevision, value) => {
+        const current = values.get(key) || null;
+        if ((current ? current.value.draftRevision || 0 : null) !== expectedRevision) return { applied: false, current: copy(current) };
+        if (value === null) values.delete(key); else values.set(key, copy(value));
+        return { applied: true };
+      },
       remove: async key => { values.delete(key); },
       list: async prefix => [...values].filter(([key]) => key.startsWith(prefix)).map(([, value]) => copy(value)),
       clear: async () => { values.clear(); }
@@ -64,6 +70,16 @@
           if (request.result) return done({ value: request.result.value, created: false });
           store.put({ key: recordKey, namespace: ns, item: key, value: copy(value) });
           done({ value: copy(value), created: true });
+        };
+      }),
+      compareAndSet: (key, expectedRevision, value) => transact('readwrite', (store, done) => {
+        const recordKey = ns + '|' + key, request = store.get(recordKey);
+        request.onsuccess = () => {
+          const current = request.result ? request.result.value : null;
+          if ((current ? current.value.draftRevision || 0 : null) !== expectedRevision) return done({ applied: false, current });
+          if (value === null) store.delete(recordKey);
+          else store.put({ key: recordKey, namespace: ns, item: key, value: copy(value) });
+          done({ applied: true });
         };
       }),
       remove: key => transact('readwrite', store => store.delete(ns + '|' + key)),
@@ -93,6 +109,24 @@
     const store = requireStore(), key = kind + ':' + id;
     await store.write(key, { id, kind, value: copy(value), updatedAt: Date.now() });
     emit({ type: 'draft', kind, id });
+  }
+  async function putIfCurrent(kind, id, value, expectedRevision = null) {
+    const store = requireStore(), gen = generation;
+    if (typeof store.compareAndSet !== 'function') throw Object.assign(new Error('이 저장소는 충돌을 확인하는 초안 저장을 지원하지 않아요.'), { code: 'unsupported-backend' });
+    if (expectedRevision !== null && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) throw new Error('초안 버전을 확인해 주세요.');
+    const saved = { ...copy(value), draftRevision: (expectedRevision || 0) + 1 };
+    const result = await store.compareAndSet(kind + ':' + id, expectedRevision, { id, kind, value: saved, updatedAt: Date.now() });
+    if (gen !== generation) throw Object.assign(new Error('초안을 저장하는 동안 계정이 바뀌었어요.'), { code: 'account-changed' });
+    if (!result.applied) throw Object.assign(new Error('다른 탭에서 이 초안을 변경했어요. 최신 내용과 비교해 주세요.'), { code: 'conflict' });
+    emit({ type: 'draft', kind, id }); return copy(saved);
+  }
+  async function removeIfCurrent(kind, id, expectedRevision) {
+    const store = requireStore(), gen = generation;
+    if (typeof store.compareAndSet !== 'function') throw Object.assign(new Error('이 저장소는 충돌을 확인하는 초안 삭제를 지원하지 않아요.'), { code: 'unsupported-backend' });
+    const result = await store.compareAndSet(kind + ':' + id, expectedRevision, null);
+    if (gen !== generation) throw Object.assign(new Error('초안을 처리하는 동안 계정이 바뀌었어요.'), { code: 'account-changed' });
+    if (!result.applied && result.current !== null) throw Object.assign(new Error('다른 탭에서 변경한 초안은 지우지 않았어요.'), { code: 'conflict' });
+    emit({ type: 'removed', kind, id }); return true;
   }
   async function get(kind, id) { const entry = await requireStore().read(kind + ':' + id); return entry ? copy(entry.value) : null; }
   async function list(kind) { return requireStore().list(kind + ':'); }
@@ -174,6 +208,6 @@
   async function clear() { await requireStore().clear(); emit({ type: 'cleared' }); }
   function subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }
   if (root.addEventListener) root.addEventListener('online', () => { flush().catch(error => emit({ type: 'error', error: errorText(error) })); });
-  return { configure, put, get, list, remove, register, submit, flush, jobs, retry, discard, clear, subscribe, memoryStore,
+  return { configure, put, putIfCurrent, get, list, remove, removeIfCurrent, register, submit, flush, jobs, retry, discard, clear, subscribe, memoryStore,
     get ready() { return !!storage; }, get durable() { return durable; }, get namespace() { return namespace; } };
 });

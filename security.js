@@ -16,8 +16,9 @@
   async function hasPendingWork(){
     const offline=root.DGOffline,integration=root.DGIntegration;
     if(!offline||!offline.ready)return !!(typeof FB!=='undefined'&&FB&&FB.auth.currentUser&&integration&&typeof integration.hasUnsavedSync==='function'&&integration.hasUnsavedSync());
+    if(root.DGLightingWorkflows?.persistActive)await root.DGLightingWorkflows.persistActive();if(root.DGOperations?.persistActive)await root.DGOperations.persistActive();if(root.DGLighting?.persistDraft)await root.DGLighting.persistDraft();
     if(integration){if(typeof integration.persistDraft==='function')await integration.persistDraft();if(typeof integration.persistPatrol==='function')await integration.persistPatrol();if(typeof integration.hasUnsaved==='function')return !!(await integration.hasUnsaved());}
-    const [jobs,...drafts]=await Promise.all([offline.jobs(),...['draft','patrol','workDraft','workCompletion'].map(kind=>offline.list(kind))]);
+    const [jobs,...drafts]=await Promise.all([offline.jobs(),...['draft','patrol','workDraft','workCompletion','lightingDraft','lightingTaskDraft'].map(kind=>offline.list(kind))]);
     return jobs.some(job=>job.state!=='synced')||drafts.some(values=>values.length>0);
   }
   async function call(name,data){

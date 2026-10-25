@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Both suites must run against a local emulator. Never silently pass through a skip.
+// All suites must run against a local emulator. Never silently pass through a skip.
 const {spawnSync}=require('node:child_process');
 const path=require('node:path');
 const host=process.env.FIRESTORE_EMULATOR_HOST||'';
@@ -11,7 +11,8 @@ if(!/^127\.0\.0\.1:\d+$/.test(host)){
 const cwd=path.resolve(__dirname,'..');
 for(const [name,args,projectId] of [
   ['Firestore authorization rules',['--test','scripts/tests/firestore-rules.emulator.cjs'],'demo-donggu-streetlight'],
-  ['Functions server operations',['functions/test/server.emulator.cjs'],'demo-donggu-server-tests']
+  ['Functions server operations',['functions/test/server.emulator.cjs'],'demo-donggu-server-tests'],
+  ['Operational restore',['functions/test/restore.emulator.cjs'],'demo-donggu-restore-tests']
 ]){
   console.log('Checking '+name);
   // Firebase CLI injects FIREBASE_CONFIG; give each suite the same demo project

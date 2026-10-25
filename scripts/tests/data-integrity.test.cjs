@@ -290,7 +290,7 @@ test('report, shared summary and CSV use the same district and date selection', 
     dongLabel: value => value, fmtD: value => String(value),
     dl: { save: async file => { csv = file.data; } },
   });
-  load(c, 'function reportData(){', 'function reportSection(){');
+  load(c, 'function reportData(){', 'function reportSection(forPrint=false){');
   load(c, 'function repSummaryText(){', '/* per-light dossier:');
   assert.equal(c.reportData().ins.length, 1);
   assert.equal(c.reportData().pats.length, 1);

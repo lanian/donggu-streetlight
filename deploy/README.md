@@ -102,14 +102,27 @@ export DONGGU_PLAYWRIGHT_MODULE="$DG_BROWSER_DIR/node_modules/playwright"
 node scripts/field-browser-smoke.cjs
 node scripts/integration-ui-smoke.cjs
 node scripts/operations-browser-smoke.cjs
+node scripts/brightness-smoke.cjs
+node scripts/field-workflows-browser-smoke.cjs
+node scripts/lighting-workflows-smoke.cjs
+node scripts/review-fixes-smoke.cjs
+node scripts/sheet-transitions-browser-smoke.cjs
 ```
 
 이미 설치한 Chromium은 `DONGGU_CHROMIUM=/실제/실행파일`로 지정할 수 있습니다. Linux의 브라우저 시스템 의존성도 필요하며, CI는 Playwright 설치에 `--with-deps`를 사용합니다.
 
-[검사 workflow](../.github/workflows/checks.yml)는 앱 회귀, 서버 단위 검사, 규칙·서버 에뮬레이터를 실행합니다. [브라우저 workflow](../.github/workflows/browser.yml)는 세 브라우저 검사를 실행합니다. [Pages workflow](../.github/workflows/pages.yml)는 두 workflow가 모두 성공한 뒤 공개 목록만 배포합니다. 실제 휴대전화 센서·야간 OCR·장시간 오프라인과 기관 서버의 HTTPS/MIME 응답은 배포 환경에서 따로 확인합니다.
+[검사 workflow](../.github/workflows/checks.yml)는 앱 회귀, 서버 단위 검사, 규칙·서버·복원 에뮬레이터를 실행합니다. [브라우저 workflow](../.github/workflows/browser.yml)는 위의 여덟 브라우저 검사를 실행합니다. [Pages workflow](../.github/workflows/pages.yml)는 두 workflow가 모두 성공한 뒤 공개 목록만 배포합니다. 실제 휴대전화 센서·야간 OCR·장시간 오프라인과 기관 서버의 HTTPS/MIME 응답은 배포 환경에서 따로 확인합니다.
 
 ## 업데이트와 이전
 
 새 필수 앱 모듈은 서비스 워커의 앱 셸 목록과 공개 파일 목록에 함께 반영합니다. 사용자는 **새 버전 적용** 전에 미전송 작업·초안을 확인합니다. 서비스 워커가 다른 탭의 작성 내용을 자동으로 새로고침하지 않습니다.
 
 운영 자료를 옮길 때는 [백업·복원 절차](../docs/operations-guide.md#7-백업복원이전)를 따릅니다. 백업은 초안·대기함·서버 설정 전체를 포함하지 않습니다. 사용자 UID와 권한, 신고 접수 원본, 감사·보관 정책은 대상 환경에서 별도로 확인합니다.
+
+### 업무 기록 복원과 운영 상태
+
+이번 버전의 Firebase 업무 복원에는 `previewOperationalRestore`·`applyOperationalRestore`, 운영 상태 화면에는 `getOperationalHealth`가 필요합니다. 규칙·인덱스와 Functions를 같은 버전으로 배포하세요. 서버 기능이 없거나 업무 묶음이 200문서·4MB를 넘으면 웹 복원은 일반 문서를 쓰기 전에 중단합니다. 미리보기는 15분간 유효하며 이후 자료가 바뀌면 다시 비교합니다.
+
+큰 백업은 `functions/scripts/restore-backup.cjs`로 검증한 뒤 빈 업무 저장소에 이전합니다. 기본은 `--plan`이며 실제 반영에는 확인한 프로젝트·관리자 UID·파일·고정 작업 ID와 `--apply`가 필요합니다. 중단되면 같은 파일·작업 ID로 이어갑니다. 완료 전에는 일반 업무 접근이 잠기며 임의로 잠금을 지우지 않습니다. 구체적인 명령과 한도는 [서버 운영 안내](../docs/security-operations.md)에 있습니다.
+
+공유 운영 상태는 서버에 기록된 마지막 성공·실패와 대기 건수를 표시합니다. 설정 존재만으로 정상 운영으로 판정하지 않으며 실제 접수·감사·보관 정리 실행이 없으면 확인 기록 없음으로 표시합니다.

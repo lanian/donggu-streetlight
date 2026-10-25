@@ -19,7 +19,7 @@ async function fixture(options = {}) {
   const listeners = {}, toasts = [], invalidations = [], control = { failDraft: false };
   const document = { querySelector: selector => fields[selector] || null, addEventListener: (name, fn) => (listeners[name] ||= []).push(fn) };
   const context = vm.createContext({ console, Date, Math, TextEncoder, structuredClone, setTimeout, clearTimeout, crypto: webcrypto,
-    document, confirm: () => true, DGLightingCommands: Commands, DGLightingModel: Model });
+    document, confirm: message => options.confirm ? options.confirm(message) : true, DGLightingCommands: Commands, DGLightingModel: Model });
   vm.runInContext(source('app/data.js'), context);
   const db = context.DGData.createLocalDB({ storage: { getItem: () => saved, setItem: (_, value) => { saved = value; } }, indexedDB: null });
   vm.runInContext(source('app/offline.js'), context);
@@ -42,7 +42,7 @@ async function fixture(options = {}) {
     const form = { id: 'lcForm', dataset: { recordId: draft.recordId }, isConnected: true,
       querySelector: selector => selector === 'fieldset' ? fieldset : fields[selector] || null };
     const value = v => ({ value: v == null ? '' : String(v), closest: selector => selector === '#lcForm' ? form : null });
-    fields = { '#lcForm': form, '#lcSave': { disabled: !!draft.pending, isConnected: true }, '#lcSaveState': status, fieldset };
+    fields = { '#lcForm': form, '#lcSave': { disabled: !!draft.pending, isConnected: true }, '#lcSaveState': status, '#lcTimeWarning': { textContent: '' }, fieldset };
     const mapping = { lcLabel: 'label', lcLat: 'lat', lcLng: 'lng', lcRadius: 'radius', lcSchedule: 'schedule', lcValidDays: 'validDays',
       lcNote: 'note', lcCategory: 'category', lcOperator: 'operator', lcStrength: 'strength', lcStatus: 'status', lcLinked: 'linkedLightId',
       lcLevel: 'level', lcLux: 'lux', lcInstrument: 'instrument' };
@@ -59,7 +59,7 @@ async function fixture(options = {}) {
     field: key => fields[key], closed: () => closes,
     async open(label = '새 외부 광원') { await context.DGLighting.openEditor('source', { lat: 35.15, lng: 126.92 }); fields['#lcLabel'].value = label; return context.DGLighting.state.draft; },
     submit() { for (const fn of listeners.submit || []) fn({ target: fields['#lcForm'], preventDefault() {} }); },
-    input(id, value) { fields[id].value = value; for (const fn of listeners.input || []) fn({ target: fields[id] }); }
+    input(id, value) { fields[id].id = id.slice(1); fields[id].value = value; for (const fn of listeners.input || []) fn({ target: fields[id] }); }
   };
 }
 
@@ -139,4 +139,26 @@ test('load follows an update received during an in-flight read and can retry aft
   assert.equal(calls, 2); assert.equal(f.ui.state.records[0].id, 'current'); assert.equal(f.ui.state.records[0].revision, 2);
   failNext = true; await f.ui.load(); assert.equal(f.ui.state.error, 'read failed');
   await f.ui.load(); assert.equal(f.ui.state.error, ''); assert.equal(f.ui.state.records[0].revision, 4);
+});
+
+test('changing a historical observation time follows the untouched default window across midnight', async () => {
+  const f = await fixture(); await f.ui.openEditor('observation', { lat: 35.15, lng: 126.92 });
+  f.input('#lcObservedAt', '2026-01-01T23:30');
+  assert.equal(f.field('#lcStart').value, '22:30'); assert.equal(f.field('#lcEnd').value, '00:30');
+  assert.equal(f.ui.state.draft.data.startMinute, 1350); assert.equal(f.ui.state.draft.data.endMinute, 30);
+  assert.equal(f.field('#lcTimeWarning').textContent, '');
+  await f.ui.persistDraft(); const saved = await f.offline.get('lightingDraft', f.ui.state.draft.recordId);
+  assert.equal(saved.timeWindowManual, false); assert.equal(saved.data.startMinute, 1350);
+});
+
+test('a manually chosen observation window survives a date change and requires mismatch acknowledgement', async () => {
+  const confirmations = [], f = await fixture({ confirm: text => { confirmations.push(text); return false; } });
+  await f.ui.openEditor('observation', { lat: 35.15, lng: 126.92 });
+  f.input('#lcLabel', '전날 관찰'); f.input('#lcStart', '20:00'); f.input('#lcEnd', '22:00');
+  f.input('#lcObservedAt', '2026-01-01T01:00');
+  assert.equal(f.field('#lcStart').value, '20:00'); assert.equal(f.field('#lcEnd').value, '22:00');
+  assert.equal(f.ui.state.draft.timeWindowManual, true); assert.match(f.field('#lcTimeWarning').textContent, /시간대 밖/);
+  f.submit(); await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(confirmations.length, 1); assert.equal((await f.offline.jobs()).length, 0);
+  assert.equal(f.ui.state.draft.pending, null);
 });

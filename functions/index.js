@@ -11,6 +11,8 @@ const sharp=require('sharp');
 const C=require('./core');
 initializeApp();
 const db=getFirestore();
+const restore=require('./restore').createRestoreService(db);
+const health=require('./health').createHealthService(db);
 const region='asia-northeast3';
 const rateSecret=defineSecret('REPORT_RATE_SECRET');
 const allowedOrigins=defineString('PUBLIC_REPORT_ORIGINS',{default:''});
@@ -18,9 +20,13 @@ const callableOptions={region,enforceAppCheck:process.env.FUNCTIONS_EMULATOR!=='
 function fail(error){if(error instanceof HttpsError)throw error;throw new HttpsError(error instanceof C.InputError?error.code:'internal',error instanceof C.InputError?error.message:'작업을 완료하지 못했습니다.');}
 function uidOf(request){if(!request.auth)throw new HttpsError('unauthenticated','직원 로그인이 필요합니다.');return request.auth.uid;}
 async function roleOf(uid){return (await db.doc('roles/'+uid).get()).data()?.role||'';}
-async function adminOnly(request){const uid=uidOf(request);if(await roleOf(uid)!=='admin')throw new HttpsError('permission-denied','관리자 권한이 필요합니다.');return uid;}
+async function adminOnly(request){const uid=uidOf(request);if(await roleOf(uid)!=='admin')throw new HttpsError('permission-denied','관리자 권한이 필요합니다.');if((await db.doc('meta/operationalRestore').get()).data()?.status==='partial')throw new HttpsError('failed-precondition','관리자 대량 이전이 진행 중입니다. 같은 이전 작업을 완료한 뒤 사용해 주세요.');return uid;}
 function emailOf(request){const email=String(request.auth?.token?.email||'').toLowerCase();if(!email||request.auth.token.email_verified!==true)throw new HttpsError('failed-precondition','확인된 이메일 계정이 필요합니다.');return email;}
 async function commandAudit(transaction,id,by,action,path,detail={}){transaction.create(db.doc('auditEvents/'+id),{at:Date.now(),by,actorType:'user',action,path,...detail});}
+
+exports.previewOperationalRestore=onCall({...callableOptions,timeoutSeconds:120,memory:'512MiB'},async request=>{try{return await restore.preview(await adminOnly(request),request.data);}catch(e){fail(e);}});
+exports.applyOperationalRestore=onCall({...callableOptions,timeoutSeconds:120,memory:'512MiB'},async request=>{try{return await restore.apply(await adminOnly(request),request.data);}catch(e){fail(e);}});
+exports.getOperationalHealth=onCall(callableOptions,async request=>{try{return await health.query(uidOf(request));}catch(e){fail(e);}});
 
 exports.createStaffInvite=onCall(callableOptions,async request=>{try{
   const by=await adminOnly(request),email=C.text(request.data?.email,254,true).toLowerCase();
@@ -84,13 +90,14 @@ exports.submitCitizenReport=onRequest({region,cors:false,secrets:[rateSecret],ma
       if(existing.exists){if(existing.data().requestHash!==fingerprint)throw new HttpsError('already-exists','같은 요청 ID의 내용이 다릅니다.');return {receipt:existing.data().receipt,id};}
       tx.set(limit,C.consumeLimit(previous.data(),now,10));
       tx.create(ref,{...parsed.rec,photo,receipt,requestHash:fingerprint});return {receipt,id};
-    });res.status(200).json(result);
-  }catch(e){const code=e.code||'';res.status(code==='resource-exhausted'?429:code==='unauthenticated'?401:code==='already-exists'?409:code==='invalid-argument'?400:500).json({error:e instanceof C.InputError||e instanceof HttpsError?e.message:'접수하지 못했습니다. 잠시 후 다시 시도하세요.'});}
+    });await health.record('gateway',true);res.status(200).json(result);
+  }catch(e){const code=e.code||'';if(!(e instanceof C.InputError)&&!(e instanceof HttpsError))await health.record('gateway',false,{code});res.status(code==='resource-exhausted'?429:code==='unauthenticated'?401:code==='already-exists'?409:code==='invalid-argument'?400:500).json({error:e instanceof C.InputError||e instanceof HttpsError?e.message:'접수하지 못했습니다. 잠시 후 다시 시도하세요.'});}
 });
 
 // Server-owned audit entries use the trigger's authenticated actor, never a client-provided "by" as proof.
 exports.recordAudit=onDocumentWrittenWithAuthContext({document:'{collection}/{id}',region},async event=>{
-  if(!['roles','joinRequests','lights','photos','inspections','reports','citizen_reports','patrols','workOrders','workEvents','inventory','inventoryMoves','settings','lightingContext'].includes(event.params.collection)||!event.data)return;
+  if(!['roles','joinRequests','lights','photos','inspections','reports','citizen_reports','patrols','workOrders','workEvents','inventory','inventoryMoves','settings','lightingContext','lightingTasks','lightingRuns','reportEvents'].includes(event.params.collection)||!event.data)return;
+  try{
   const before=event.data.before.exists?event.data.before.data():null,after=event.data.after.exists?event.data.after.data():null;
   const record={eventId:event.id,at:Date.parse(event.time)||Date.now(),path:event.params.collection+'/'+event.params.id,by:event.authId||null,actorType:event.authType||'unknown',...C.auditSummary(before,after)};
   try{await db.doc('auditEvents/'+C.hash(event.id)).create(record);}catch(e){if(e.code!==6&&e.code!=='already-exists')throw e;}
@@ -99,13 +106,19 @@ exports.recordAudit=onDocumentWrittenWithAuthContext({document:'{collection}/{id
     const settings=(await db.doc('settings/operations').get()).data()||{};
     await db.runTransaction(async tx=>{const ref=event.data.after.ref,s=await tx.get(ref);if(s.exists&&s.data().privacyExpiresAt==null&&!s.data().privacyPurgedAt)tx.update(ref,{privacyExpiresAt:Date.now()+C.days(settings.privacyDays)*86400000});});
   }
+  await health.record('audit',true);
+  }catch(error){await health.record('audit',false,{code:error.code});throw error;}
 });
 
 exports.purgeExpiredPersonalData=onSchedule({region,schedule:'every 24 hours',timeZone:'Asia/Seoul',timeoutSeconds:540},async()=>{
-  const now=Date.now();
+  const now=Date.now(),counts={citizenReports:0,reports:0,expiredInvites:0,expiredLimits:0,remainingExpired:0};
+  try{
   for(const collection of ['citizen_reports','reports'])for(let page=0;page<25;page++){
     const rows=await db.collection(collection).where('privacyExpiresAt','<=',now).limit(400).get();if(rows.empty)break;
-    const batch=db.batch();for(const d of rows.docs){const patch=Object.fromEntries(C.PRIVATE_FIELDS.map(k=>[k,FieldValue.delete()]));batch.update(d.ref,{...patch,privacyExpiresAt:FieldValue.delete(),privacyPurgedAt:now});}await batch.commit();
+    const batch=db.batch();for(const d of rows.docs){const patch=Object.fromEntries(C.PRIVATE_FIELDS.map(k=>[k,FieldValue.delete()]));batch.update(d.ref,{...patch,privacyExpiresAt:FieldValue.delete(),privacyPurgedAt:now});}await batch.commit();counts[collection==='citizen_reports'?'citizenReports':'reports']+=rows.size;
   }
-  for(const collection of ['privateLimits','staffInvites'])for(let page=0;page<10;page++){const rows=await db.collection(collection).where('expiresAt','<=',now).limit(400).get();if(rows.empty)break;const batch=db.batch();rows.docs.forEach(d=>batch.delete(d.ref));await batch.commit();}
+  for(const collection of ['privateLimits','staffInvites'])for(let page=0;page<10;page++){const rows=await db.collection(collection).where('expiresAt','<=',now).limit(400).get();if(rows.empty)break;const batch=db.batch();rows.docs.forEach(d=>batch.delete(d.ref));await batch.commit();counts[collection==='staffInvites'?'expiredInvites':'expiredLimits']+=rows.size;}
+  for(const collection of ['citizen_reports','reports'])counts.remainingExpired+=(await db.collection(collection).where('privacyExpiresAt','<=',now).count().get()).data().count;
+  await health.record('retention',true,{counts});
+  }catch(error){await health.record('retention',false,{code:error.code});throw error;}
 });

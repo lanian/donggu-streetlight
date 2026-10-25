@@ -29,3 +29,7 @@ jobs:
           node scripts/integration-ui-smoke.cjs
           node scripts/operations-browser-smoke.cjs
           node scripts/brightness-smoke.cjs
+          node scripts/field-workflows-browser-smoke.cjs
+          node scripts/lighting-workflows-smoke.cjs
+          node scripts/review-fixes-smoke.cjs
+          node scripts/sheet-transitions-browser-smoke.cjs

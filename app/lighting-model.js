@@ -55,7 +55,7 @@
     const linkedLightId = text(input.linkedLightId, 180, '연결 시설 ID');
     if (linkedLightId.includes('/')) fail('연결 시설 ID 형식을 확인해 주세요.');
     const emptyLux = input.lux == null || (typeof input.lux === 'string' && !input.lux.trim());
-    return {
+    const record = {
       kind, label: text(input.label, 100, '이름', true),
       category: member(input.category, 'category', kind === 'observation' ? 'field' : 'unknown'),
       operator: text(input.operator, 100, '관리 주체'),
@@ -69,6 +69,22 @@
       instrument: text(input.instrument, 100, '측정 장비', !emptyLux), note: text(input.note, 1000, '메모'),
       linkedLightId, distinct: bool(input.distinct, '별개 광원'), removed: bool(input.removed, '보관')
     };
+    const provenanceKeys = ['sourceAgency', 'sourceRecordId', 'sourceDataset', 'sourceUpdatedAt', 'importedAt', 'importBatchId'];
+    if (provenanceKeys.some(key => Object.prototype.hasOwnProperty.call(input, key))) {
+      if (kind !== 'source' || !provenanceKeys.every(key => Object.prototype.hasOwnProperty.call(input, key))) fail('외부 자료의 출처 항목을 모두 확인해 주세요.');
+      Object.assign(record, {
+        sourceAgency: text(input.sourceAgency, 100, '원본 관리기관', true), sourceRecordId: text(input.sourceRecordId, 180, '기관 시설 ID', true),
+        sourceDataset: text(input.sourceDataset, 300, '자료 출처', true), sourceUpdatedAt: number(input.sourceUpdatedAt, 0, now + 300000, '원본 갱신 시각', true),
+        importedAt: number(input.importedAt, 1, now + 300000, '자료 반입 시각', true), importBatchId: text(input.importBatchId, 180, '반입 작업 ID', true)
+      });
+      if (!/^[A-Za-z0-9_-]{1,180}$/.test(record.importBatchId)) fail('반입 작업 ID 형식을 확인해 주세요.');
+    }
+    const originKeys = ['originKind', 'originId', 'originPointId', 'positionAccuracy'];
+    if (originKeys.some(key => Object.prototype.hasOwnProperty.call(input, key))) {
+      if (kind !== 'observation' || !originKeys.every(key => Object.prototype.hasOwnProperty.call(input, key)) || !['patrol', 'task'].includes(input.originKind)) fail('현장 관찰의 원본 연결을 확인해 주세요.');
+      Object.assign(record, { originKind: input.originKind, originId: text(input.originId, 180, '원본 업무 ID', true), originPointId: text(input.originPointId, 180, '원본 지점 ID'), positionAccuracy: number(input.positionAccuracy, 0, 10000, '위치 정확도') });
+    }
+    return record;
   }
 
   function minuteOfKst(at) {

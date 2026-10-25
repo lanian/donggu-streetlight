@@ -3,7 +3,9 @@ service cloud.firestore {
   match /databases/{db}/documents {
     // ---- 역할: roles/{uid} = {role: admin|inspector|resident, name, at, by}
     function signedIn(){ return request.auth != null; }
-    function myRole(){ let role=signedIn()?get(/databases/$(db)/documents/roles/$(request.auth.uid)).data:null; return role is map?role.get("role",""):""; }
+    function myRole(){ let role=signedIn()?get(/databases/$(db)/documents/roles/$(request.auth.uid)).data:null;
+      let maintenance=/databases/$(db)/documents/meta/operationalRestore;
+      return exists(maintenance) && get(maintenance).data.get('status','')=='partial'?'':(role is map?role.get("role",""):""); }
     function isAdmin(){ return myRole() == "admin"; }
     function isStaff(){ return myRole() in ["admin","inspector"]; }
     function setupDone(){ return exists(/databases/$(db)/documents/meta/setup); }
@@ -151,7 +153,47 @@ service cloud.firestore {
         && request.resource.data == resource.data);
       allow delete: if isAdmin();
     }
-    match /reports/{id} { allow read, create: if isStaff(); allow update: if isAdmin(); allow delete: if isAdmin(); }
+    function reportLinkKeys(){return ['lightId','code','dong','linkRevision','linkEventId','linkUpdatedBy'];}
+    function inactiveReportWork(d){let key=d.get('workId','');let ref=/databases/$(db)/documents/workOrders/$(key==''?'__none__':key);
+      return key=='' || !exists(ref) || get(ref).data.status in ['verified','cancelled'];}
+    function reportWorkMatches(id,d){let key=d.get('workId','');let work=getAfter(/databases/$(db)/documents/workOrders/$(key)).data;
+      return key is string && key.size()>0 && work.lightId==d.lightId && id in work.reportIds
+        && (work.status in ['draft','assigned','in_progress','completed'] || (work.status=='verified' && d.status=='완료'
+          && d.get('resolvedBy','')==request.auth.uid && d.get('resolvedAt',0)==work.verifiedAt));}
+    function reportLight(d){return d.get('lightId','')==null?'':d.get('lightId','');}
+    function reportRelink(id,d,old){let event=getAfter(/databases/$(db)/documents/reportEvents/$(d.linkEventId)).data;
+      return d.diff(old).affectedKeys().hasOnly(['lightId','code','dong','linkRevision','linkEventId','linkUpdatedBy','updatedAt','workId'])
+        && lightingId(d.linkEventId) && !exists(/databases/$(db)/documents/reportEvents/$(d.linkEventId))
+        && d.linkRevision==old.get('linkRevision',0)+1 && d.linkUpdatedBy==request.auth.uid && d.updatedAt is int
+        && event.reportId==id && event.toLightId==d.lightId && event.fromLightId==reportLight(old)
+        && event.revision==d.linkRevision && event.by==request.auth.uid && event.at==d.updatedAt
+        && (d.lightId==reportLight(old) ? d.get('workId','')==old.get('workId','') : inactiveReportWork(old) && d.get('workId','')=='');}
+    match /reports/{id} {
+      allow read: if isStaff();
+      allow create: if isStaff() && !request.resource.data.keys().hasAny(['linkRevision','linkEventId','linkUpdatedBy'])
+        && (!request.resource.data.keys().hasAny(['workId']) || (isAdmin() && reportWorkMatches(id,request.resource.data)));
+      allow update: if isAdmin()
+        && (request.resource.data.diff(resource.data).affectedKeys().hasAny(reportLinkKeys())
+          ? reportRelink(id,request.resource.data,resource.data)
+          : (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['workId'])
+            || ((resource.data.get('workId','')==request.resource.data.get('workId','') || inactiveReportWork(resource.data))
+              && (request.resource.data.get('workId','')=='' || reportWorkMatches(id,request.resource.data)))));
+      allow delete: if isAdmin();
+    }
+    match /reportEvents/{id}{
+      allow read: if isStaff();
+      allow create: if isAdmin() && lightingId(id)
+        && request.resource.data.keys().hasOnly(['schemaVersion','type','reportId','fromLightId','toLightId','reason','by','at','revision','requestHash'])
+        && request.resource.data.schemaVersion==1 && request.resource.data.type=='facility-linked'
+        && lightingText(request.resource.data.reportId,180) && request.resource.data.reportId.size()>0
+        && lightingText(request.resource.data.fromLightId,180) && lightingText(request.resource.data.toLightId,180) && request.resource.data.toLightId.size()>0
+        && lightingText(request.resource.data.reason,500) && request.resource.data.reason.size()>0
+        && request.resource.data.by==request.auth.uid && request.resource.data.at is int && request.resource.data.revision is int
+        && request.resource.data.requestHash is string && request.resource.data.requestHash.matches('[a-f0-9]{64}')
+        && getAfter(/databases/$(db)/documents/reports/$(request.resource.data.reportId)).data.linkEventId==id
+        && reportRelink(request.resource.data.reportId,getAfter(/databases/$(db)/documents/reports/$(request.resource.data.reportId)).data,get(/databases/$(db)/documents/reports/$(request.resource.data.reportId)).data);
+      allow update,delete: if false;
+    }
     match /patrols/{id} { allow read: if isStaff(); allow create: if isAdmin() || (isStaff() && request.resource.data.by == request.auth.uid); allow update: if isAdmin() || (isStaff() && resource.data.by==request.auth.uid && request.resource.data==resource.data); allow delete: if isAdmin(); }
     match /photos/{id} {
       allow read: if isStaff();
@@ -216,6 +258,8 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /auditEvents/{id} {allow read: if isStaff(); allow write: if false;}
+    match /restoreOperations/{id} {allow read: if isAdmin(); allow write: if false;}
+    match /systemHealth/{id} {allow read,write: if false;}
     match /staffInvites/{id} {allow read,write: if false;}
     match /privateLimits/{id} {allow read,write: if false;}
     match /lightFields/{id} {allow read,write: if isAdmin();}
@@ -232,10 +276,22 @@ service cloud.firestore {
     function lightingId(value){return value is string && value.matches('[A-Za-z0-9_-]{1,180}')
       && !(value in ['__proto__','prototype','constructor']);}
     function lightingText(value,max){return value is string && value.size()<=max;}
+    function lightingSourceKeys(){return ['sourceAgency','sourceRecordId','sourceDataset','sourceUpdatedAt','importedAt','importBatchId'];}
+    function validLightingSource(data){return !data.keys().hasAny(lightingSourceKeys()) || (
+      data.keys().hasAll(lightingSourceKeys()) && data.kind=='source'
+      && lightingText(data.sourceAgency,100) && data.sourceAgency.size()>0
+      && lightingText(data.sourceRecordId,180) && data.sourceRecordId.size()>0
+      && lightingText(data.sourceDataset,300) && data.sourceDataset.size()>0
+      && data.sourceUpdatedAt is int && data.sourceUpdatedAt>=0 && data.sourceUpdatedAt<=request.time.toMillis()+300000
+      && data.importedAt is int && data.importedAt>0 && data.importedAt<=request.time.toMillis()+300000 && lightingId(data.importBatchId));}
+    function validLightingOrigin(d){return !d.keys().hasAny(['originKind','originId','originPointId','positionAccuracy']) || (
+      d.keys().hasAll(['originKind','originId','originPointId','positionAccuracy']) && d.kind=='observation'
+      && d.originKind in ['patrol','task'] && lightingText(d.originId,180) && d.originId.size()>0
+      && lightingText(d.originPointId,180) && d.positionAccuracy is number && d.positionAccuracy>=0 && d.positionAccuracy<=10000);}
     function validLighting(data){
       return data.keys().hasOnly(['schemaVersion','kind','label','category','operator','lat','lng','radius','strength','status','level',
         'schedule','startMinute','endMinute','observedAt','validDays','nightConfirmed','lux','instrument','note','linkedLightId','distinct','removed',
-        'createdAt','createdBy','updatedAt','updatedBy','revision','operationId'])
+        'createdAt','createdBy','updatedAt','updatedBy','revision','operationId','sourceAgency','sourceRecordId','sourceDataset','sourceUpdatedAt','importedAt','importBatchId','originKind','originId','originPointId','positionAccuracy'])
         && data.schemaVersion==1 && data.kind in ['source','observation']
         && lightingText(data.label,100) && data.label.size()>0 && lightingText(data.operator,100)
         && data.category in ['other_public','private','shop','building','unknown','field']
@@ -254,7 +310,7 @@ service cloud.firestore {
         && data.createdAt is int && data.createdAt>0 && data.updatedAt is int && data.updatedAt>=data.createdAt
         && data.updatedAt<=request.time.toMillis()+300000 && lightingText(data.createdBy,128) && data.createdBy.size()>0
         && data.updatedBy==request.auth.uid && data.revision is int && data.revision>=1 && data.revision<=9007199254740991
-        && lightingId(data.operationId);
+        && lightingId(data.operationId) && validLightingSource(data) && validLightingOrigin(data);
     }
     function lightingReceiptMatches(receipt,data,id){
       return receipt.recordId==id && receipt.by==request.auth.uid && receipt.by==data.updatedBy
@@ -269,10 +325,14 @@ service cloud.firestore {
       allow create: if isStaff() && lightingId(id) && validLighting(request.resource.data)
         && request.resource.data.createdBy==request.auth.uid && request.resource.data.createdAt==request.resource.data.updatedAt
         && request.resource.data.revision==1 && request.resource.data.removed==false
+        && (!request.resource.data.keys().hasAny(lightingSourceKeys()) || (isAdmin()
+          && request.resource.data.status=='unknown' && request.resource.data.schedule=='unknown' && request.resource.data.nightConfirmed==false
+          && request.resource.data.level=='unknown' && request.resource.data.lux==null && request.resource.data.distinct==false && request.resource.data.linkedLightId==''))
         && newLightingReceipt(id,request.resource.data);
       allow update: if isStaff() && lightingId(id) && validLighting(request.resource.data)
         && (isAdmin() || resource.data.createdBy==request.auth.uid)
         && request.resource.data.createdBy==resource.data.createdBy && request.resource.data.createdAt==resource.data.createdAt
+        && (isAdmin() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(lightingSourceKeys()))
         && request.resource.data.revision==resource.data.revision+1 && newLightingReceipt(id,request.resource.data);
       // Keep an auditable tombstone. A deleted observation cannot silently reappear on retry.
       allow delete: if false;
@@ -292,6 +352,74 @@ service cloud.firestore {
       allow create: if isStaff() && validLightingOperation(id,request.resource.data);
       allow update,delete: if false;
     }
+    function lightingWorkflowMeta(d){return d.schemaVersion==1 && d.createdAt is int && d.createdAt>0
+      && lightingText(d.createdBy,128) && d.createdBy.size()>0 && d.updatedAt is int && d.updatedAt>=d.createdAt
+      && d.updatedAt<=request.time.toMillis()+300000 && d.updatedBy==request.auth.uid
+      && d.revision is int && d.revision>=1 && d.revision<=9007199254740991 && lightingId(d.operationId);}
+    function workflowReceipt(d,id,entity){let ref=/databases/$(db)/documents/lightingWorkflowOperations/$(d.operationId);let r=getAfter(ref).data;
+      return !exists(ref) && r.recordId==id && r.entity==entity && r.by==d.updatedBy && r.at==d.updatedAt && r.revision==d.revision;}
+    function validLightingTask(d){return d.keys().hasOnly(['schemaVersion','title','lat','lng','radius','note','originKind','originId','evidenceIds','assignedTo','dueAt','reviewMinute','status','observationId','completionNote','completedAt','completedBy','createdAt','createdBy','updatedAt','updatedBy','revision','operationId'])
+      && lightingWorkflowMeta(d) && lightingText(d.title,120) && d.title.size()>0 && lightingText(d.note,1500)
+      && d.lat is number && d.lat>=-90 && d.lat<=90 && d.lng is number && d.lng>=-180 && d.lng<=180
+      && d.radius is number && d.radius>=5 && d.radius<=80
+      && d.originKind in ['candidate','record','patrol','manual'] && lightingText(d.originId,180)
+      && d.evidenceIds is list && d.evidenceIds.size()<=20
+      && lightingText(d.assignedTo,128) && d.assignedTo.size()>0 && d.dueAt is int && d.dueAt>0
+      && d.reviewMinute is int && d.reviewMinute>=0 && d.reviewMinute<=1439
+      && d.status in ['open','completed','cancelled'] && lightingText(d.observationId,180) && lightingText(d.completionNote,1000)
+      && d.completedAt is int && lightingText(d.completedBy,128)
+      && (d.status=='completed' ? (d.observationId.size()>0 && d.completionNote.size()>0 && d.completedAt==d.updatedAt && d.completedBy==request.auth.uid)
+        : (d.observationId=='' && d.completedAt==0 && d.completedBy==''));}
+    function lightingTaskEvidence(d){let o=getAfter(/databases/$(db)/documents/lightingContext/$(d.observationId)).data;
+      return o.kind=='observation' && o.removed==false && o.nightConfirmed==true && o.level in ['bright','adequate','dark']
+        && latlng.value(d.lat,d.lng).distance(latlng.value(o.lat,o.lng))<=d.radius+o.radius
+        && o.observedAt>=d.createdAt-300000 && o.observedAt<=d.updatedAt+300000 && o.observedAt+o.validDays*86400000>=d.updatedAt
+        && (o.schedule=='always' || (o.schedule=='hours' && (o.startMinute<o.endMinute
+          ? d.reviewMinute>=o.startMinute && d.reviewMinute<o.endMinute : d.reviewMinute>=o.startMinute || d.reviewMinute<o.endMinute)));
+    }
+    function lightingAssignee(d){return get(/databases/$(db)/documents/roles/$(d.assignedTo)).data.role in ['admin','inspector'];}
+    match /lightingTasks/{id}{
+      allow read: if isStaff();
+      allow create: if isStaff() && lightingId(id) && validLightingTask(request.resource.data)
+        && request.resource.data.createdBy==request.auth.uid && request.resource.data.createdAt==request.resource.data.updatedAt
+        && request.resource.data.revision==1 && request.resource.data.status=='open'
+        && (request.resource.data.assignedTo==request.auth.uid || (isAdmin() && lightingAssignee(request.resource.data)))
+        && workflowReceipt(request.resource.data,id,'task');
+      allow update: if isStaff() && validLightingTask(request.resource.data)
+        && request.resource.data.createdBy==resource.data.createdBy && request.resource.data.createdAt==resource.data.createdAt
+        && request.resource.data.originKind==resource.data.originKind && request.resource.data.originId==resource.data.originId
+        && request.resource.data.revision==resource.data.revision+1
+        && ((resource.data.status=='open' && (isAdmin() || (resource.data.assignedTo==request.auth.uid && request.resource.data.assignedTo==resource.data.assignedTo)))
+          || (isAdmin() && resource.data.status in ['completed','cancelled'] && request.resource.data.status=='open'))
+        && (request.resource.data.assignedTo==resource.data.assignedTo || lightingAssignee(request.resource.data))
+        && (request.resource.data.status!='completed' || lightingTaskEvidence(request.resource.data))
+        && workflowReceipt(request.resource.data,id,'task');
+      allow delete: if false;
+    }
+    function validLightingRun(d){return d.keys().hasOnly(['schemaVersion','modelVersion','reviewedAt','minute','mode','dong','facilityKind','registryCount','contextCount','roadCount','candidateCount','inputDigest','inputVersionsJson','settingsJson','candidatesJson','evaluationJson','payloadBytes','createdAt','createdBy','updatedAt','updatedBy','revision','operationId'])
+      && lightingWorkflowMeta(d) && lightingText(d.modelVersion,64) && d.modelVersion.size()>0
+      && d.reviewedAt is int && d.reviewedAt>0 && d.reviewedAt<=request.time.toMillis()+300000
+      && d.minute is int && d.minute>=0 && d.minute<=1439 && d.mode in ['roads','pairs'] && lightingText(d.dong,80) && lightingText(d.facilityKind,30)
+      && d.registryCount is int && d.registryCount>=0 && d.registryCount<=100000 && d.contextCount is int && d.contextCount>=0 && d.contextCount<=100000
+      && d.roadCount is int && d.roadCount>=0 && d.roadCount<=100000 && d.candidateCount is int && d.candidateCount>=0 && d.candidateCount<=100000
+      && d.inputDigest is string && d.inputDigest.matches('[a-f0-9]{64}')
+      && lightingText(d.inputVersionsJson,300000) && lightingText(d.settingsJson,12000) && lightingText(d.candidatesJson,300000) && lightingText(d.evaluationJson,180000)
+      && d.payloadBytes is int && d.payloadBytes>0 && d.payloadBytes<=600000
+      && d.inputVersionsJson.toUtf8().size()+d.settingsJson.toUtf8().size()+d.candidatesJson.toUtf8().size()+d.evaluationJson.toUtf8().size()<=600000;}
+    match /lightingRuns/{id}{
+      allow read: if isStaff();
+      allow create: if isStaff() && lightingId(id) && validLightingRun(request.resource.data)
+        && request.resource.data.createdBy==request.auth.uid && request.resource.data.createdAt==request.resource.data.updatedAt
+        && request.resource.data.revision==1 && workflowReceipt(request.resource.data,id,'run');
+      allow update,delete: if false;
+    }
+    function validWorkflowOperation(id,d){let ref=d.entity=='task'?/databases/$(db)/documents/lightingTasks/$(d.recordId):/databases/$(db)/documents/lightingRuns/$(d.recordId);
+      let a=getAfter(ref).data;let old=exists(ref)?get(ref).data:{'revision':0};
+      return d.keys().hasOnly(['schemaVersion','entity','recordId','by','at','revision','requestHash']) && d.schemaVersion==1
+        && d.entity in ['task','run'] && lightingId(id) && lightingId(d.recordId) && d.by==request.auth.uid
+        && d.at is int && d.revision is int && d.requestHash is string && d.requestHash.matches('[a-f0-9]{64}')
+        && a.operationId==id && a.updatedBy==d.by && a.updatedAt==d.at && a.revision==d.revision && a.revision==old.revision+1;}
+    match /lightingWorkflowOperations/{id}{allow read: if isStaff();allow create: if isStaff() && validWorkflowOperation(id,request.resource.data);allow update,delete: if false;}
     function workVisible(data){let role=myRole();return role=='admin' || (role=='inspector' && data.assignedTo==request.auth.uid);}
     function ownWorkPhoto(data){
       let work=getAfter(/databases/$(db)/documents/workOrders/$(data.workId)).data;
@@ -348,7 +476,9 @@ service cloud.firestore {
           && ((previous.status=='assigned' && data.status=='in_progress')
             || (previous.status=='in_progress' && data.status in ['in_progress','completed']))))
         && (!changed.hasAny(['stockApplied','accountedCost']) || (admin && previous.status=='completed' && data.status=='verified'))
-        && (data.status!='completed' || (workEvidence(id,data) && data.completedBy==request.auth.uid && data.completedAt is int))
+        && (data.status!='completed' || (workEvidence(id,data) && data.completedAt is int
+          && (data.completedBy==request.auth.uid || (admin && previous.status=='completed'
+            && changed.hasOnly(['reportIds','revision','updatedAt','updatedBy'])))))
         && (data.status!='verified' || (admin && workEvidence(id,data)
           && data.get('accountedCost',0)==data.costTotal && data.verifiedBy==request.auth.uid && data.verifiedAt is int));
     }
@@ -396,9 +526,10 @@ service cloud.firestore {
     }
     match /workEvents/{id} {
       allow read: if isStaff();
-      allow create: if isStaff() && request.resource.data.keys().hasOnly(['workId','lightId','fromStatus','toStatus','type','note','at','by','revision','createdAt','costTotal','costDelta'])
+      allow create: if isStaff() && request.resource.data.keys().hasOnly(['workId','lightId','fromStatus','toStatus','type','note','at','by','revision','createdAt','costTotal','costDelta','requestHash'])
         && request.resource.data.by==request.auth.uid && request.resource.data.at is int
         && optionalText(request.resource.data,'note',2000)
+        && (!('requestHash' in request.resource.data) || (request.resource.data.requestHash is string && request.resource.data.requestHash.matches('[a-f0-9]{64}')))
         && workEventMatches(request.resource.data);
       allow update,delete: if false;
     }

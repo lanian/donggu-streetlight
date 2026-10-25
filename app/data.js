@@ -11,25 +11,54 @@
   function select(rows,options={}){let out=rows.filter(r=>clauses(options.where).every(c=>matches(r,c)));const order=clauses(options.orderBy);out.sort((a,b)=>{for(const [key,dir='asc']of order){const x=key==='__name__'?a.id:a[key],y=key==='__name__'?b.id:b[key];if(x===y)continue;const n=x==null?-1:y==null?1:x<y?-1:1;return dir==='desc'?-n:n}return String(a.id).localeCompare(String(b.id))});return out}
   function rowsOf(snap){if(!snap||!Array.isArray(snap.docs))throw error('invalid-snapshot','저장소 조회 결과를 읽을 수 없어요.');return snap.docs.map(d=>({...clone(typeof d.data==='function'?d.data():d.data||d),id:d.id}))}
   function checkComplete(snap){if(snap.truncated||snap.hasMore||snap.nextCursor||snap.metadata&&snap.metadata.truncated)throw error('incomplete-query','저장소가 일부 기록만 반환했어요. 전체 자료를 확인한 뒤 다시 시도하세요.')}
+  function snapshotSource(snap, required){return snap.metadata&&typeof snap.metadata.fromCache==='boolean'?(snap.metadata.fromCache?'cache':'server'):required?'server':'unknown'}
+  function combinedSource(sources){const values=[...new Set(sources)];return values.length===1?values[0]:values.length?'mixed':'unknown'}
+  function emitMetadata(options,source){const metadata={source,complete:['server','local'].includes(source),fetchedAt:Date.now()};if(typeof options.onMetadata==='function')options.onMetadata(metadata);return metadata}
   async function readAll(db,collection,options={}){
     if(!db)throw error('unavailable','저장소에 연결하지 못했어요.');
-    if(typeof db.readAll==='function')return db.readAll(collection,options);
+    if(typeof db.readAll==='function'){const rows=await db.readAll(collection,options);emitMetadata(options,db.mode==='local'?'local':'unknown');return rows}
     let base=db.collection(collection);
     // Firestore exposes cursors. Keep a deterministic document-ID tiebreaker on every page.
     if(typeof base.startAfter==='function'){
       for(const [field,op,value]of clauses(options.where))base=base.where(field,op,value);
       const order=clauses(options.orderBy);for(const [field,dir='asc']of order)base=base.orderBy(field,dir);
       if(!order.some(([f])=>f==='__name__'))base=base.orderBy('__name__',order.length?(order[order.length-1][1]||'asc'):'asc');
-      const size=Math.max(1,Math.min(1000,options.pageSize||400)),rows=[],seen=new Set();let cursor=null;
+      const size=Math.max(1,Math.min(1000,options.pageSize||400)),rows=[],seen=new Set(),sources=[];let cursor=null;
       while(true){let q=cursor?base.startAfter(cursor):base;const snap=await q.limit(size).get(options.requireServer?{source:'server'}:undefined);
         if(options.requireServer&&snap.metadata&&snap.metadata.fromCache)throw error('offline','완전한 자료를 확인하려면 서버 연결이 필요해요.');
+        sources.push(snapshotSource(snap,options.requireServer));
         const docs=snap.docs||[];for(const row of rowsOf(snap)){if(seen.has(row.id))throw error('unstable-query','조회 중 기록 순서가 바뀌었어요. 다시 불러와 주세요.');seen.add(row.id);rows.push(row)}
         if(options.onPage)options.onPage(rows.length);if(docs.length<size)break;cursor=docs[docs.length-1];
-      }return rows;
+      }emitMetadata(options,combinedSource(sources));return rows;
     }
     // The artifact API has get/update/set but no documented cursor. Request an unbounded
     // snapshot (never a silent fixed limit), and refuse a backend-declared partial response.
-    const snap=await base.get();checkComplete(snap);const rows=select(rowsOf(snap),options);if(options.onPage)options.onPage(rows.length);return rows;
+    const snap=await base.get();checkComplete(snap);const rows=select(rowsOf(snap),options);if(options.onPage)options.onPage(rows.length);emitMetadata(options,'artifact');return rows;
+  }
+  async function readPage(db,collection,options={}){
+    if(!db)throw error('unavailable','저장소에 연결하지 못했어요.');
+    const size=Math.max(1,Math.min(200,Math.floor(options.pageSize||40))),where=clauses(options.where),order=clauses(options.orderBy);
+    const key=JSON.stringify([collection,where,order]),cursor=options.cursor;
+    if(cursor&&cursor.queryKey!==key)throw error('invalid-cursor','조회 조건이 바뀌었어요. 첫 페이지부터 다시 불러와 주세요.');
+    let base=db.collection(collection),rows,hasMore,nextCursor=null,source;
+    if(typeof base.startAfter==='function'){
+      for(const[field,op,value]of where)base=base.where(field,op,value);
+      for(const[field,dir='asc']of order)base=base.orderBy(field,dir);
+      if(!order.some(([field])=>field==='__name__'))base=base.orderBy('__name__',order.length?(order[order.length-1][1]||'asc'):'asc');
+      if(cursor){if(cursor.backend!=='firebase')throw error('invalid-cursor','저장소가 바뀌었어요. 다시 조회해 주세요.');base=base.startAfter(cursor.snapshot)}
+      const snap=await base.limit(size+1).get(options.requireServer?{source:'server'}:undefined);
+      if(options.requireServer&&snap.metadata&&snap.metadata.fromCache)throw error('offline','서버 자료를 확인하려면 연결이 필요해요.');
+      const docs=snap.docs||[];rows=rowsOf(snap).slice(0,size);hasMore=docs.length>size;source=snapshotSource(snap,options.requireServer);
+      if(hasMore)nextCursor={backend:'firebase',queryKey:key,snapshot:docs[size-1]};
+    }else{
+      const all=await readAll(db,collection,{...options,onMetadata:m=>{source=m.source}});
+      if(cursor&&cursor.backend!=='array')throw error('invalid-cursor','저장소가 바뀌었어요. 다시 조회해 주세요.');
+      const compare=(a,b)=>{for(const[field,dir='asc']of order){const av=field==='__name__'?a.id:a[field],bv=field==='__name__'?b.id:b[field];if(av!==bv){const n=av==null?-1:bv==null?1:av<bv?-1:1;return dir==='desc'?-n:n}}return String(a.id).localeCompare(String(b.id))};
+      const after=cursor?all.filter(row=>compare(row,cursor.last)>0):all;
+      rows=after.slice(0,size);hasMore=after.length>size;
+      if(hasMore){const last=rows[rows.length-1];nextCursor={backend:'array',queryKey:key,last:Object.fromEntries(['id',...order.map(([field])=>field).filter(f=>f!=='__name__')].map(field=>[field,last[field]]))}}
+    }
+    return{rows,nextCursor,hasMore,...emitMetadata(options,source||'unknown')};
   }
   const statusKeys=['status','lastInspected','lastResult','redoNote'];
   function latestPatch(current,patch){const next=clone(patch);if(typeof next.lastInspected==='number'&&typeof current?.lastInspected==='number'&&next.lastInspected<current.lastInspected){for(const key of statusKeys)delete next[key];delete next.updatedAt}return next}
@@ -45,7 +74,8 @@
     try{data=legacy()}catch(e){if(e.code==='corrupt-local-data')throw e;throw error('corrupt-local-data','기기 저장 자료가 손상됐어요. 기존 자료를 덮어쓰지 않았어요.')}
     const ready=idb?new Promise((resolve,reject)=>{const request=idb.open('donggu-local-records-v2',1);request.onupgradeneeded=()=>request.result.createObjectStore('state');request.onerror=()=>reject(request.error);request.onsuccess=()=>{database=request.result;database.onversionchange=()=>database.close();const tx=database.transaction('state','readwrite'),st=tx.objectStore('state'),get=st.get(key);get.onsuccess=()=>{if(get.result!==undefined)data=get.result;else st.put(data,key)};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)}}):Promise.resolve();
     function snapshot(col,q){let rows=select(Object.entries(data[col]||{}).map(([id,d])=>({...clone(d),id})),q);if(q.limit!=null)rows=rows.slice(0,q.limit);return{docs:rows.map(row=>{const{id,...d}=row;return{id,data:()=>clone(d)}})}}
-    function notify(){for(const sub of subscriptions)try{sub.callback(snapshot(sub.col,sub.q))}catch(e){console.error('Local data subscriber failed',e)}}
+    function publish(sub){const next=snapshot(sub.col,sub.q),rows=rowsOf(next);if(sub.last!==undefined&&equal(sub.last,rows))return;sub.last=rows;sub.callback(next)}
+    function notify(){for(const sub of subscriptions)try{publish(sub)}catch(e){console.error('Local data subscriber failed',e)}}
     async function refresh(){await ready;if(database){await new Promise((resolve,reject)=>{const tx=database.transaction('state','readonly'),req=tx.objectStore('state').get(key);req.onsuccess=()=>{data=req.result||{};resolve()};req.onerror=()=>reject(req.error)})}else data=legacy();return data}
     const channel=options.events&&typeof root.BroadcastChannel==='function'?new root.BroadcastChannel('donggu-local-records-v2'):null;
     if(channel)channel.onmessage=()=>refresh().then(notify).catch(console.error);
@@ -55,11 +85,11 @@
       else{const save=()=>{next=clone(legacy());result=change(next);storage.setItem(key,JSON.stringify(next))};if(locks&&locks.request)await locks.request('donggu-local-records-v2',save);else if(root.navigator)throw error('local-storage-unavailable','이 브라우저에서 안전한 기기 저장을 사용할 수 없어요. IndexedDB 사용을 허용하거나 지원 브라우저로 열어 주세요.');else save()}
       data=next;notify();if(channel)channel.postMessage({changed:true});return result;
     }
-    const query=(col,q={})=>({where:(field,op,value)=>query(col,{...q,where:[...clauses(q.where),[field,op,value]]}),orderBy:(field,dir)=>query(col,{...q,orderBy:[...clauses(q.orderBy),[field,dir]]}),limit:limit=>query(col,{...q,limit}),get:async()=>{await refresh();return snapshot(col,q)},onSnapshot(callback){const sub={col,q,callback};subscriptions.add(sub);const first=snapshot(col,q);callback(first);const original=JSON.stringify(first.docs.map(d=>({id:d.id,...d.data()})));refresh().then(()=>{const latest=snapshot(col,q);if(subscriptions.has(sub)&&JSON.stringify(latest.docs.map(d=>({id:d.id,...d.data()})))!==original)callback(latest)}).catch(console.error);return()=>subscriptions.delete(sub)},add:async rec=>{const id=newId('local');await commit(next=>applyOps(next,[{path:col+'/'+id,data:rec}]));return{id}}});
+    const query=(col,q={})=>({where:(field,op,value)=>query(col,{...q,where:[...clauses(q.where),[field,op,value]]}),orderBy:(field,dir)=>query(col,{...q,orderBy:[...clauses(q.orderBy),[field,dir]]}),limit:limit=>query(col,{...q,limit}),get:async()=>{await refresh();return snapshot(col,q)},onSnapshot(callback){const sub={col,q,callback};subscriptions.add(sub);publish(sub);refresh().then(()=>{if(subscriptions.has(sub))publish(sub)}).catch(console.error);return()=>subscriptions.delete(sub)},add:async rec=>{const id=newId('local');await commit(next=>applyOps(next,[{path:col+'/'+id,data:rec}]));return{id}}});
     const db={mode:'local',ready,collection:col=>query(col),readAll:async(col,q)=>{await refresh();return select(Object.entries(data[col]||{}).map(([id,d])=>({...clone(d),id})),q)},commitMany:(ops,options={})=>commit(next=>{for(const[path,revision]of Object.entries(options.expected||{})){const[c,id]=path.split('/'),current=(next[c]||{})[id];if(revision===null?current!==undefined:typeof revision==='object'?('document'in revision?!equal(current??null,revision.document):(current?.[revision.field]??null)!==revision.value):!current||(current.revision||0)!==revision)throw error('conflict','다른 사용자가 먼저 변경했어요. 새로고침 후 다시 시도하세요.')}return applyOps(next,ops)}),doc:path=>{const[col,id]=path.split('/');return{path,get:async()=>{await refresh();const d=(data[col]||{})[id];return{id,exists:d!==undefined,data:()=>clone(d)}},set:(rec,opts)=>commit(next=>applyOps(next,[{path,data:rec,merge:!!(opts&&(opts.merge||opts.mergeFields))}])),update:patch=>commit(next=>applyOps(next,[{path,data:patch,merge:true}])),delete:()=>commit(next=>applyOps(next,[{path,delete:true}])),create:rec=>commit(next=>applyOps(next,[{path,data:rec,ifAbsent:true}]))}},close(){if(channel)channel.close();if(database)database.close();subscriptions.clear()}};
     db.seed=async()=>{await refresh();let planned;try{const fetcher=options.fetch||root.fetch,mf=await(await fetcher('seed/manifest.json',{cache:'no-cache'})).json(),docs=Array.isArray(mf)?mf:mf.docs,version=Array.isArray(mf)?1:mf.version;const refreshSeed=data.seedVersion!==version,todo=refreshSeed?docs:docs.filter(e=>!(data[e.collection]&&data[e.collection][e.doc_id]));planned={version,purge:refreshSeed&&mf.purge,docs:await Promise.all(todo.map(async e=>({...e,data:await(await fetcher('seed/'+e.file,{cache:'no-cache'})).json()})))} }catch(e){return}if(planned)await commit(next=>{const newVersion=next.seedVersion!==planned.version;if(newVersion&&planned.purge)for(const c of['lights','inspections','reports','register'])next[c]={};for(const e of planned.docs){const bucket=next[e.collection]||(next[e.collection]={});if(newVersion||!bucket[e.doc_id])bucket[e.doc_id]=e.data};next.seedVersion=planned.version})};
     return db;
   }
   function validateBackup(input){if(!input||input.app!=='donggu-streetlight'||!input.collections||typeof input.collections!=='object'||Array.isArray(input.collections))throw error('invalid-backup','이 앱의 백업 파일이 아니에요.');const counts={};for(const[c,rows]of Object.entries(input.collections)){if(!Array.isArray(rows))throw error('invalid-backup',c+' 자료 형식이 올바르지 않아요.');const seen=new Set();for(const row of rows){if(!row||typeof row!=='object'||typeof row.id!=='string'||!row.id||row.id.includes('/')||row.id==='.'||row.id==='..'||['__proto__','prototype','constructor'].includes(row.id)||seen.has(row.id))throw error('invalid-backup',c+'에 잘못되었거나 중복된 문서 ID가 있어요.');seen.add(row.id)}counts[c]=rows.length;if(input.counts&&input.counts[c]!==rows.length)throw error('invalid-backup',c+'의 기록 수가 백업 목록과 달라요.')}if(input.complete===false)throw error('incomplete-backup','완료되지 않은 백업은 복원할 수 없어요.');return counts}
-  return{clone,equal,newId,stableId,readAll,select,rowsOf,latestPatch,mergeLightFields,createLocalDB,validateBackup,error};
+  return{clone,equal,newId,stableId,readAll,readPage,select,rowsOf,latestPatch,mergeLightFields,createLocalDB,validateBackup,error};
 });

@@ -1,7 +1,7 @@
 /* The legacy field UI is connected here; business commands stay in independent modules. */
 (function (root) {
   'use strict';
-  let api, attached = false, initialized = false, timer = null, patrolTimer = null, memoryPending = false, autosaveError = '', patrolKey = '', draftWrite = Promise.resolve(), resolveReady;
+  let api, attached = false, initialized = false, timer = null, patrolTimer = null, memoryPending = false, autosaveError = '', patrolKey = '', draftWrite = Promise.resolve(), resolveReady, operationsUnsubscribe;
   const readyPromise = new Promise(resolve => { resolveReady = resolve; });
   const finishing = new Map(), busy = new Set();
   const Q = s => document.querySelector(s), copy = v => JSON.parse(JSON.stringify(v));
@@ -101,11 +101,11 @@
   }
   async function hasUnsaved() {
     if (!root.DGOffline.ready) return hasUnsavedSync();
-    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'workDraft', 'workCompletion', 'lightingDraft'].map(k => root.DGOffline.list(k))]);
+    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'workDraft', 'workCompletion', 'lightingDraft', 'lightingTaskDraft'].map(k => root.DGOffline.list(k))]);
     memoryPending = jobs.some(j => j.state !== 'synced') || drafts.some(values => values.length);
     return memoryPending || hasActiveDraft();
   }
-  function hasActiveDraft() { return !!api.draftDirty(syncMemo(api.activeDraft())) || !!patrolSnapshot(); }
+  function hasActiveDraft() { return !!api.draftDirty(syncMemo(api.activeDraft())) || !!patrolSnapshot() || !!root.DGOperations?.hasActiveDraft?.() || !!root.DGLightingWorkflows?.hasActiveDraft?.(); }
   function hasUnsavedSync() { return memoryPending || hasActiveDraft(); }
   async function ready() {
     try {
@@ -121,11 +121,8 @@
     if (saved.length || (await root.DGOffline.list('patrol')).length) api.toast('작성하던 내용이 있어요. 저장 대기함에서 이어 쓸 수 있어요.');
     root.DGOffline.flush().catch(warn);
     clearInterval(patrolTimer); patrolTimer = setInterval(() => persistPatrol().catch(warn), 2500);
-    if (api.database().collection && supportedSubscriptions()) {
-      for (const collection of ['workOrders', 'inventory', 'settings', 'reports']) {
-        try { api.database().collection(collection).onSnapshot(() => { if (root.DGOperations.state.loaded) root.DGOperations.load(true); }, () => {}); } catch (e) { /* Explicit refresh remains available on adapters without live reads. */ }
-      }
-    }
+    if (operationsUnsubscribe) operationsUnsubscribe();
+    if (api.database().collection && supportedSubscriptions() && root.DGOperations.subscribeUpdates) operationsUnsubscribe = root.DGOperations.subscribeUpdates();
     } catch (error) { resolveReady(false); throw error; }
   }
   function supportedSubscriptions() { return api.state().me === 'local' || !!api.firebase(); }

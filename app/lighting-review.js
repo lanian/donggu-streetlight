@@ -72,8 +72,12 @@ function rvAddObservationPoints(out, dong, kind, ctx, G) {
 function lightReview(dong, kind) {
   const G = lightGrid(), ctx = rvContext(), seen = new Set(), cands = [];
   const items = G.items.filter(it => inDong(it.l, dong) && (kind === '전체' || it.l.kind === kind) && !it.l.removed);
-  for (const a of items) for (const { it: b, d } of G.near(a.x, a.y, LIGHT_MODEL.pairMax[a.l.kind] || 62)) {
+  // Discover mixed-kind pairs symmetrically before removing the reversed ID pair.
+  // Otherwise a 60m street/park pair disappears when the 50m park light has the lower ID.
+  const searchRadius = Math.max(62, ...Object.values(LIGHT_MODEL.pairMax));
+  for (const a of items) for (const { it: b, d } of G.near(a.x, a.y, searchRadius)) {
     if (b === a || b.l.removed || b.l.id < a.l.id || kind !== '전체' && b.l.kind !== kind) continue;
+    if (d > Math.max(LIGHT_MODEL.pairMax[a.l.kind] || 62, LIGHT_MODEL.pairMax[b.l.kind] || 62)) continue;
     const need = (a.r + b.r) * LIGHT_MODEL.gapFactor;
     if (d <= need && a.on > 0 && b.on > 0) continue;
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, E = G.lightAt(mx, my);
@@ -142,6 +146,7 @@ function runLightingReview() {
       const transitions = DGLighting.state.records.filter(r => !r.removed).flatMap(r => [r.observedAt, r.observedAt + r.validDays * 86400000]).filter(t => Number.isFinite(t) && t > now);
       S.review = { mode: actualMode, dong: S.rvDong, kind: S.rvKind, minute: S.rvMinute, cands, show: 20, at: now, inputRevision: S.rvRevision || 0, validUntil: Math.min(Infinity, ...transitions), n: S.lights.filter(l => !l.removed && inDong(l, S.rvDong) && (S.rvKind === '전체' || l.kind === S.rvKind)).length };
       rvExpireAt(S.review.validUntil); S.rvMessage = ''; render();
+      if (globalThis.DGLightingWorkflows) DGLightingWorkflows.captureReview(S.review);
     } catch (error) { toast('검토 계산을 완료하지 못했어요: ' + error.message); if (button.isConnected) { button.disabled = false; button.textContent = '검토 실행'; } }
   }, 30);
 }
@@ -166,12 +171,13 @@ function rvEvidenceHTML(c, details = true) {
 function rvTitle(c) { return c.a ? c.a.code + ' ↔ ' + c.b.code : c.name; }
 function rvButtons(c, i) {
   const point = ' data-lat="' + c.mid.lat + '" data-lng="' + c.mid.lng + '"';
-  return '<div class="split"><button class="btn sm" data-rvmap="' + i + '">지도</button><button class="btn ghost sm" data-lc="new-source"' + point + '>다른 기관·외부 광원 기록</button><button class="btn ghost sm" data-lc="new-observation"' + point + '>현장 밝기 기록</button><button class="btn ghost sm" data-rvreg="' + i + '">관리 시설 등록 양식</button></div>';
+  return '<div class="split"><button class="btn sm" data-rvmap="' + i + '">지도</button><button class="btn ghost sm" data-lc="new-source"' + point + '>다른 기관·외부 광원 기록</button><button class="btn ghost sm" data-lc="new-observation"' + point + '>현장 밝기 기록</button>' + (globalThis.DGLightingWorkflows ? '<button class="btn ghost sm" data-lw="candidate-task" data-candidate="' + i + '">재확인 업무로</button>' : '') + '<button class="btn ghost sm" data-rvreg="' + i + '">관리 시설 등록 양식</button></div>';
 }
 function reviewSection() {
   const rv = rvFresh(), mode = S.rvMode || (ROADS ? 'roads' : 'pairs'), cs = rvList(rv), sk = rv?.cands.skip || {};
   const active = DGLighting.state.records.filter(r => !r.removed);
   return '<div class="panel"><h3>밝기 검토 · 주변 광원과 현장 근거</h3><p>대장에 표시되지 않은 등이나 건물 빛 때문에 실제로는 밝을 수 있어요. <b>대장 모델·외부 광원·현장 관찰</b>을 함께 확인하세요.</p>' +
+    (globalThis.DGLightingWorkflows ? DGLightingWorkflows.reviewHistoryStatus(rv) : '') +
     '<div class="split"><button class="btn ghost sm" data-asec="lightingcontext">외부 광원·관찰 관리 (' + active.length + ')</button><button class="btn ghost sm" data-lc="new-source">외부 광원 추가</button><button class="btn ghost sm" data-lc="new-observation">현장 밝기 기록</button></div>' +
     (DGLighting.state.error ? '<p class="notice">' + esc(DGLighting.state.error) + ' <button class="btn ghost sm" data-lc="reload">자료 다시 읽기</button></p>' : '') +
     '<details class="help"><summary>계산과 한계</summary><p>대장 시설의 간격·종류·상태로 상대 지수를 계산해요. 0.30 미만 지점 또는 도로의 24m 이상 구간은 모델상 부족 후보로 남겨요. 외부 광원은 확인된 반경·점등 시간·재확인 기한 안에서 보완하고, 대장 시설과 중복되거나 야간·시간 정보가 불명확한 자료는 확인 대상으로 표시해요. 반경과 영향 정도는 모델 가정이에요.</p><p>현장 밝기와 조도계 lux는 별도 근거로 표시하며 모델에 더하지 않아요. 모델상 밝아도 현장 어두움 관찰이 있으면 검토 대상으로 남아요. 도로는 8m 이하 조각을 광원·관찰 반경의 경계에서 다시 나누어 집계해요. 표시 길이는 좌표와 입력 반경에 따른 근사치예요. 아파트·학교·숲·사유지 길은 도로 검토에서 제외하지만 현장 어두움 지점은 별도로 표시해요. 상대 지수는 밝기 백분율·실측 조도·법정 기준 충족률이 아니며 조명 설치 결정을 대신하지 않아요.</p></details>' +

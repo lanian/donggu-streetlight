@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const root = process.env.DONGGU_TEST_ROOT || path.resolve(__dirname, '../..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const html = read('index.html');
-const sources = ['app/operations-core.js', 'app/operations.js', 'app/integration.js', 'app/legacy-bridge.js'].map(file => [file, read(file)]);
+const sources = ['app/operations-core.js', 'app/operations.js', 'app/workflows.js', 'app/integration.js', 'app/legacy-bridge.js'].map(file => [file, read(file)]);
 const copy = value => JSON.parse(JSON.stringify(value));
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const turn = () => new Promise(resolve => setImmediate(resolve));
@@ -27,12 +27,12 @@ function harness() {
     PATROL_JOBS: new Map(), ADMIN_SECTIONS: {}, ADONGS: [], CHECKS: [], dl: null,
     $: () => null, esc: String, fmtDT: String, can: () => true, inDong: () => true, dongOptions: () => '', render() {},
     toast: message => toasts.push(message), listAllRecords: async () => [], getPhoto() {},
-    db: { collection: () => ({ onSnapshot() {} }) },
+    db: { collection: () => ({ where() { return this; }, orderBy() { return this; }, limit() { return this; }, onSnapshot(callback) { callback({ docs: [] }); return () => {}; } }) },
     byId: id => ({ id, code: id, dong: '동' }), draftDirty: d => !!(d && (d.memo || d.result || d.photos?.length || Object.keys(d.checks || {}).length)),
     inspectionDraftKey: snapshotKey, suggestResult() {},
     newInspectionJob: (light, d) => ({ id: 'inspection-' + ++sequence, key: snapshotKey(d), rec: { lightId: light.id, photos: copy(d.photos) } }),
     commitInspectionJob: async () => {}, commitPatrolJob: async () => {},
-    DGData: { clone: copy, newId: prefix => prefix + '-' + ++sequence },
+    DGData: { clone: copy, newId: prefix => prefix + '-' + ++sequence, readPage: async () => ({ rows: [], hasMore: false, nextCursor: null, source: 'local', complete: true, fetchedAt: 1 }) },
     DGManagement: { attach() {} }, DGWorkCommands: { execute: async () => {} },
     openSheet() {}, openMap() {}, renderPhotoStrip() {}, openAdminSection() {}, refreshAdminSection() {}, saveInspection() {}, ptSave() {}, ptFinish() {}, reportCard: () => '<div></div>', ptDraw() {},
     stashDraft() { if (context.draft && context.draftDirty(context.draft)) context.DRAFTS[context.draft.lightId] = context.draft; },

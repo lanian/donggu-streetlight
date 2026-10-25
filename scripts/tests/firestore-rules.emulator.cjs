@@ -419,5 +419,64 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       await assertFails(setDoc(doc(outsider, 'roles/outsider'), { role: 'admin' }));
       await assertFails(setDoc(doc(staff(), 'roles/inspector-a'), { role: 'admin' }));
     });
+
+    test('server-owned restore receipts and health cannot be forged by client administrators',async()=>{
+      await assertFails(setDoc(doc(admin(),'restoreOperations/forged'),{status:'applied',by:'admin'}));
+      await assertFails(setDoc(doc(admin(),'systemHealth/retention'),{lastSuccessAt:Date.now()}));
+      await seed({'restoreOperations/server':{status:'applied',by:'admin'},'systemHealth/retention':{lastSuccessAt:1}});
+      await assertSucceeds(getDoc(doc(admin(),'restoreOperations/server')));
+      await assertFails(getDoc(doc(staff(),'restoreOperations/server')));
+      await assertFails(getDoc(doc(staff(),'systemHealth/retention')));
+      await seed({'meta/operationalRestore':{status:'partial',operationId:'bulk'}});
+      await assertFails(setDoc(doc(admin(),'inventory/during-restore'),{name:'램프',unit:'개',quantity:1,unitCost:1,revision:1,updatedAt:1,updatedBy:'admin'}));
+    });
+    test('imported external sources require admin and unconfirmed initial lighting conditions',async()=>{
+      const source=lighting({sourceAgency:'타 기관',sourceRecordId:'lamp-1',sourceDataset:'공개 대장',sourceUpdatedAt:0,importedAt:1000,importBatchId:'import-1',status:'unknown',schedule:'unknown',nightConfirmed:false,level:'unknown',lux:null,distinct:false,linkedLightId:''});
+      await assertFails(lightingWrite(staff(),'external-1',source));
+      const imported={...source,createdBy:'admin',updatedBy:'admin',operationId:'import-admin'};
+      await assertFails(lightingWrite(admin(),'external-lit',{...imported,status:'on',nightConfirmed:true}));
+      await assertSucceeds(lightingWrite(admin(),'external-1',imported));
+    });
+    function workflowWrite(client,entity,id,record){const batch=writeBatch(client);batch.set(doc(client,(entity==='task'?'lightingTasks/':'lightingRuns/')+id),record);batch.set(doc(client,'lightingWorkflowOperations/'+record.operationId),{schemaVersion:1,entity,recordId:id,by:record.updatedBy,at:record.updatedAt,revision:record.revision,requestHash:'b'.repeat(64)});return batch.commit();}
+    test('lighting tasks enforce assignment, bounded evidence and immutable completion receipts',async()=>{
+      const now=Date.now(),task={schemaVersion:1,title:'밝기 재확인',lat:35.15,lng:126.92,radius:20,note:'',originKind:'manual',originId:'',evidenceIds:[],assignedTo:'inspector-a',dueAt:now+86400000,reviewMinute:1260,status:'open',observationId:'',completionNote:'',completedAt:0,completedBy:'',createdAt:now,createdBy:'inspector-a',updatedAt:now,updatedBy:'inspector-a',revision:1,operationId:'task-create'};
+      await assertFails(workflowWrite(staff(),'task','other-task',{...task,assignedTo:'inspector-b'}));
+      await assertSucceeds(workflowWrite(staff(),'task','task',task));
+      const completed={...task,status:'completed',observationId:'observed',completionNote:'확인',completedAt:now+1000,completedBy:'inspector-a',updatedAt:now+1000,revision:2,operationId:'task-complete'};
+      await assertFails(workflowWrite(staff(),'task','task',completed));
+      await seed({'lightingContext/observed':lighting({kind:'observation',level:'dark',observedAt:now,schedule:'always',nightConfirmed:true,removed:false})});
+      await assertFails(workflowWrite(otherStaff(),'task','task',{...completed,completedBy:'inspector-b',updatedBy:'inspector-b'}));
+      await assertSucceeds(workflowWrite(staff(),'task','task',completed));
+      await assertFails(workflowWrite(staff(),'task','task',{...task,revision:3,updatedAt:now+2000,operationId:'task-reopen'}));
+      await assertSucceeds(workflowWrite(admin(),'task','task',{...task,revision:3,updatedAt:now+2000,updatedBy:'admin',operationId:'task-reopen-admin'}));
+      await assertFails(deleteDoc(doc(admin(),'lightingTasks/task')));
+      await assertFails(updateDoc(doc(admin(),'lightingWorkflowOperations/task-complete'),{at:123}));
+    });
+    test('saved lighting runs are bounded, receipt-backed and immutable',async()=>{
+      const now=Date.now(),run={schemaVersion:1,modelVersion:'test-v1',reviewedAt:now,minute:1260,mode:'pairs',dong:'전체',facilityKind:'전체',registryCount:2,contextCount:0,roadCount:0,candidateCount:0,inputDigest:'a'.repeat(64),inputVersionsJson:'[]',settingsJson:'{}',candidatesJson:'[]',evaluationJson:'{}',payloadBytes:400,createdAt:now,createdBy:'inspector-a',updatedAt:now,updatedBy:'inspector-a',revision:1,operationId:'run-create'};
+      await assertFails(setDoc(doc(staff(),'lightingRuns/run'),run));
+      await assertSucceeds(workflowWrite(staff(),'run','run',run));
+      await assertFails(updateDoc(doc(admin(),'lightingRuns/run'),{candidateCount:999}));
+      await assertFails(workflowWrite(staff(),'run','large',{...run,payloadBytes:600001,operationId:'run-large'}));
+    });
+    test('report facility relinking preserves receipt, needs admin and writes its immutable event atomically',async()=>{
+      await seed({'reports/relink':{lightId:null,code:'',dong:'',createdAt:1000,status:'접수',desc:'원문 유지',receipt:'R-original'}});
+      const event={schemaVersion:1,type:'facility-linked',reportId:'relink',fromLightId:'',toLightId:'p1',reason:'표찰 확인',by:'admin',at:2000,revision:1,requestHash:'c'.repeat(64)};
+      const patch={lightId:'p1',code:'산수동 1',dong:'산수동',linkRevision:1,linkEventId:'link-command',linkUpdatedBy:'admin',updatedAt:2000,workId:''};
+      await assertFails(updateDoc(doc(admin(),'reports/relink'),patch));
+      const manager=admin(),batch=writeBatch(manager);batch.update(doc(manager,'reports/relink'),patch);batch.set(doc(manager,'reportEvents/link-command'),event);await assertSucceeds(batch.commit());
+      assert.equal((await getDoc(doc(admin(),'reports/relink'))).data().receipt,'R-original');
+      await assertFails(updateDoc(doc(admin(),'reportEvents/link-command'),{reason:'변경'}));
+      await assertFails(updateDoc(doc(staff(),'reports/relink'),{lightId:'p2'}));
+    });
+
+    test('admin can attach a report to a completed work without replacing its original completer',async()=>{
+      const C=require('../../app/operations-core'),manager=admin(),work={...C.createOrder({title:'검수 대기',assignedTo:'inspector-a'}, {id:'p1',code:'산수동 1',dong:'산수동'},'admin',1000),status:'completed',revision:3,updatedAt:3000,updatedBy:'inspector-a',afterPhotos:['waiting-photo'],completedAt:3000,completedBy:'inspector-a',completionNote:'수리'};
+      await seed({'workOrders/waiting':work,'photos/waiting-photo':photo({workId:'waiting',kind:'work'}),'reports/waiting-report':{createdAt:1000,status:'접수',lightId:'p1'}});
+      const batch=writeBatch(manager);batch.update(doc(manager,'workOrders/waiting'),{reportIds:['waiting-report'],revision:4,updatedAt:4000,updatedBy:'admin'});batch.update(doc(manager,'reports/waiting-report'),{workId:'waiting',updatedAt:4000});batch.set(doc(manager,'workEvents/link-waiting'),{workId:'waiting',lightId:'p1',fromStatus:'completed',toStatus:'completed',type:'reports-linked',note:'',at:4000,by:'admin',revision:4,createdAt:1000,costTotal:0,costDelta:0,requestHash:'d'.repeat(64)});await assertSucceeds(batch.commit());
+      assert.equal((await getDoc(doc(manager,'workOrders/waiting'))).data().completedBy,'inspector-a');
+      await seed({'workOrders/other-work':{...work,status:'assigned',revision:1,reportIds:['waiting-report']}});
+      await assertFails(updateDoc(doc(manager,'reports/waiting-report'),{workId:'other-work',updatedAt:5000}));
+    });
   });
 }
