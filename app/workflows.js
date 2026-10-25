@@ -92,15 +92,21 @@
   }
   function selectedReportIds() { return [...document.querySelectorAll('[data-fw-report]:checked')].map(el => el.dataset.fwReport); }
   async function linkExisting() {
-    const form = Q('#dgReportWork'), report = state.report;
+    const form = Q('#dgReportWork'), report = state.report, token = sequence;
     if (!form || form.dataset.reportId !== report?.id || state.reportJob) return;
     const work = state.orders.find(w => w.id === Q('#dgExistingWork').value), reportIds = selectedReportIds();
     if (!work || !reportIds.length) throw new Error('작업과 연결할 신고를 선택해 주세요.');
     const versions = Object.fromEntries(state.candidates.filter(r => reportIds.includes(r.id)).map(r => [r.id, r.updatedAt || r.createdAt || null]));
     const job = { id: root.DGOperations.uuid('work-link'), kind: 'link-reports', workId: work.id, actor: api.state().me, at: Date.now(), input: { expectedRevision: work.revision, reportIds }, reportVersions: versions, note: '신고 ' + reportIds.length + '건 연결' };
+    const ownsForm = () => token === sequence && form.isConnected && Q('#dgReportWork') === form && Q('#sheet')?.classList.contains('open');
+    const current = () => ownsForm() && state.reportJob === job;
     state.reportJob = job; form.querySelector('fieldset').disabled = true;
-    try { const result = await root.DGOperations.submit(job, '기존 작업에 신고 연결 · ' + work.title); if (form.isConnected && Q('#dgReportWork') === form) { if (result.state === 'synced') await root.DGOperations.openWork(work.id); else api.closeSheet(); } }
-    catch (error) { if (!(await root.DGOffline.jobs()).some(j => j.id === job.id)) { state.reportJob = null; if (form.isConnected) form.querySelector('fieldset').disabled = false; } if (form.isConnected && Q('#dgWorkLinkState')) Q('#dgWorkLinkState').textContent = '저장 대기함에서 오류를 확인해 주세요. ' + error.message; throw error; }
+    try { const result = await root.DGOperations.submit(job, '기존 작업에 신고 연결 · ' + work.title); if (current()) { if (result.state === 'synced') await root.DGOperations.openWork(work.id, undefined, { isCurrent: current }); else api.closeSheet(); } }
+    catch (error) {
+      if (!(await root.DGOffline.jobs()).some(j => j.id === job.id) && state.reportJob === job) { state.reportJob = null; if (ownsForm()) form.querySelector('fieldset').disabled = false; }
+      if (ownsForm() && Q('#dgWorkLinkState')) Q('#dgWorkLinkState').textContent = '저장 대기함에서 오류를 확인해 주세요. ' + error.message;
+      throw error;
+    }
   }
   async function readFacility(id) {
     const light = api.byId(id); if (!light) throw new Error('시설을 찾을 수 없어요.');

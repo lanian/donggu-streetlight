@@ -271,15 +271,21 @@
   function partRows(values) {
     return (values || []).map((p, i) => '<tr><td>' + E(p.name) + (p.inventoryId ? '<small>재고 연동</small>' : '') + '</td><td>' + p.qty + '</td><td>' + p.unitCost.toLocaleString() + '</td><td><button class="btn ghost sm" data-dg="remove-part" data-index="' + i + '">삭제</button></td></tr>').join('');
   }
-  async function openWork(id, resumeId) {
-    const request = ++editorRequest; await persistActive(); await load(); if (request !== editorRequest) return; const order = await readOrder(id); if (!order) return api.toast('작업을 찾을 수 없어요. 새로고침해 주세요.');
-    await loadReports(order.lightId); if (request !== editorRequest) return;
+  async function openWork(id, resumeId, navigation = {}) {
+    const owned = () => !navigation.isCurrent || navigation.isCurrent();
+    if (!owned()) return;
+    const request = ++editorRequest, current = () => request === editorRequest && owned();
+    await persistActive(); if (!current()) return;
+    await load(); if (!current()) return;
+    const order = await readOrder(id); if (!current()) return;
+    if (!order) return api.toast('작업을 찾을 수 없어요. 새로고침해 주세요.');
+    await loadReports(order.lightId); if (!current()) return;
+    const oldCompletion = root.DGOffline.ready && await root.DGOffline.get('workCompletion', resumeId || id);
+    if (!current()) return;
     state.currentOrder = JSON.parse(JSON.stringify(order));
     state.lightVersion = (api.byId(order.lightId) || {}).updatedAt || null;
     state.reportVersions = Object.fromEntries((order.reportIds || []).map(reportId => { const r = state.reports.find(x => x.id === reportId); return [reportId, r && (r.updatedAt || r.createdAt || null)]; }));
     const token = ++detailToken;
-    const oldCompletion = root.DGOffline.ready && await root.DGOffline.get('workCompletion', resumeId || id);
-    if (request !== editorRequest) return;
     state.completion = oldCompletion && oldCompletion.expectedRevision === order.revision ? oldCompletion : { workId: id, lightId: order.lightId, expectedRevision: order.revision, photos: [], existingPhotos: order.afterPhotos || [], parts: order.parts || [], measurements: order.measurements || [], note: order.completionNote || '' };
     const completion = adoptDraft(state.completion, 'workCompletion', oldCompletion && oldCompletion.expectedRevision === order.revision ? resumeId || id : id, !!(oldCompletion && oldCompletion.expectedRevision === order.revision));
     if (oldCompletion && oldCompletion.expectedRevision !== order.revision) {
@@ -299,12 +305,13 @@
       '<h3>조도계 실측 (선택)</h3><div class="grid2"><input class="f-in" id="woLux" type="number" min="0" max="200000" step="0.1" placeholder="lux" aria-label="실측 조도"><input class="f-in" id="woLuxNote" maxlength="300" placeholder="측정 위치·기기·조건" aria-label="실측 조건"></div><button class="btn ghost sm" data-dg="add-lux">실측 추가</button><div id="woMeasurements">' + measureRows(completion.measurements) + '</div><p class="muted">조도계로 측정한 값을 입력해요. 지도 밝기 예측과 별도로 보관돼요.</p>' : '') +
       (admin() && order.status === 'completed' ? '<h3>완료 검수</h3><label class="f" for="woVerification">검수 의견 / 보완 사유</label><textarea class="f-in" id="woVerification" maxlength="2000"></textarea><label class="f" for="woFacilityStatus">검수 후 시설 상태</label><select class="f-in" id="woFacilityStatus"><option value="">현재 시설 상태 유지</option>' + options(['정상', '점검필요', '고장', '수리중'], '') + '</select><label class="f"><input type="checkbox" id="woCloseReports"> 연결된 신고도 완료 처리하고 연락처 삭제</label>' : '') +
       '<div class="split">' + allowed.map(target => '<button class="btn' + (target === 'cancelled' ? ' ghost' : ' sodium') + '" data-dg="transition-work" data-id="' + E(id) + '" data-status="' + target + '">' + E({ assigned: '담당 배정', in_progress: order.status === 'completed' ? '보완 요청' : '작업 시작', completed: '완료 검수 요청', verified: '검수 승인', cancelled: '작업 취소', draft: '배정 대기로 복원' }[target]) + '</button>').join('') + '</div></fieldset></div><h3>처리 이력</h3><div id="woEvents" class="panel" aria-live="polite">불러오는 중…</div>');
+    const detail = Q('#woDetail'), detailCurrent = () => request === editorRequest && token === detailToken && detail?.isConnected && Q('#woDetail') === detail;
     const evidence = [...(order.beforePhotos || []), ...(order.afterPhotos || [])];
     const results = await Promise.allSettled(evidence.map(async photoId => { const photo = await api.getPhoto(photoId), src = photo && root.DGSecurity.safeImageSrc(photo.data); return src ? '<figure><img src="' + E(src) + '" alt="' + E(photo.label || '작업 사진') + '"><figcaption>' + E(photo.label) + '</figcaption></figure>' : '<p class="notice">원본 사진을 확인할 수 없어요.</p>'; }));
-    if (token !== detailToken || !Q('#woEvidence')) return;
+    if (!detailCurrent() || !Q('#woEvidence')) return;
     Q('#woEvidence').innerHTML = results.length ? results.map(r => r.status === 'fulfilled' ? r.value : '<p class="notice">사진 조회 실패</p>').join('') : '<span class="muted">첨부 사진 없음</span>';
-    try { const events = await api.readAll('workEvents', { where: [['workId', '==', id]], orderBy: [['at', 'desc']] }); if (token === detailToken && Q('#woEvents')) Q('#woEvents').innerHTML = events.map(e => '<p><b>' + E(C.STATES[e.toStatus] || e.type) + '</b> · ' + time(e.at) + ' · ' + E(label(e.by)) + (e.note ? '<br>' + E(e.note) : '') + '</p>').join('') || '처리 이력이 없어요.'; }
-    catch (error) { if (token === detailToken && Q('#woEvents')) Q('#woEvents').textContent = '처리 이력을 불러오지 못했어요.'; }
+    try { const events = await api.readAll('workEvents', { where: [['workId', '==', id]], orderBy: [['at', 'desc']] }); if (detailCurrent() && Q('#woEvents')) Q('#woEvents').innerHTML = events.map(e => '<p><b>' + E(C.STATES[e.toStatus] || e.type) + '</b> · ' + time(e.at) + ' · ' + E(label(e.by)) + (e.note ? '<br>' + E(e.note) : '') + '</p>').join('') || '처리 이력이 없어요.'; }
+    catch (error) { if (detailCurrent() && Q('#woEvents')) Q('#woEvents').textContent = '처리 이력을 불러오지 못했어요.'; }
   }
   function measureRows(values) { return values.map((m, i) => '<p>' + m.lux + ' lux · ' + E(m.note) + ' <button class="btn ghost sm" data-dg="remove-lux" data-index="' + i + '">삭제</button></p>').join(''); }
   async function persistCompletion() { const d = state.completion; if (!d || d.pending || !ownerForm(d, 'workCompletion') || !Q('#woCompletionNote')) return; d.note = Q('#woCompletionNote').value; await writeDraft(d, 'workCompletion'); }
@@ -328,7 +335,7 @@
       const result = await submit(job, C.STATES[target] + ' · ' + order.title);
       if (result.state === 'synced') {
         await clearWorkDraft(d, 'workCompletion'); await load(true);
-        if (form.isConnected && Q('#woDetail') === form) await openWork(order.id);
+        if (form.isConnected && Q('#woDetail') === form) await openWork(order.id, undefined, { isCurrent: () => form.isConnected && Q('#woDetail') === form && Q('#sheet')?.classList.contains('open') && state.currentOrder === order });
       } else if (form.isConnected && Q('#woDetail') === form) api.closeSheet();
     } catch (error) {
       const queued = (await root.DGOffline.jobs().catch(() => [])).some(j => j.id === job.id);

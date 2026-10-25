@@ -36,6 +36,15 @@ const server = http.createServer((req, res) => {
     await poll(page, async id => (await db.doc('workOrders/' + id).get()).exists, workId, 'new work saved');
     await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open')); return workId;
   }
+  async function delayLinkedWorkRead(id) {
+    await page.evaluate(id => {
+      const doc = db.doc, open = DGOperations.openWork, race = window.workLinkRace = { started: false, entered: false, returned: false };
+      const delay = new Promise(resolve => { race.release = resolve; });
+      db.doc = function (path) { const ref = doc.call(this, path); if (path === 'workOrders/' + id) { const get = ref.get; ref.get = async function (...args) { if (race.started && !race.entered) { race.entered = true; await delay; } return get.apply(this, args); }; } return ref; };
+      DGOperations.openWork = async function (...args) { race.started = true; try { return await open.apply(this, args); } finally { race.returned = true; } };
+      race.restore = () => { db.doc = doc; DGOperations.openWork = open; };
+    }, id);
+  }
   try {
     await page.goto(origin); await page.waitForFunction(() => S.live && DGOffline.ready && S.me === 'local' && DGIntegration.initialized);
     await page.evaluate(() => { S.demoRole = 'admin'; S.tab = 'admin'; render(); });
@@ -58,13 +67,21 @@ const server = http.createServer((req, res) => {
     await page.evaluate(() => DGWorkflows.openReportWork('field-ui-report'));
     assert.equal(await page.locator('[data-fw-report="field-ui-report"]').isChecked(), true);
     assert.equal(await page.locator('[data-fw-report="field-ui-duplicate"]').isChecked(), false);
+    await delayLinkedWorkRead(first);
     await page.locator('[data-fw-report="field-ui-duplicate"]').check(); await page.locator('#dgExistingWork').selectOption(first); await page.locator('[data-fw="link-existing-work"]').click();
+    await poll(page, () => window.workLinkRace.entered, undefined, 'linked work detail read deliberately delayed');
     await poll(page, async id => (await db.doc('reports/field-ui-report').get()).data().workId === id, first, 'existing work got both reports');
     const joined = await page.evaluate(async id => ({ order: (await db.doc('workOrders/' + id).get()).data(), reports: await DGData.readAll(db, 'reports'), events: await DGData.readAll(db, 'workEvents', { where: [['workId', '==', id]] }) }), first);
     assert.deepEqual(joined.order.reportIds.sort(), ['field-ui-duplicate', 'field-ui-report']); assert.equal(joined.order.status, 'assigned'); assert.equal(joined.events.some(e => e.type === 'reports-linked'), true); assert.equal(joined.reports.length, 2);
     results.push('duplicate candidates require human selection and link to an existing work without deleting reports');
 
     await page.evaluate(() => DGWorkflows.openReportWork('field-ui-duplicate'));
+    await page.evaluate(() => { workLinkRace.newForm = document.querySelector('#dgReportWork'); workLinkRace.release(); });
+    await poll(page, () => workLinkRace.returned, undefined, 'older linked work response returned');
+    assert.equal(await page.evaluate(() => workLinkRace.newForm.isConnected && document.querySelector('#dgReportWork') === workLinkRace.newForm), true);
+    assert.equal(await page.locator('#dgReportWork').getAttribute('data-report-id'), 'field-ui-duplicate');
+    await page.evaluate(() => workLinkRace.restore());
+    results.push('delayed linked-work detail cannot replace a newer report connection view');
     await page.locator('[data-fw="new-from-report"]').click();
     assert.equal(await page.locator('[data-work-report="field-ui-duplicate"]').isChecked(), true);
     const selectedDraft = await page.evaluate(() => DGOperations.state.draft);
@@ -107,6 +124,33 @@ const server = http.createServer((req, res) => {
     assert.equal(dossierText.includes('신고 시설 연결'), true); assert.equal(dossierText.includes('현재 진행 중 작업 3건'), true);
     await page.emulateMedia({ media: 'print' }); assert.equal(await page.locator('#sheet .rep').first().isVisible(), true); assert.equal(await page.locator('#sheet .sheet-head').isVisible(), false); await page.emulateMedia({ media: 'screen' });
     results.push('dossier appendix omits existing inspection/edit details without removing report or active-work history');
+
+    await page.evaluate(() => DGWorkflows.openReportWork('field-ui-report')); await delayLinkedWorkRead(first);
+    await page.locator('#dgExistingWork').selectOption(first); await page.locator('[data-fw="link-existing-work"]').click();
+    await poll(page, () => workLinkRace.entered, undefined, 'linked work read delayed before closing');
+    await page.evaluate(() => { window.closedLinkHistory = new Promise(resolve => addEventListener('popstate', resolve, { once: true })); });
+    await page.locator('#sheet [data-close]').click(); await page.evaluate(() => closedLinkHistory.then(() => true));
+    await page.evaluate(() => workLinkRace.release()); await poll(page, () => workLinkRace.returned, undefined, 'closed report link response returned');
+    assert.equal(await page.locator('#sheet').evaluate(el => el.classList.contains('open')), false);
+    assert.equal(await page.locator('#dgReportWork').getAttribute('data-report-id'), 'field-ui-report'); await page.evaluate(() => workLinkRace.restore());
+    results.push('closing the report sheet prevents a delayed linked-work response from reopening it');
+
+    await page.evaluate(() => {
+      const submit = DGOperations.submit, race = window.failedLinkRace = { calls: [] };
+      DGOperations.submit = job => new Promise((resolve, reject) => race.calls.push({ job, resolve, reject }));
+      race.restore = () => { DGOperations.submit = submit; };
+    });
+    await page.evaluate(() => DGWorkflows.openReportWork('field-ui-report')); await page.locator('#dgExistingWork').selectOption(first); await page.locator('[data-fw="link-existing-work"]').click();
+    await poll(page, () => failedLinkRace.calls.length === 1, undefined, 'first delayed report link');
+    await page.evaluate(() => DGWorkflows.openReportWork('field-ui-duplicate')); await page.locator('#dgExistingWork').selectOption(first); await page.locator('[data-fw="link-existing-work"]').click();
+    await poll(page, () => failedLinkRace.calls.length === 2, undefined, 'newer delayed report link');
+    await page.evaluate(() => failedLinkRace.calls[0].reject(new Error('이전 신고 연결 지연 실패')));
+    await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('이전 신고 연결 지연 실패'));
+    assert.equal(await page.evaluate(() => DGWorkflows.state.reportJob?.id === failedLinkRace.calls[1].job.id), true);
+    assert.equal(await page.locator('#dgReportWork fieldset').isDisabled(), true); assert.equal(await page.locator('#dgWorkLinkState').textContent(), '');
+    await page.evaluate(() => failedLinkRace.calls[1].resolve({ state: 'queued' })); await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
+    await page.evaluate(() => failedLinkRace.restore());
+    results.push('older link failure cannot clear or unlock a newer report submission');
     assert.deepEqual(errors, []); console.log(JSON.stringify({ results, browserErrors: errors }, null, 2));
   } catch (error) {
     console.error(JSON.stringify(await page.evaluate(async () => ({ toast: document.querySelector('#toast')?.textContent, error: DGOperations?.state.error, filter: DGOperations?.workFilters(), jobs: DGOffline.ready ? (await DGOffline.jobs()).map(x => ({ kind: x.kind, state: x.state, error: x.error })) : [], text: document.querySelector('#sheetIn')?.innerText.slice(-1400) })).catch(() => ({})), null, 2)); throw error;

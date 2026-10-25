@@ -47,6 +47,7 @@ async function fixture(shared) {
   ctx.DGOperations.attach(api);
   const emit = (name, target) => { for (const fn of events[name] || []) fn({ target }); };
   return { ctx, api, ui: ctx.DGOperations, offline, adapter, control, messages, db, field: id => fields[id], closed: () => closes, html: () => html,
+    showOther(markup) { for (const field of Object.values(fields)) field.isConnected = false; fields = {}; html = markup; },
     async open(lightId = 'a', reportId, resumeId) { await ctx.DGOperations.newWork(lightId, reportId, resumeId); return ctx.DGOperations.state.draft; },
     input(id, value) { fields[id].value = value; emit('input', fields[id]); },
     fireInput(target) { emit('input', target); },
@@ -90,6 +91,27 @@ test('older save completion cannot close or delete a newer work editor', async (
   gate.resolve(); await until(async () => !(await f.offline.get('workDraft', old.storageId)));
   assert.equal(f.ui.state.draft, newer); assert.equal(f.field('#woNewForm'), form); assert.equal(f.closed(), 0);
   assert.equal((await f.offline.get('workDraft', newer.storageId)).title, '다음 작업');
+});
+
+test('work detail stops when its originating view changes during any prerequisite read', async t => {
+  for (const stage of ['work-list', 'work-order', 'reports', 'completion-draft']) await t.test(stage, async () => {
+    const f = await fixture(), gate = deferred(); let entered = false, current = true;
+    await f.db.doc('workOrders/older-work').set({ lightId: 'a', code: 'A', title: '이전 연결 작업', status: 'assigned', assignedTo: 'local', priority: '보통', createdAt: 1, updatedAt: 1, revision: 1, beforePhotos: [], afterPhotos: [], reportIds: [], parts: [], measurements: [] });
+    const hold = async () => { entered = true; await gate.promise; };
+    if (stage === 'work-list') f.api.readPage = async (name, options) => { await hold(); return f.ctx.DGData.readPage(f.db, name, options); };
+    if (stage === 'work-order') {
+      const doc = f.db.doc;
+      f.db.doc = function (path) { const ref = doc.call(this, path); if (path === 'workOrders/older-work') { const get = ref.get; ref.get = async function (...args) { await hold(); return get.apply(this, args); }; } return ref; };
+    }
+    if (stage === 'reports') { const read = f.api.readAll; f.api.readAll = async (...args) => { if (args[0] === 'reports') await hold(); return read(...args); }; }
+    if (stage === 'completion-draft') { const get = f.offline.get; f.offline.get = async (...args) => { if (args[0] === 'workCompletion') await hold(); return get(...args); }; }
+    const existingOrder = { id: 'current-owner' }, existingCompletion = { workId: 'current-owner' };
+    f.ui.state.currentOrder = existingOrder; f.ui.state.completion = existingCompletion;
+    const pending = f.ui.openWork('older-work', undefined, { isCurrent: () => current });
+    await until(() => entered); current = false; f.showOther('<div>새 신고 연결 화면</div>'); gate.resolve(); await pending;
+    assert.equal(f.html(), '<div>새 신고 연결 화면</div>');
+    assert.equal(f.ui.state.currentOrder, existingOrder); assert.equal(f.ui.state.completion, existingCompletion);
+  });
 });
 
 test('late photo processing stays with its captured work and blocks premature submission', async () => {
