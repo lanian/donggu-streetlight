@@ -51,20 +51,40 @@
   }
   function view() {
     if (!state.loaded && !state.error && !loading) load();
-    const active = state.records.filter(r => !r.removed), records = state.records.filter(r => state.filter === 'removed' ? r.removed : !r.removed && (state.filter === 'all' || r.kind === state.filter));
+    const active = state.records.filter(r => !r.removed), records = state.records.filter(r => state.filter === 'removed' ? r.removed : !r.removed && (state.filter === 'all' || r.kind === state.filter || state.filter === 'stale' && r.observedAt + r.validDays * 86400000 <= Date.now() || state.filter === 'unconfirmed' && (!r.nightConfirmed || r.schedule === 'unknown')));
     return '<div class="panel"><h3>대장 밖 광원·현장 관찰</h3><p>다른 기관의 등, 상가·건물의 빛을 위치와 점등 시간대로 기록해요. 다른 기관 자료를 자동으로 수집한 목록은 아니에요.</p><p class="muted">추가 광원은 상대 모델의 보완 입력이에요. 현장 밝기와 조도계 실측은 별도 근거로 표시하며 모델 지수에 더하지 않아요.</p>' +
       (!canWrite() ? '<p class="notice">기록에는 점검 권한과 Firebase 또는 기기 저장 모드가 필요해요.</p>' : '<div class="split"><button class="btn" data-lc="new-source">외부 광원 추가</button><button class="btn ghost" data-lc="new-observation">현장 밝기 기록</button></div>') +
+      (root.DGLightingWorkflows ? '<div class="split"><button class="btn ghost sm" data-lw="tasks">재확인 업무</button><button class="btn ghost sm" data-lw="history">검토 이력·관찰 비교</button>' + (api.can('admin') ? '<button class="btn ghost sm" data-lw="import">기관 자료 반입</button>' : '') + '</div>' : '') +
       (state.draft ? '<button class="btn ghost block" data-lc="resume">작성 중 기록 이어쓰기</button>' : '') +
       (state.error ? '<p class="notice" role="alert">' + E(state.error) + ' 기존에 읽은 자료만 표시해요.</p>' : '') +
-      '<div class="split"><select class="f-in" id="lcFilter" aria-label="보완 기록 종류">' + option({ all: '사용 중 전체', source: '외부 광원', observation: '현장 관찰', removed: '제외한 기록' }, state.filter) + '</select><button class="btn ghost sm" data-lc="reload">새로고침</button></div><p class="muted">사용 중 광원 ' + active.filter(r => r.kind === 'source').length + ' · 관찰 ' + active.filter(r => r.kind === 'observation').length + '</p>' +
-      (records.length ? records.slice(0, state.show).map(r => '<div class="panel"><b>' + E(r.label) + '</b><p>' + E(recordSummary(r)) + '</p><p class="muted">' + E(kstTime(r.observedAt)) + ' · 반경 ' + E(r.radius) + 'm · 재확인 ' + E(r.validDays) + '일' + (r.lux != null ? ' · 실측 ' + E(r.lux) + ' lux (' + E(r.instrument) + ')' : '') + '</p><button class="btn ghost sm" data-lc="edit" data-id="' + E(r.id) + '">' + (canEdit(r) ? '확인·수정' : '기록 보기') + '</button></div>').join('') : '<p class="empty">' + (state.loaded ? '이 범위의 기록이 없어요.' : '불러오는 중…') + '</p>') +
+      '<div class="split"><select class="f-in" id="lcFilter" aria-label="보완 기록 종류">' + option({ all: '사용 중 전체', source: '외부 광원', observation: '현장 관찰', stale: '재확인 기한 경과', unconfirmed: '야간·시간 미확인', removed: '제외한 기록' }, state.filter) + '</select><button class="btn ghost sm" data-lc="reload">새로고침</button></div><p class="muted">사용 중 광원 ' + active.filter(r => r.kind === 'source').length + ' · 관찰 ' + active.filter(r => r.kind === 'observation').length + '</p>' +
+      (records.length ? records.slice(0, state.show).map(r => '<div class="panel"><b>' + E(r.label) + '</b><p>' + E(recordSummary(r)) + '</p><p class="muted">' + (r.importedAt && !r.nightConfirmed ? '기관 자료 시각 · 현장 미확인: ' : '') + E(kstTime(r.observedAt)) + ' · 반경 ' + E(r.radius) + 'm · 재확인 ' + E(r.validDays) + '일' + (r.lux != null ? ' · 실측 ' + E(r.lux) + ' lux (' + E(r.instrument) + ')' : '') + '</p>' + (r.sourceAgency ? '<p class="muted">출처 ' + E(r.sourceAgency) + ' / ' + E(r.sourceRecordId) + ' · ' + E(r.sourceDataset) + '</p>' : '') + '<div class="split"><button class="btn ghost sm" data-lc="edit" data-id="' + E(r.id) + '">' + (canEdit(r) ? '확인·수정' : '기록 보기') + '</button>' + (root.DGLightingWorkflows && canWrite() ? '<button class="btn ghost sm" data-lw="record-task" data-record-id="' + E(r.id) + '">재확인 업무로</button>' : '') + '</div></div>').join('') : '<p class="empty">' + (state.loaded ? '이 범위의 기록이 없어요.' : '불러오는 중…') + '</p>') +
       (records.length > state.show ? '<button class="btn ghost block" data-lc="more">더 보기</button>' : '') + '</div>';
   }
   function defaults(kind, point) {
     const now = Date.now(), minute = root.DGLightingModel.minuteOfKst(now);
     return { kind, label: '', category: kind === 'source' ? 'other_public' : 'field', operator: '', lat: point?.lat ?? '', lng: point?.lng ?? '', radius: kind === 'source' ? 20 : 10, strength: 'medium', status: 'unknown', level: 'unknown', schedule: kind === 'source' ? 'unknown' : 'hours', startMinute: kind === 'source' ? 1080 : (minute + 1380) % 1440, endMinute: kind === 'source' ? 360 : (minute + 60) % 1440, observedAt: now, validDays: kind === 'source' ? 90 : 30, nightConfirmed: false, lux: null, instrument: '', note: '', linkedLightId: '', distinct: false, removed: false };
   }
-  async function openEditor(kind, point, id, resume = false) {
+  function observationTimeWarning(d) {
+    if (!d || d.kind !== 'observation' || d.schedule !== 'hours' || !Number.isFinite(d.observedAt)) return '';
+    const minute = root.DGLightingModel.minuteOfKst(d.observedAt);
+    const inside = d.startMinute < d.endMinute ? minute >= d.startMinute && minute < d.endMinute : minute >= d.startMinute || minute < d.endMinute;
+    return inside ? '' : '실제 확인 시각이 적용 시간대 밖이에요. 관찰한 시간에 반영하려면 적용 시간대를 확인해 주세요.';
+  }
+  function syncObservationTime(target) {
+    const draft = state.draft, form = Q('#lcForm');
+    if (!draft || draft.readonly || draft.pending || form?.dataset.recordId !== draft.recordId || draft.data.kind !== 'observation') return;
+    if (['lcStart', 'lcEnd', 'lcSchedule'].includes(target.id)) draft.timeWindowManual = true;
+    if (target.id === 'lcObservedAt' && draft.timeWindowManual === false) {
+      const at = Date.parse(target.value + '+09:00');
+      if (Number.isFinite(at)) {
+        const minute = root.DGLightingModel.minuteOfKst(at);
+        Q('#lcStart').value = minuteText((minute + 1380) % 1440); Q('#lcEnd').value = minuteText((minute + 60) % 1440);
+      }
+    }
+    readForm(); const hint = Q('#lcTimeWarning'); if (hint) hint.textContent = observationTimeWarning(draft.data);
+  }
+  async function openEditor(kind, point, id, resume = false, prefill = null) {
     if (!state.loaded) await load();
     await persistDraft();
     if (resume) { if (id) state.draft = await root.DGOffline.get('lightingDraft', id); else if (!state.draft) state.draft = (await root.DGOffline.list('lightingDraft')).sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value; if (!state.draft) return api.toast('이어 쓸 기록이 없어요.'); }
@@ -73,10 +93,18 @@
       if (id && !record) return api.toast('기록을 찾을 수 없어요. 새로고침해 주세요.');
       const saved = id && root.DGOffline.ready ? await root.DGOffline.get('lightingDraft', id) : null;
       if (saved && confirm('이 기록의 작성 중인 초안을 이어 쓸까요?')) { state.draft = saved; renderEditor(); return; }
-      state.draft = { recordId: record ? record.id : uuid('lighting'), expectedRevision: record ? record.revision : 0, data: record ? root.DGLightingCommands.normalize(record) : defaults(kind, point), readonly: record ? !canEdit(record) : !canWrite(), pending: null };
+      state.draft = { recordId: record ? record.id : uuid('lighting'), expectedRevision: record ? record.revision : 0, data: record ? root.DGLightingCommands.normalize(record) : prefill || defaults(kind, point), readonly: record ? !canEdit(record) : !canWrite(), pending: null, timeWindowManual: !!record };
       if (!state.draft.readonly) await persistDraft(false);
     }
     renderEditor();
+  }
+  async function openObservation(input) {
+    if (!canWrite()) return api.toast('현장 관찰을 기록할 권한과 저장소를 확인해 주세요.');
+    if (!input || !Number.isFinite(input.lat) || !Number.isFinite(input.lng)) throw new Error('원본 지점의 위치를 확인해 주세요.');
+    const at = Number.isFinite(input.observedAt) ? input.observedAt : Date.now(), minute = root.DGLightingModel.minuteOfKst(at);
+    const data = { ...defaults('observation', input), label: input.label || '현장 밝기 재확인', note: input.note || '', observedAt: at, level: ['bright', 'adequate', 'dark'].includes(input.level) ? input.level : 'unknown', radius: Math.min(30, Math.max(5, input.radius || 10)), startMinute: (minute + 1380) % 1440, endMinute: (minute + 60) % 1440, nightConfirmed: false };
+    if (input.originKind) Object.assign(data, { originKind: input.originKind, originId: input.originId, originPointId: input.originPointId || '', positionAccuracy: input.positionAccuracy || 0 });
+    return openEditor('observation', input, null, false, root.DGLightingCommands.normalize(data));
   }
   function renderEditor() {
     if (editorMap) { editorMap.remove(); editorMap = null; }
@@ -88,9 +116,12 @@
       '<div class="grid2"><div>' + field('lcRadius', source ? '모델에 반영할 반경 (5–80m)' : '확인한 범위 반경 (5–30m)', d.radius, 'type="number" min="5" max="' + (source ? 80 : 30) + '" step="1" required') + '</div><div>' + (source ? select('lcStrength', '모델 영향 가정', { low: '낮음', medium: '중간', high: '높음' }, d.strength) : field('lcLux', '조도계 실측 lux (선택)', d.lux ?? '', 'type="number" min="0" max="200000" step="any"')) + '</div></div>' +
       (source ? select('lcStatus', '관찰 당시 점등 상태', { unknown: '미확인', on: '켜짐', off: '꺼짐' }, d.status) + '<p class="muted">반경·영향 가정은 상대 모델 입력이에요. 광도·조도 실측값이나 조명 설계값이 아니에요.</p>' : field('lcInstrument', '측정 기기·방법 (실측 입력 시 필수)', d.instrument, 'maxlength="100" placeholder="예: 조도계 모델, 보행면 수평 측정"') + '<p class="muted">밝기 판단과 lux는 기록한 범위 안의 관찰이에요. 주변 길 전체로 확대하거나 모델 지수로 변환하지 않아요.</p>') +
       field('lcObservedAt', '실제로 확인한 날짜·시각 (한국 시간)', kstInput(d.observedAt), 'type="datetime-local" required') +
+      (d.sourceAgency ? '<p class="muted">자료 출처: ' + E(d.sourceAgency) + ' / ' + E(d.sourceRecordId) + ' · ' + E(d.sourceDataset) + '<br>원본 갱신 ' + (d.sourceUpdatedAt ? E(kstTime(d.sourceUpdatedAt)) : '미제공') + ' · 반입 ' + E(kstTime(d.importedAt)) + '</p>' : '') +
+      (d.originKind ? '<p class="muted">연결 원본: ' + (d.originKind === 'patrol' ? '순찰 ' : '재확인 업무 ') + E(d.originId) + (d.originPointId ? ' / 지점 ' + E(d.originPointId) : '') + (d.positionAccuracy ? ' · GPS ±' + E(d.positionAccuracy) + 'm' : '') + '</p>' : '') +
       '<label class="f"><input id="lcNight" type="checkbox" ' + (d.nightConfirmed ? 'checked' : '') + '> 실제 해가 진 뒤 확인했어요</label>' +
       select('lcSchedule', source ? '점등 시간 정보' : '이 관찰을 적용할 시간대', source ? { unknown: '모름 · 수치 보완 없이 확인 대상으로 표시', hours: '확인한 시간대', always: '상시 점등 확인' } : { hours: '관찰한 시간대', unknown: '시간대 미확인' }, d.schedule) +
       '<div class="grid2"><div>' + field('lcStart', '시작 (한국 시간)', minuteText(d.startMinute), 'type="time"') + '</div><div>' + field('lcEnd', '종료 (다음 날 가능)', minuteText(d.endMinute), 'type="time"') + '</div></div><p class="muted">상가가 문을 닫거나 조명이 꺼지는 시간을 반영해 주세요. 시간 미확인·야간 미확인 자료는 밝기 수치 보완에 쓰지 않아요.</p>' +
+      '<p id="lcTimeWarning" class="notice" role="status">' + E(observationTimeWarning(d)) + '</p>' +
       field('lcValidDays', '다시 확인할 때까지의 기간 (일)', d.validDays, 'type="number" min="1" max="365" step="1" required') +
       (source ? '<details><summary>중복 광원 확인</summary>' + field('lcLinked', '같은 시설의 관리 대장 ID (선택)', d.linkedLightId, 'maxlength="180" placeholder="같은 시설이면 연결하고 중복 합산 제외"') + '<label class="f"><input id="lcDistinct" type="checkbox" ' + (d.distinct ? 'checked' : '') + '> 5m 이내 대장 시설과 별개의 광원임을 확인했어요</label><p class="muted">대장 시설과 가까우면 확인 전까지 중복 합산하지 않아요. 동일 이름·관리기관의 가까운 추가 기록도 중복을 확인해요.</p></details>' : '') +
       '<label class="f" for="lcNote">근거·주변 환경 메모</label><textarea class="f-in" id="lcNote" maxlength="1000" placeholder="예: 상가 폐점 후 꺼짐, 가로수 가림, 맞은편 기관 보행등">' + E(d.note) + '</textarea></fieldset>' +
@@ -129,6 +160,8 @@
   }
   async function save(button, remove) {
     const d = readForm(); if (!d || d.readonly || d.pending || !canWrite()) return;
+    const timeWarning = observationTimeWarning(d.data);
+    if (timeWarning && !confirm(timeWarning + '\n입력한 적용 시간대를 유지하고 저장할까요?')) return;
     if (remove !== undefined) d.data.removed = remove;
     if (d.data.lat === '' || d.data.lng === '') throw new Error('실제 확인 지점의 위도와 경도를 입력해 주세요.');
     const data = root.DGLightingCommands.normalize(d.data), job = { id: uuid('lighting-op'), recordId: d.recordId, actor: api.state().me, at: Date.now(), expectedRevision: d.expectedRevision, data };
@@ -182,6 +215,7 @@
       else if (!job) { d.pending = null; await writeDraft(d); }
     }
     state.draft = (await root.DGOffline.list('lightingDraft')).sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value || null; await load();
+    if (root.DGLightingWorkflows) await root.DGLightingWorkflows.ready();
     if (unsubscribe) unsubscribe();
     if (api.state().me === 'local' || api.firebase()) {
       try { unsubscribe = api.database().collection('lightingContext').onSnapshot(() => load(), error => { state.error = error.message || '실시간 갱신 실패'; notify(); }); } catch (_) { /* The refresh button remains available. */ }
@@ -189,10 +223,11 @@
   }
   function attach(contextApi) {
     api = contextApi; root.DGOffline.register('lighting', job => root.DGLightingCommands.execute(job, { db: api.database(), fb: api.firebase(), user: api.state().me, admin: api.can('admin') }));
+    if (root.DGLightingWorkflows) root.DGLightingWorkflows.attach(contextApi);
     if (attached) return; attached = true;
     document.addEventListener('click', event => { const b = event.target.closest('[data-lc]'); if (b) Promise.resolve().then(() => handle(b)).catch(error => api.toast(error.message)); });
     document.addEventListener('submit', event => { if (event.target.id !== 'lcForm') return; event.preventDefault(); save(Q('#lcSave')).catch(error => api.toast(error.message)); });
-    for (const event of ['input', 'change']) document.addEventListener(event, e => { if (e.target.closest('#lcForm')) persistDraft().catch(error => api.toast(error.message)); });
+    for (const event of ['input', 'change']) document.addEventListener(event, e => { if (e.target.closest('#lcForm')) { syncObservationTime(e.target); persistDraft().catch(error => api.toast(error.message)); } });
     document.addEventListener('change', e => { if (e.target.id === 'lcFilter') { state.filter = e.target.value; state.show = 40; notify(); } });
     root.DGOffline.subscribe(event => {
       if (event.type === 'synced' && event.job.kind === 'lighting') {
@@ -209,5 +244,5 @@
     });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') persistDraft().catch(() => {}); });
   }
-  root.DGLighting = { attach, ready, load, context, view, openEditor, state, restoreRecord, persistDraft, clearDraft, minuteText, parseMinute, kstTime, recordSummary, reason: key => REASONS[key] || key, classification: key => CLASSIFICATIONS[key] || key, categories: CATEGORIES, levels: LEVELS };
+  root.DGLighting = { attach, ready, load, context, view, openEditor, openObservation, state, restoreRecord, persistDraft, clearDraft, minuteText, parseMinute, kstTime, recordSummary, reason: key => REASONS[key] || key, classification: key => CLASSIFICATIONS[key] || key, categories: CATEGORIES, levels: LEVELS };
 })(globalThis);

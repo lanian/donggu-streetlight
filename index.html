@@ -27,19 +27,25 @@
 <script src="firebase-config.js"></script>
 <script src="security.js"></script>
 <script src="app/data.js"></script>
+<script src="app/restore.js"></script>
 <script src="app/field.js"></script>
 <script src="app/field-ui.js"></script>
 <script src="app/map-config.js"></script>
 <script src="app/pwa.js"></script>
 <script src="app/offline.js"></script>
 <script src="app/operations-core.js"></script>
+<script src="app/reporting.js"></script>
 <script src="app/work-commands.js"></script>
 <script src="app/registry-commands.js"></script>
 <script src="app/lighting-model.js"></script>
 <script src="app/lighting-commands.js"></script>
+<script src="app/lighting-workflow-core.js"></script>
+<script src="app/lighting-workflow-commands.js"></script>
+<script src="app/lighting-workflows.js"></script>
 <script src="app/lighting.js"></script>
 <script src="app/lighting-review.js"></script>
 <script src="app/operations.js"></script>
+<script src="app/workflows.js"></script>
 <script src="app/management.js"></script>
 <script src="app/integration.js"></script>
 <script src="app/legacy-bridge.js"></script>
@@ -1153,7 +1159,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="cmpYes"){repConfirmYes();return}
   if(t.id==="cmpNo"){repConfirmNext();return}
   if(t.dataset.tab){S.tab=t.dataset.tab;render();window.scrollTo(0,0);return}
-  if(t.dataset.close!==undefined){if(pt.on&&(pt.passed.size||pt.marks.length)){ptFinish();return}closeSheet();return}
+  if(t.dataset.close!==undefined){if(pt.on&&(pt.passed.size||pt.marks.length||pt.spots.length)){ptFinish();return}closeSheet();return}
   if(t.dataset.light){openLight(t.dataset.light);return}
   if(t.dataset.stat){S.stat=S.stat===t.dataset.stat?null:t.dataset.stat;S.limit=60;render();return}
   if(t.id==="moreList"){S.limit+=100;render();return}
@@ -1229,10 +1235,13 @@ document.addEventListener("click",async e=>{
   if(t.dataset.psheet){openPhotoSheet(t.dataset.psheet);return}
   if(t.id==="psPrint"||t.id==="repPrint"){printSheet(t);return}
   if(t.dataset.rep){REP[t.dataset.rep]=t.dataset.v;render();return}
-  if(t.dataset.repph){REP_PH[t.dataset.repph]=t.dataset.v;render();return}
+  if(t.dataset.repph){REP_PH[t.dataset.repph]=t.dataset.v;REP_PH.page=0;render();return}
+  if(t.dataset.repphPage!==undefined){REP_PH.page=+t.dataset.repphPage;render();return}
+  if(t.id==="repPhotosRetry"){for(const[id,doc]of Object.entries(REP_PH.docs))if(doc.missing)delete REP_PH.docs[id];render();return}
   if(t.id==="csv7"){exportReportCSV();return}
   if(t.id==="bkExport"){if(need("admin"))backupExport();return}
-  if(t.id==="bkImport"){if(need("admin"))backupImport();return}
+    if(t.id==="bkImport"){if(need("admin"))backupImport();return}
+    if(t.id==="bkPreview"){if(need("admin"))backupPreview();return}
   if(t.id==="csv8"){exportReportsCSV();return}
   if(t.id==="ibAdd"){if(need("inspect"))addInboxReport(t);return}
   if(t.id==="ibMore"){IB.show+=30;render();return}
@@ -1265,11 +1274,12 @@ document.addEventListener("click",async e=>{
   if(t.id==="ptPause"){pt.paused=!pt.paused;t.textContent=pt.paused?"순찰 재개":"일시정지";t.setAttribute("aria-pressed",pt.paused);return}
   if(t.id==="ptEnd"){ptFinish();return}
   if(t.id==="ptSave"){if(need("inspect"))ptSave(t);return}
-  if(t.id==="ptDiscard"){if(pt.marks.length&&!confirm("표시한 내용을 저장하지 않고 끝낼까요?"))return;ptReset();closeSheet();return}
+  if(t.id==="ptDiscard"){if((pt.marks.length||pt.spots.length)&&!confirm("표시한 내용을 저장하지 않고 끝낼까요?"))return;ptReset();closeSheet();return}
   if(t.dataset.ptmap){openPatrolMap(t.dataset.ptmap);return}
   if(t.dataset.ptspot){ptSpot();return}
   if(t.dataset.ptspotdel){pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
-  if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;closeSheet();S.tab="admin";render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
+  if(t.dataset.ptspotobserve!==undefined){const i=+t.dataset.ptspotobserve,sp=pt.spots[i];if(!sp||!need("inspect"))return;if(!pt.sessionId)pt.sessionId=DGData.newId("patrol-session");DGLighting.openObservation({lat:sp.lat,lng:sp.lng,observedAt:sp.at,level:"dark",label:"순찰 중 어두운 지점",note:"순찰 기록 · GPS ±"+sp.acc+"m"+(sp.near?" · "+sp.near+" 근처":""),originKind:"patrol",originId:pt.sessionId,originPointId:String(i),positionAccuracy:sp.acc}).catch(error=>toast(error.message));return}
+  if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;closeSheet(true);S.tab="admin";render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
   if(t.id==="ptListen"){ptListen(!pt.listen);return}
   if(t.dataset.ptview){ptView(t.dataset.ptview);return}
   if(t.id==="ptMapFollow"){pt.mapFollow=true;t.setAttribute("aria-pressed","true");if(pt.map&&pt.pos)pt.map.setView([pt.pos.lat,pt.pos.lng],Math.max(pt.map.getZoom(),17));return}
@@ -1279,7 +1289,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="csv6"){exportPatrolCSV();return}
   if(t.dataset.mapscope){openMap(t.dataset.mapscope);return}
   if(t.id==="mapLoc"){mapLocate();return}
-  if(t.dataset.mapOpen){closeSheet();openLight(t.dataset.mapOpen);return}
+  if(t.dataset.mapOpen){closeSheet(true);openLight(t.dataset.mapOpen);return}
   if(t.dataset.arOpen){arStop();openLight(t.dataset.arOpen);return}
   if(t.dataset.arTarget!==undefined){arSetTarget(t.dataset.arTarget);return}
   if(t.dataset.range){ar.range=+t.dataset.range;document.querySelectorAll("#arRange [data-range]").forEach(b=>b.setAttribute("aria-pressed",b===t));arList();arDraw();return}
@@ -1314,10 +1324,10 @@ document.addEventListener("change",async e=>{
   if(e.target.id==="ibOnly"){IB.only=e.target.checked;render();return}
   if(e.target.id==="qrDong"){QR.dong=e.target.value;render();return}
   if(e.target.id==="qrKind"){QR.kind=e.target.value;render();return}
-  if(e.target.id==="bkPhotos"){BK.photos=e.target.checked;return}
-  if(e.target.id==="bkOver"){BK.overwrite=e.target.checked;BK.preview=null;render();return}
-  if(e.target.id==="bkRoles"){BK.roles=e.target.checked;BK.preview=null;render();return}
-  if(e.target.id==="bkFile"){BK.file=e.target.files&&e.target.files[0]||null;BK.preview=null;render();return}
+  if(e.target.id==="bkPhotos"){if(BK.busy)return;BK.photos=e.target.checked;return}
+  if(e.target.id==="bkOver"){if(BK.busy)return;BK.overwrite=e.target.checked;BK.preview=null;render();return}
+  if(e.target.id==="bkRoles"){if(BK.busy)return;BK.roles=e.target.checked;BK.preview=null;render();return}
+  if(e.target.id==="bkFile"){if(BK.busy)return;BK.file=e.target.files&&e.target.files[0]||null;BK.preview=null;render();return}
   if(e.target.id==="repDong"){REP.dong=e.target.value;render();return}
   if(e.target.id==="repPhotos"){REP.photos=e.target.checked;render();return}
   if(e.target.id==="repInline"){REP.inlinePh=e.target.checked;render();return}
@@ -1531,22 +1541,22 @@ function qrSection(){
 }
 /* ---------- backup: every collection as one JSON, and the reverse — for moving between the artifact, Firebase and other backends ---------- */
 const BK={busy:false,msg:"",photos:true,overwrite:false,roles:false,file:null,preview:null};
-const BK_COLS=["lights","lightFields","inspections","reports","patrols","roles","photos","workOrders","workEvents","auditEvents","settings","inventory","inventoryMoves","lightingContext","lightingOperations"];
+const BK_COLS=["lights","lightFields","inspections","reports","reportEvents","patrols","roles","photos","workOrders","workEvents","auditEvents","settings","inventory","inventoryMoves","lightingContext","lightingOperations","lightingTasks","lightingRuns","lightingWorkflowOperations"];
 function backupSection(){
   const p=BK.preview;
-  return `<details class="help"><summary>백업과 복원</summary><p>배포 대장을 제외한 운영 기록을 전체 조회해 JSON으로 내려받아요. 가져오기는 먼저 추가·건너뜀·덮어쓰기 건수를 검토해요. 사용자 역할은 별도로 선택해야 복원하며 Firebase의 서버 감사 기록과 변경 불가 처리 영수증은 복원 대상에서 제외해요. 외부 광원·현장 관찰은 새 변경 이력으로 복원하며, 이미 제외된 기록을 신규로 되살리지 않아요.</p></details>
-  <div class="panel"><h3>내보내기</h3><label class="muted"><input type="checkbox" id="bkPhotos" ${BK.photos?"checked":""}> 사진 포함</label>
+  return `<details class="help"><summary>백업과 복원</summary><p>배포 대장을 제외한 운영 기록을 전체 조회해 JSON으로 내려받아요. 먼저 추가·건너뜀·덮어쓰기 건수를 확인하세요. Firebase의 보수·재고·재확인 업무와 불변 이력은 관리자 서버에서 연결 관계를 검증하고 원작성자를 보존해 복원해요. 이 묶음은 200문서·4MB까지 한 번에 반영하며 큰 자료는 관리자 대량 이전 도구를 사용해요. 사용자 역할은 별도로 선택하며 서버 감사 기록과 처리 영수증은 직접 복원하지 않아요.</p></details>
+  <div class="panel"><h3>내보내기</h3><label class="muted"><input type="checkbox" id="bkPhotos" ${BK.busy?"disabled":""} ${BK.photos?"checked":""}> 사진 포함</label>
   <div class="split"><button class="btn sm" id="bkExport" ${BK.busy?"disabled":""}>전체 JSON 내려받기</button></div>
-  <h3>가져오기</h3><input type="file" id="bkFile" accept="application/json,.json" class="f-in">
-  <label class="muted" style="display:block;margin:8px 0"><input type="checkbox" id="bkOver" ${BK.overwrite?"checked":""}> 기존 문서를 덮어쓰기</label>
-  <label class="muted" style="display:block;margin:8px 0"><input type="checkbox" id="bkRoles" ${BK.roles?"checked":""}> 사용자 역할도 복원 (현재 접근 권한이 바뀔 수 있어요)</label>
+  <h3>가져오기</h3><input type="file" id="bkFile" ${BK.busy?"disabled":""} accept="application/json,.json" class="f-in">
+  <label class="muted" style="display:block;margin:8px 0"><input type="checkbox" id="bkOver" ${BK.busy?"disabled":""} ${BK.overwrite?"checked":""}> 기존 문서를 덮어쓰기</label>
+  <label class="muted" style="display:block;margin:8px 0"><input type="checkbox" id="bkRoles" ${BK.busy?"disabled":""} ${BK.roles?"checked":""}> 사용자 역할도 복원 (현재 접근 권한이 바뀔 수 있어요)</label>
   ${p?`<div class="notice slim"><b>복원 미리보기</b> 추가 ${p.add}건 · 기존 건너뜀 ${p.skip}건 · 덮어쓰기 ${p.replace}건 · 제외 ${p.excluded}건${p.notes.length?`<p>${p.notes.map(esc).join(" · ")}</p>`:""}</div>`:""}
-  <div class="split"><button class="btn sodium sm" id="bkImport" ${BK.busy||!BK.file?"disabled":""}>${p?"검토한 내용 가져오기":"복원 내용 검토"}</button><span class="muted">${esc(BK.msg||"")}</span></div></div>`;
+  <div class="split"><button class="btn sodium sm" id="bkImport" ${BK.busy||!BK.file?"disabled":""}>${p?"검토한 내용 가져오기":"복원 내용 검토"}</button>${p?`<button class="btn ghost sm" id="bkPreview" ${BK.busy?"disabled":""}>현재 자료와 다시 비교</button>`:""}<span class="muted">${esc(BK.msg||"")}</span></div></div>`;
 }
 async function backupExport(){
-  if(BK.busy)return;BK.busy=true;BK.msg="전체 기록 모으는 중…";render();
+  if(BK.busy)return;const includePhotos=BK.photos;BK.busy=true;BK.msg="전체 기록 모으는 중…";render();
   try{const out={app:"donggu-streetlight",version:2,complete:true,at:Date.now(),by:S.me||null,mode:FB?"firebase":db.mode==="local"?"local":"artifact",collections:{},counts:{}};
-    for(const c of BK_COLS){if(c==="photos"&&!BK.photos)continue;out.collections[c]=await listAllRecords(c,{requireServer:!!FB,onPage:n=>{BK.msg=`${c} ${n}건 확인 중…`;render()}})}
+    for(const c of BK_COLS){if(c==="photos"&&!includePhotos)continue;out.collections[c]=await listAllRecords(c,{requireServer:!!FB,onPage:n=>{BK.msg=`${c} ${n}건 확인 중…`;render()}})}
     // Include a materialized light state so an artifact backup can be restored into a
     // backend that does not subscribe to the artifact's immutable patch log.
     if(out.collections.lightFields&&out.collections.lightFields.length){const base=Object.fromEntries((out.collections.lights||[]).map(({id,...v})=>[id,v]));out.collections.lights=Object.entries(DGData.mergeLightFields(base,out.collections.lightFields)).map(([id,v])=>({id,...v}))}
@@ -1557,16 +1567,24 @@ async function backupExport(){
   BK.busy=false;render();
 }
 async function backupPreview(){
-  if(BK.busy||!BK.file)return;BK.busy=true;BK.preview=null;BK.msg="백업과 기존 자료 확인 중…";render();
-  try{const input=JSON.parse(await BK.file.text());DGData.validateBackup(input);
+  if(BK.busy||!BK.file)return;const selected={file:BK.file,overwrite:BK.overwrite,roles:BK.roles};BK.busy=true;BK.preview=null;BK.msg="백업과 기존 자료 확인 중…";render();
+  try{const input=JSON.parse(await selected.file.text());DGData.validateBackup(input);
+    if(BK.file!==selected.file||BK.overwrite!==selected.overwrite||BK.roles!==selected.roles)throw new Error("파일 또는 복원 선택이 바뀌었어요. 선택한 내용으로 다시 검토해 주세요.");
     if(input.collections.lightFields&&input.collections.lightFields.length){const base=Object.fromEntries((input.collections.lights||[]).map(({id,...v})=>[id,v]));input.collections.lights=Object.entries(DGData.mergeLightFields(base,input.collections.lightFields)).map(([id,v])=>({id,...v}))}
-    const plan={file:BK.file,overwrite:BK.overwrite,roles:BK.roles,at:Date.now(),collections:{},add:0,skip:0,replace:0,excluded:0,notes:[]};
-    for(const[c,rows]of Object.entries(input.collections)){
-      if(!BK_COLS.includes(c)||c==="roles"&&!BK.roles||c==="auditEvents"&&FB||c==="lightFields"&&FB||c==="lightingOperations"){plan.excluded+=rows.length;if(rows.length)plan.notes.push(c+" 제외");continue}
-      const current=new Set((await listAllRecords(c,{requireServer:!!FB})).map(r=>r.id));plan.collections[c]=[];
-      for(const r of rows){if(c==="lightingContext"&&r.removed&&!current.has(r.id)){plan.excluded++;continue}if(c==="lightingContext")DGLightingCommands.normalize(r);plan.collections[c].push(r);if(!current.has(r.id))plan.add++;else if(BK.overwrite)plan.replace++;else plan.skip++}
+    const plan={...selected,at:Date.now(),collections:{},add:0,skip:0,replace:0,excluded:0,notes:[],operational:null};
+    if(FB){
+      plan.operational=await DGRestore.prepareBackup(input,{overwrite:plan.overwrite,call:globalThis.DGSecurity?.call,functionsEnabled:!!globalThis.FIREBASE_CONFIG?.functionsEnabled});
+      if(plan.operational){const p=plan.operational;plan.add+=p.counts.added;plan.skip+=p.counts.skipped;plan.replace+=p.counts.replaced;plan.notes.push(...p.notes,"서버에서 묶음 복원을 먼저 실행해요. 일반 자료와 역할은 그 다음에 처리해요.")}
     }
-    if(!FB&&typeof db.commitMany!=="function"&&!BK.overwrite)plan.notes.push("이 공유 저장소는 원자적 신규 생성 기능이 없어 덮어쓰기 방지 복원을 실행할 수 없어요. Firebase 또는 기기 저장 모드로 이관하세요.");
+    const handled=new Set(plan.operational?.handledPaths||[]);
+    for(const[c,rows]of Object.entries(input.collections)){
+      if(!BK_COLS.includes(c)||c==="roles"&&!plan.roles||c==="auditEvents"&&FB||c==="lightFields"&&FB||["lightingOperations","lightingWorkflowOperations","restoreOperations","systemHealth"].includes(c)){plan.excluded+=rows.length;if(rows.length)plan.notes.push(c+" 제외");continue}
+      const remaining=rows.filter(r=>!handled.has(c+"/"+r.id));if(!remaining.length)continue;
+      const current=new Set((await listAllRecords(c,{requireServer:!!FB})).map(r=>r.id));plan.collections[c]=[];
+      for(const r of remaining){if(c==="lightingContext"&&r.removed&&!current.has(r.id)){plan.excluded++;continue}if(c==="lightingContext")DGLightingCommands.normalize(r);plan.collections[c].push(r);if(!current.has(r.id))plan.add++;else if(plan.overwrite)plan.replace++;else plan.skip++}
+    }
+    if(!FB&&typeof db.commitMany!=="function"&&!plan.overwrite)plan.notes.push("이 공유 저장소는 원자적 신규 생성 기능이 없어 덮어쓰기 방지 복원을 실행할 수 없어요. Firebase 또는 기기 저장 모드로 이관하세요.");
+    if(BK.file!==selected.file||BK.overwrite!==selected.overwrite||BK.roles!==selected.roles)throw new Error("파일 또는 복원 선택이 바뀌었어요. 선택한 내용으로 다시 검토해 주세요.");
     BK.preview=plan;BK.msg="예상 변경 내용을 확인한 뒤 가져오기를 눌러 주세요.";
   }catch(e){BK.msg="백업을 검토하지 못했어요: "+(e.message||"파일 형식을 확인하세요.")}
   BK.busy=false;render();
@@ -1576,8 +1594,14 @@ async function backupImport(){
   if(!FB&&typeof db.commitMany!=="function"&&!BK.overwrite){toast("이 저장소에서는 덮어쓰기 방지 복원을 보장할 수 없어요. Firebase 또는 기기 저장 모드를 이용하세요.");return}
   const plan=BK.preview;
   if(!confirm(`추가 ${plan.add}건, 덮어쓰기 ${plan.replace}건, 건너뜀 ${plan.skip}건을 가져올까요?${plan.roles?"\n사용자 역할도 바뀝니다.":""}`))return;
-  BK.busy=true;let n=0,skip=0;const failures=[];
-  for(const[c,rows]of Object.entries(plan.collections))for(const row of rows){const{id,...original}=row;let data=original;
+  BK.busy=true;BK.msg="복원하는 중…";render();let n=0,skip=0;const failures=[];
+  if(plan.operational){
+    BK.msg="연결된 업무 기록을 서버에서 복원하는 중…";render();
+    try{const result=await DGRestore.applyBackup(plan.operational);n+=result.restored;skip+=result.skipped}
+    catch(e){BK.busy=false;BK.msg="업무 묶음 복원 결과를 확인하지 못했어요: "+(e.message||e.code||"오류")+" 일반 자료는 아직 가져오지 않았어요. 같은 계획으로 재시도하거나 현재 자료와 다시 비교하세요.";render();return}
+  }
+  const collections=Object.entries(plan.collections).sort(([a],[b])=>(a==="roles")-(b==="roles"));
+  for(const[c,rows]of collections)for(const row of (c==="roles"?[...rows].sort((a,b)=>(a.id===S.me)-(b.id===S.me)):rows)){const{id,...original}=row;let data=original;
     try{let skipped=false;
       if(c==="lightingContext"){const result=await DGLighting.restoreRecord(row,plan.overwrite);skipped=result.skipped}
       else if(FB){await FB.fs.runTransaction(async tx=>{const ref=FB.fs.doc(c+"/"+id),snap=await tx.get(ref);if(snap.exists&&!plan.overwrite){skipped=true;return}
@@ -1590,8 +1614,11 @@ async function backupImport(){
     if((n+skip+failures.length)%25===0){BK.msg=`저장 ${n}건 · 건너뜀 ${skip}건 · 실패 ${failures.length}건`;render()}
   }
   BK.msg=`가져오기 결과: ${n}건 저장, ${skip}건 건너뜀, ${failures.length}건 실패${plan.excluded?`, ${plan.excluded}건 제외`:""}.`;
-  BK.busy=false;BK.preview=null;
-  if(plan.collections.lightingContext)await DGLighting.load();
+  BK.preview=null;
+  try{
+  if(plan.collections.lightingContext||plan.operational?.payload.collections.lightingContext)await DGLighting.load();
+  if(plan.operational){await DGOperations.load(true).catch(()=>{});await DGLightingWorkflows.loadTasks().catch(()=>{});await DGLightingWorkflows.loadHistory().catch(()=>{})}
+  }catch(e){BK.msg+=" 화면 자료를 새로고침해 주세요."}finally{BK.busy=false}
   if(failures.length){BK.msg+=" 실패 목록을 내려받아 확인하고 다시 시도하세요.";try{await dl.save({filename:"동구가로등_복원실패.json",data:new Blob([JSON.stringify({at:Date.now(),failures},null,2)],{type:"application/json"})})}catch(e){}}
   else BK.file=null;toast(BK.msg);render();
 }
@@ -1632,7 +1659,7 @@ function reportData(){
   const byWho=[...new Set(ins.map(i=>i.inspector).filter(Boolean))].map(w=>{const ii=ins.filter(i=>i.inspector===w);return{w,n:ii.length,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,fault:ii.filter(i=>i.result==="고장").length,bad:ii.filter(i=>i.result!=="정상").length,ph:ii.reduce((s,i)=>s+(i.photoN||(i.photo?1:0)),0),pt:ii.filter(i=>i.patrol).length}}).sort((x,y)=>y.n-x.n);
   return{a,b,lights,ins,all,open,pats,pend,edits,byDong,byWho};
 }
-function reportSection(){
+function reportSection(forPrint=false){
   if(REP.data&&REP.data.key!==reportQueryKey())REP.data=null;
   if(!REP.data&&!REP.loading&&!REP.err)setTimeout(repLoad,0);
   if(!REP.data)return `<div class="panel"><p>${esc(REP.err||"기간 전체 기록을 불러오는 중이에요…")}</p>${REP.err?`<button class="btn sm" id="repRefresh">다시 불러오기</button>`:""}</div>`;
@@ -1642,7 +1669,7 @@ function reportSection(){
   // 6-month trend from everything loaded (not just the period)
   const months=[];for(let k=5;k>=0;k--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-k);months.push(repMonthKey(d.getTime()))}
   const trend=months.map(m=>{const ii=all.filter(i=>repMonthKey(i.date)===m);return{m,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length}});const tmax=Math.max(1,...trend.map(t=>t.ok+t.warn+t.bad));
-  const found=ins.filter(i=>i.result!=="정상").slice(0,100);
+  const found=ins.filter(i=>i.result!=="정상").slice(0,forPrint?undefined:100);
   const title=`${dongLabel(REP.dong)} 가로등·보안등 점검 보고서`;
   const periodTxt=`${fmtD(a)} ~ ${fmtD(b)}`;
   const seg=(key,opts,cur)=>`<div class="seg">${opts.map(([v,t])=>`<button type="button" data-rep="${key}" data-v="${v}" aria-pressed="${String(cur)===String(v)}">${t}</button>`).join("")}</div>`;
@@ -1652,7 +1679,7 @@ function reportSection(){
     <div class="grid2" style="margin-top:8px"><select class="f-in" id="repDong">${dongOptions(REP.dong)}</select><label class="muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="repPhotos" ${REP.photos?"checked":""}> 사진 부록</label></div>
     <label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="repInline" ${REP.inlinePh?"checked":""}> 이상 발견 표에 사진 칸</label>
     <div class="split"><button class="btn sm" id="repPrint">인쇄 / PDF 저장</button>${dl?`<button class="btn ghost sm" id="csv7">표 CSV</button>`:""}${navigator.share?`<button class="btn ghost sm" id="repShare">요약 공유</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${REP.loading?"기간 기록 불러오는 중…":REP.data?`기간 조회 완료 · ${fmtDT(REP.data.at)}`:REP.err||""}</span></div></div>`;
-  const photoAppendix=REP.photos?repPhotoAppendix(ins):"";
+  const photoAppendix=REP.photos?repPhotoAppendix(ins,{all:forPrint,load:!forPrint}):"";
   return controls+`<div class="rep" id="repBody">
     <div class="cover"><h2>${esc(title)}</h2><div class="muted">기간 ${periodTxt} · 작성 ${fmtDT(Date.now())} · ${esc(S.names[S.me]||"담당자")}</div></div>
     <div class="kpi"><div><b>${lights.length.toLocaleString()}</b><span>대상 등</span></div><div><b>${ins.length}</b><span>점검 건수</span></div><div><b>${open.length}</b><span>현재 조치 필요</span></div>
@@ -1664,39 +1691,85 @@ function reportSection(){
     <h3>점검자별</h3>${byWho.length?`<table><thead><tr><th>점검자</th><th class="n">점검</th><th class="n">이상 발견</th><th class="n">순찰 표시</th><th class="n">사진</th></tr></thead><tbody>${byWho.map(r=>`<tr><td>${esc(S.names[r.w]||"점검자")}</td><td class="n">${r.n}</td><td class="n">${r.bad}</td><td class="n">${r.pt}</td><td class="n">${r.ph}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">기간 내 점검 기록이 없어요.</p>`}
     ${faultTop.length?`<h3>불량 항목</h3><table><tbody>${faultTop.map(([f,n])=>`<tr><td>${esc(f)}</td><td class="n">${n}</td></tr>`).join("")}</tbody></table>`:""}
     <h3>순찰·등록·수정</h3><table><tbody><tr><td>야간 순찰</td><td class="n">${pats.length}회 · ${(pats.reduce((s,p)=>s+(p.dist||0),0)/1000).toFixed(1)}km · 지나간 등 ${pats.reduce((s,p)=>s+(p.passed||[]).length,0)}개 · 표시 ${pats.reduce((s,p)=>s+(p.marks||[]).length,0)}건</td></tr><tr><td>현장 등록(미등록)</td><td class="n">${pend.length}건 (대장반영 ${pend.filter(l=>l.reg==="대장반영").length} · 반려 ${pend.filter(l=>l.reg==="반려").length})</td></tr><tr><td>등 정보 수정</td><td class="n">${edits.length}건</td></tr></tbody></table>
-    <h3>이상 발견 내역 <span class="muted">${found.length}${ins.filter(i=>i.result!=="정상").length>100?" / "+ins.filter(i=>i.result!=="정상").length:""}건</span></h3>
+    <h3>이상 발견 내역 <span class="muted">${found.length}${ins.filter(i=>i.result!=="정상").length>found.length?" / "+ins.filter(i=>i.result!=="정상").length:""}건</span></h3>
     ${found.length?`<table><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th>${REP.inlinePh?`<th>사진</th>`:""}</tr></thead><tbody>${found.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${inspectionFaults(i).map(esc).join(", ")}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td>${REP.inlinePh?`<td class="phcell">${inspectionThumbs(i).slice(0,2).map(t=>`<img src="${esc(safeImageSrc(t.t))}" alt="${esc(t.label||"")}" title="${esc(t.label||"")}">`).join("")||(i.photo?`<img src="${esc(safeImageSrc(i.photo))}" alt="">`:"")}</td>`:""}</tr>`).join("")}</tbody></table>`:`<p class="muted">기간 내 이상 발견이 없어요.</p>`}
     <h3>현재 조치 필요 등 <span class="muted">${open.length}</span></h3>
-    ${open.length?`<table><thead><tr><th>등</th><th>상태</th><th>마지막 점검</th><th>위치</th></tr></thead><tbody>${open.slice(0,150).map(l=>`<tr><td><b>${esc(l.code)}</b><br><span class="muted">${esc(l.dong)}</span></td><td><span class="chip st-${esc(l.status)}">${esc(l.status)}</span></td><td style="white-space:nowrap">${fmtD(l.lastInspected)}</td><td class="muted">${esc(l.address||"")}</td></tr>`).join("")}</tbody></table>${open.length>150?`<p class="muted">외 ${open.length-150}개</p>`:""}`:`<p class="muted">모든 등이 정상이에요.</p>`}
+    ${open.length?`<table><thead><tr><th>등</th><th>상태</th><th>마지막 점검</th><th>위치</th></tr></thead><tbody>${open.slice(0,forPrint?undefined:150).map(l=>`<tr><td><b>${esc(l.code)}</b><br><span class="muted">${esc(l.dong)}</span></td><td><span class="chip st-${esc(l.status)}">${esc(l.status)}</span></td><td style="white-space:nowrap">${fmtD(l.lastInspected)}</td><td class="muted">${esc(l.address||"")}</td></tr>`).join("")}</tbody></table>${!forPrint&&open.length>150?`<p class="muted">외 ${open.length-150}개</p>`:""}`:`<p class="muted">모든 등이 정상이에요.</p>`}
     ${photoAppendix}
     <p class="muted" style="margin-top:16px;font-size:11px">${REP.data?`기간 전체 기록으로 집계했어요. 자료 기준 ${fmtDT(REP.data.at)}.`:""} 밝기·조명 범위는 모델 추정이며 실측값이 아니에요.</p>
   </div>`;
 }
 /* photo appendix: full-size photos of the period's inspections, before/after pairs side by side, loaded on demand */
-const REP_PH={want:[],docs:{},loading:false,scope:"bad",size:"m"};
-function repPhotoAppendix(ins){
-  const src=(REP_PH.scope==="all"?ins:ins.filter(i=>i.result!=="정상")).filter(i=>(inspectionThumbs(i).length)||i.photo);
-  const items=src.flatMap(i=>(inspectionThumbs(i).length?inspectionThumbs(i).map(t=>({id:t.id,label:t.label||"",code:i.code,lightId:i.lightId,date:i.date,result:i.result,by:i.inspector,t:t.t})):[{id:null,label:"현장 사진",code:i.code,lightId:i.lightId,date:i.date,result:i.result,by:i.inspector,t:i.photo,full:i.photo}])).slice(0,REP_PH.size==="l"?24:48);
-  const missing=items.filter(x=>x.id&&!REP_PH.docs[x.id]).map(x=>x.id);
-  if(missing.length&&!REP_PH.loading){REP_PH.loading=true;(async()=>{for(const id of missing){const d=await getPhoto(id);REP_PH.docs[id]=d||{missing:true}}REP_PH.loading=false;render()})()}
-  const ctl=`<div class="split noprint" style="margin:0 0 8px"><div class="seg">${[["bad","이상 건만"],["all","기간 내 전부"]].map(([v,t])=>`<button type="button" data-repph="scope" data-v="${v}" aria-pressed="${REP_PH.scope===v}">${t}</button>`).join("")}</div><div class="seg">${[["s","작게"],["m","보통"],["l","크게"]].map(([v,t])=>`<button type="button" data-repph="size" data-v="${v}" aria-pressed="${REP_PH.size===v}">${t}</button>`).join("")}</div>${REP_PH.loading?`<span class="muted" style="align-self:center;font-size:12px">원본 사진 불러오는 중…</span>`:""}</div>`;
-  if(!items.length){const anyPh=ins.filter(i=>(inspectionThumbs(i).length)||i.photo).length;return `<h3>부록 · 사진</h3>${ctl}<p class="muted">${REP_PH.scope==="bad"?`기간(${fmtD(repRange().a)}~${fmtD(repRange().b)}) 안의 고장·점검필요 건에 붙은 사진이 없어요.${anyPh?` 정상 건에는 ${anyPh}건 있어요 → "기간 내 전부"를 누르세요.`:" 점검 결과 저장 때 붙인 사진만 여기 와요."}`:`기간 안의 점검 ${ins.length}건에 붙은 사진이 없어요. 점검 결과 저장 때 붙인 사진만 여기 와요.`}</p>`}
-  // group by light: 조치 전·후가 같이 있으면 나란히
-  const byLight={};items.forEach(x=>{(byLight[x.lightId||x.code]=byLight[x.lightId||x.code]||[]).push(x)});
-  const fig=x=>{const d=x.id?REP_PH.docs[x.id]:null;const src=x.full||(d&&d.data?d.data:x.t);return `<figure><img src="${esc(safeImageSrc(src))}" alt="${esc(x.label)}" loading="eager"><figcaption><b>${esc(x.code)}</b> · ${esc(x.label)}${x.result!=="정상"?` · <span class="chip st-${esc(x.result)}" style="font-size:11px;padding:0 6px">${esc(x.result)}</span>`:""}<br>${fmtDT(x.date)} · ${esc(S.names[x.by]||"점검자")}${d&&d.note?` · ${esc(d.note)}`:""}</figcaption></figure>`};
-  const blocks=Object.values(byLight).map(arr=>{const b=arr.find(x=>x.label==="조치 전"),a=arr.find(x=>x.label==="조치 후");const rest=arr.filter(x=>x!==b&&x!==a);
-    return (b&&a?`<div class="pair-ba"><div class="pl">조치 전 · 후</div>${fig(b)}${fig(a)}</div>`:"")+rest.map(fig).join("")+(b&&!a?fig(b):"")+(a&&!b?fig(a):"")}).join("");
-  return `<h3>부록 · 사진 <span class="muted">${items.length}장</span></h3>${ctl}<div class="psheet ph-${REP_PH.size}">${blocks}</div>`;
+const REP_PH={docs:{},pending:new Map(),loading:false,scope:"bad",size:"m",page:0,printing:false,cleanup:null};
+function reportPhoto(id){
+  if(REP_PH.docs[id])return Promise.resolve(REP_PH.docs[id]);
+  if(REP_PH.pending.has(id))return REP_PH.pending.get(id);
+  const task=Promise.resolve().then(()=>getPhoto(id)).then(value=>REP_PH.docs[id]=value||{missing:true}).catch(()=>REP_PH.docs[id]={missing:true}).finally(()=>REP_PH.pending.delete(id));
+  REP_PH.pending.set(id,task);return task;
 }
-/* print only after every photo on the page has decoded — lazy or still-loading images print as blank boxes */
+async function loadReportPhotos(items,progress){
+  const ids=[...new Set(items.filter(x=>x.id).map(x=>x.id))];let cursor=0,done=0;
+  await Promise.all(Array.from({length:Math.min(3,ids.length)},async()=>{while(cursor<ids.length){const id=ids[cursor++];await reportPhoto(id);if(progress)progress(++done,ids.length)}}));
+}
+function repPhotoAppendix(ins,options={}){
+  const all=options.items||DGReporting.photoItems(ins,inspectionThumbs,REP_PH.scope);
+  const page=DGReporting.photoPage(all,REP_PH.size,REP_PH.page),items=options.all?all:page.items;
+  if(!options.all)REP_PH.page=page.page;
+  if(options.load!==false&&items.some(x=>x.id&&!REP_PH.docs[x.id])&&!REP_PH.loading){
+    REP_PH.loading=true;loadReportPhotos(items).finally(()=>{REP_PH.loading=false;render()});
+  }
+  const ctl=options.all?"":'<div class="split noprint" style="margin:0 0 8px"><div class="seg">'+[["bad","이상 건만"],["all","기간 내 전부"]].map(([v,t])=>'<button type="button" data-repph="scope" data-v="'+v+'" aria-pressed="'+(REP_PH.scope===v)+'">'+t+'</button>').join("")+'</div><div class="seg">'+[["s","작게"],["m","보통"],["l","크게"]].map(([v,t])=>'<button type="button" data-repph="size" data-v="'+v+'" aria-pressed="'+(REP_PH.size===v)+'">'+t+'</button>').join("")+'</div></div>';
+  const paging=options.all?"":'<p class="muted noprint">선택한 전체 '+all.length+'장 · 미리보기 '+page.first+'–'+page.last+'장 ('+(page.page+1)+'/'+page.pages+'쪽). 인쇄 / PDF에는 선택한 사진 전체가 포함돼요.</p>'+(page.pages>1?'<div class="split noprint"><button class="btn ghost sm" data-repph-page="'+(page.page-1)+'"'+(page.page===0?' disabled':'')+'>이전 사진</button><button class="btn ghost sm" data-repph-page="'+(page.page+1)+'"'+(page.page+1>=page.pages?' disabled':'')+'>다음 사진</button></div>':"");
+  const fig=x=>{
+    const d=x.id?REP_PH.docs[x.id]:null,src=safeImageSrc(x.full||(d&&d.data)||x.t);
+    const fallback=x.id&&!(d&&d.data),note=fallback?(d?.missing?'원본 조회 실패 · 보관된 미리보기':'원본 확인 전 · 미리보기'):"";
+    return '<figure>'+(src?'<img src="'+esc(src)+'" alt="'+esc(x.label)+'" loading="eager">':'<div class="notice">사진을 불러올 수 없어요.</div>')+'<figcaption><b>'+esc(x.code)+'</b> · '+esc(x.label)+(x.result!=="정상"?' · '+esc(x.result):"")+'<br>'+fmtDT(x.date)+' · '+esc(S.names[x.by]||"점검자")+(d?.note?' · '+esc(d.note):"")+(note?'<br><strong>'+note+'</strong>':"")+'</figcaption></figure>';
+  };
+  const blocks=DGReporting.photoGroups(items,REP_PH.docs).map(({before,after,rest})=>(before&&after?'<div class="pair-ba"><div class="pl">동일 작업·점검의 조치 전 · 후</div>'+fig(before)+fig(after)+'</div>':"")+rest.map(fig).join("")+(before&&!after?fig(before):"")+(after&&!before?fig(after):"")).join("");
+  const missing=items.filter(x=>x.id&&REP_PH.docs[x.id]?.missing).length;
+  return '<section id="repPhotoAppendix"><h3>부록 · 사진 <span class="muted">선택 전체 '+all.length+'장</span></h3>'+ctl+paging+(REP_PH.loading&&!options.all?'<p class="muted noprint" role="status">원본 사진 불러오는 중…</p>':"")+(missing?'<p class="notice">원본을 확인하지 못한 사진 '+missing+'장. 각 사진에 미리보기 대체 여부를 표시했어요.</p>'+(!options.all?'<button class="btn ghost sm noprint" id="repPhotosRetry">원본 다시 조회</button>':""):"")+(items.length?'<div class="psheet ph-'+esc(REP_PH.size)+'">'+blocks+'</div>':'<p class="muted">선택한 범위에 첨부된 사진이 없어요.</p>')+'</section>';
+}
+async function decodePrintImages(container){
+  const images=[...container.querySelectorAll("img")];
+  images.forEach(image=>{image.loading="eager"});
+  await Promise.all(images.map(image=>image.complete?Promise.resolve():new Promise(resolve=>{
+    let timer;const done=()=>{clearTimeout(timer);image.removeEventListener("load",done);image.removeEventListener("error",done);resolve()};
+    image.addEventListener("load",done,{once:true});image.addEventListener("error",done,{once:true});timer=setTimeout(done,8000);
+  })));
+  await Promise.all(images.map(image=>image.decode?image.decode().catch(()=>{}):Promise.resolve()));
+  for(const image of images)if(!image.naturalWidth){const note=document.createElement("p");note.className="notice";note.textContent="사진 표시 실패 · 원본을 확인해 주세요.";image.replaceWith(note)}
+}
+/* Prepare a frozen, complete print view. Preview pagination never limits the output. */
 async function printSheet(btn){
-  if(REP_PH.loading){toast("원본 사진을 아직 불러오는 중이에요. 잠시 후 다시 눌러 주세요.");return}
-  const imgs=[...document.querySelectorAll("#sheet img")];const t0=btn&&btn.textContent;if(btn){btn.disabled=true;btn.textContent="사진 준비 중…"}
-  imgs.forEach(i=>{i.loading="eager"});
-  await Promise.all(imgs.map(i=>i.complete&&i.naturalWidth?Promise.resolve():new Promise(res=>{i.addEventListener("load",res,{once:true});i.addEventListener("error",res,{once:true});setTimeout(res,8000)})));
-  try{await Promise.all(imgs.map(i=>i.decode().catch(()=>{})))}catch(e){}
-  if(btn){btn.disabled=false;btn.textContent=t0}
-  window.print();
+  if(REP_PH.printing)return;
+  const report=document.querySelector("#repBody"),sheet=document.querySelector("#sheet");
+  if(!sheet)return;
+  if(report&&(!REP.data||REP.loading||REP.err||REP.data.key!==reportQueryKey()))return toast("기간 자료를 다시 조회한 뒤 인쇄해 주세요.");
+  REP_PH.printing=true;const text=btn?.textContent;
+  if(btn){btn.disabled=true;btn.textContent="전체 출력 준비 중…"}
+  let target;
+  try{
+    if(REP_PH.cleanup)REP_PH.cleanup();
+    const scope=REP_PH.scope,size=REP_PH.size,key=report?reportQueryKey():null;
+    target=document.createElement("div");target.id="reportPrintRoot";target.setAttribute("aria-hidden","true");target.style.display="none";
+    target.innerHTML=report?reportSection(true):sheet.innerHTML;
+    if(report&&REP.photos){
+      const items=DGReporting.photoItems(reportData().ins,inspectionThumbs,scope);
+      await loadReportPhotos(items,(done,total)=>{if(btn?.isConnected)btn.textContent="사진 준비 "+done+"/"+total});
+      if(!document.querySelector("#repBody")||reportQueryKey()!==key||REP_PH.scope!==scope||REP_PH.size!==size)throw new Error("검토 조건이나 화면이 바뀌었어요. 현재 화면에서 다시 인쇄해 주세요.");
+      const appendix=target.querySelector("#repPhotoAppendix");if(appendix)appendix.outerHTML=repPhotoAppendix([],{all:true,load:false,items});
+    }
+    if(!document.querySelector("#sheet")?.classList.contains("open"))throw new Error("화면이 닫혀 인쇄 준비를 취소했어요.");
+    target.querySelectorAll(".noprint,.sheet-head,.sheet-foot,button").forEach(el=>el.remove());
+    const style=document.createElement("style");style.textContent='@media print{body.dg-report-printing>*:not(#reportPrintRoot){display:none!important}body.dg-report-printing #reportPrintRoot{display:block!important;position:static!important;width:auto!important;height:auto!important;overflow:visible!important}body.dg-report-printing{overflow:visible!important;background:white!important}}';
+    target.append(style);document.body.append(target);
+    await decodePrintImages(target);
+    document.body.classList.add("dg-report-printing");
+    let timer;const cleanup=()=>{clearTimeout(timer);window.removeEventListener("afterprint",cleanup);target.remove();document.body.classList.remove("dg-report-printing");if(REP_PH.cleanup===cleanup)REP_PH.cleanup=null};
+    REP_PH.cleanup=cleanup;window.addEventListener("afterprint",cleanup,{once:true});timer=setTimeout(cleanup,120000);
+    window.print();
+  }catch(error){if(target)target.remove();document.body.classList.remove("dg-report-printing");toast(error.message||"인쇄 자료를 준비하지 못했어요.")}
+  finally{REP_PH.printing=false;if(btn?.isConnected){btn.disabled=false;btn.textContent=text}}
 }
 function repSummaryText(){const {a,b,ins,open,pats}=reportData();
   return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${fmtD(a)}~${fmtD(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${pats.length}회`}
@@ -1712,7 +1785,7 @@ async function exportReportCSV(){
 /* per-light dossier: registry, status, inspections, photos — for a complaint file or a repair order */
 async function openLightDossier(id){
   const l=byId(id);if(!l)return;
-  let rows,photos;try{[rows,photos]=await Promise.all([listAllRecords("inspections",{where:[["lightId","==",id]],orderBy:[["date","desc"]]}),listAllRecords("photos",{where:[["lightId","==",id]],orderBy:[["at","desc"]]})]);photos.forEach(r=>GAL[r.id]=r)}catch(e){toast("전체 이력을 불러오지 못했어요: "+(e.message||"연결을 확인하세요."));return}
+  let rows,photos,workflow;try{[rows,photos,workflow]=await Promise.all([listAllRecords("inspections",{where:[["lightId","==",id]],orderBy:[["date","desc"]]}),listAllRecords("photos",{where:[["lightId","==",id]],orderBy:[["at","desc"]]}),DGWorkflows.facilitySection(id,{omitExistingDetails:true})]);photos.forEach(r=>GAL[r.id]=r)}catch(e){toast("전체 이력을 불러오지 못했어요: "+(e.message||"연결을 확인하세요."));return}
   await ensureRepPhotos(l);
   openSheet(`<div class="sheet-head noprint"><div><h3>등 이력서</h3><div class="muted">${esc(l.code)} · 인쇄하거나 PDF로 저장</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="split noprint" style="margin:0 0 10px"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button></div>
@@ -1720,6 +1793,7 @@ async function openLightDossier(id){
     <h3>대장 정보</h3><table><tbody><tr><td>관리ID</td><td>${esc(l.lampId||"")}</td><td>종류</td><td>${esc(l.kind||"")}</td></tr><tr><td>광원</td><td>${esc(l.lampType||"")}</td><td>등주</td><td>${esc(l.pole||"")}</td></tr><tr><td>점멸기</td><td>${esc(l.sw||"")}</td><td>전주번호</td><td>${esc(l.poleNo||"")}</td></tr><tr><td>좌표</td><td>${typeof l.lat==="number"?`${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}`:""}</td><td>마지막 점검</td><td>${fmtD(l.lastInspected)}</td></tr>${l.note?`<tr><td>비고</td><td colspan="3">${esc(l.note)}</td></tr>`:""}${l.redoNote?`<tr><td>재점검 요청</td><td colspan="3">${esc(l.redoNote)}</td></tr>`:""}</tbody></table>
     <h3>점검 이력 <span class="muted">${rows.length}</span></h3>${rows.length?`<table><thead><tr><th>일시</th><th>결과</th><th>점검자</th><th>내용</th></tr></thead><tbody>${rows.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${esc(S.names[i.inspector]||"점검자")}</td><td>${inspectionFaults(i).map(esc).join(", ")}${typeof i.tiltDeg==="number"?` · 기울기 ${i.tiltDeg.toFixed(1)}°`:""}${typeof i.posDist==="number"?` · 📍${i.posDist}m`:""}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.reviewedAt?`<br><span class="muted">검수 ${fmtD(i.reviewedAt)}</span>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">점검 기록이 없어요.</p>`}
     ${l.edits&&l.edits.length?`<h3>정보 변경 이력</h3><div class="panel">${editHistory(l)}</div>`:""}
+    ${workflow}
     ${PT_LAST[l.id]?`<h3>순찰</h3><p>마지막 순찰 기록 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" · GPS 근접 통과(점등 미확인)"}</p>`:""}
     ${photos.length?`<h3>사진 <span class="muted">${photos.length}</span></h3><div class="psheet">${photos.map((r,i)=>`<figure><img src="${esc(safeImageSrc(r.data))}" alt=""><figcaption>${i+1}. ${esc(r.label||"")} · ${fmtDT(r.at)}${r.note?` · ${esc(r.note)}`:""}</figcaption></figure>`).join("")}</div>`:""}
     </div>`);
@@ -2576,11 +2650,11 @@ function ptSummary(){
   box.innerHTML=`<div class="tally"><button tabindex=-1 style="--c:var(--ink-2)"><b>${(pt.dist/1000).toFixed(1)}</b><span>km</span></button><button tabindex=-1 style="--c:var(--ink-2)"><b>${mins}</b><span>분</span></button><button tabindex=-1 style="--c:var(--ok)"><b>${pt.passed.size}</b><span>GPS 통과</span></button><button tabindex=-1 style="--c:var(--bad)"><b>${pt.marks.length}</b><span>표시</span></button></div>
     <h2>직접 관찰한 등 <span class="muted">${pt.marks.length}</span></h2><p class="muted">진행률 기준: ${esc(pt.dong)} · 기준 동 밖의 관찰 ${pt.marks.filter(m=>{const l=byId(m.id);return l&&!inDong(l,pt.dong)}).length}건도 함께 저장해요.</p>
     ${pt.marks.length?`<div class="list">${pt.marks.slice().reverse().map(m=>{const l=byId(m.id)||{};return `<div class="panel" style="border-left:5px solid ${m.result==="고장"?"var(--bad)":"var(--warn)"}"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${kindBadge(l.kind)}<b>${esc(m.code)}</b><span class="chip st-${esc(m.result)}">${esc(m.result)}</span><span class="muted" style="margin-left:auto">${fmtT(m.at)}</span></div><div class="muted">${esc(l.dong||"")}${l.id&&!inDong(l,pt.dong)?" · 기준 동 밖":""} · ${esc(l.address||"")}${l.status&&l.status!=="정상"?` · 현재 ${esc(l.status)}`:""}</div><div class="split"><button class="btn ghost sm" data-light="${esc(m.id)}">열기</button><button class="btn ghost sm" data-ptdrop="${esc(m.id)}" style="color:var(--bad)">빼기</button></div></div>`}).join("")}</div>`:`<div class="empty">꺼진 등으로 표시한 것이 없어요.</div>`}
-    ${pt.spots.length?`<h2>어두운 지점 <span class="muted">${pt.spots.length}</span></h2><div class="list">${pt.spots.map((sp,i)=>`<div class="panel" style="border-left:5px solid #5B4B9E"><div><b>${sp.lat.toFixed(5)}, ${sp.lng.toFixed(5)}</b> <span class="muted">±${sp.acc}m · ${fmtT(sp.at)}</span></div><div class="muted">${sp.near?`가장 가까운 등 ${esc(sp.near)} ${sp.nearD}m`:"80m 안에 등록된 등 없음 — 미등록 등이거나 조명 공백"}</div><div class="split">${S.canWrite&&can("inspect")?`<button class="btn ghost sm" data-ptspotform="${i}">미등록 양식에</button>`:""}<button class="btn ghost sm" data-ptspotdel="${i}" style="color:var(--bad)">빼기</button></div></div>`).join("")}</div>`:""}
+    ${pt.spots.length?`<h2>어두운 지점 <span class="muted">${pt.spots.length}</span></h2><div class="list">${pt.spots.map((sp,i)=>`<div class="panel" style="border-left:5px solid #5B4B9E"><div><b>${sp.lat.toFixed(5)}, ${sp.lng.toFixed(5)}</b> <span class="muted">±${sp.acc}m · ${fmtT(sp.at)}</span></div><div class="muted">${sp.near?`가장 가까운 등 ${esc(sp.near)} ${sp.nearD}m`:"80m 안에 등록된 등 없음 — 미등록 등이거나 조명 공백"}</div><div class="split">${S.canWrite&&can("inspect")?`<button class="btn ghost sm" data-ptspotobserve="${i}">현장 밝기 기록으로</button><button class="btn ghost sm" data-ptspotform="${i}">미등록 양식에</button>`:""}<button class="btn ghost sm" data-ptspotdel="${i}" style="color:var(--bad)">빼기</button></div></div>`).join("")}</div>`:""}
     <h2>GPS 통과만 기록 <span class="muted">${passedOnly.length}</span></h2><p class="muted">25m 안으로 지나간 위치 기록이에요. 직접 점등 확인 ${pt.marks.filter(m=>m.result==="정상").length}건과 구분돼요.</p><div class="muted">${passedOnly.slice(0,40).map(id=>(byId(id)||{}).code).filter(Boolean).map(esc).join(", ")}${passedOnly.length>40?` 외 ${passedOnly.length-40}개`:""}${passedOnly.length?"":"지나간 등이 없어요."}</div>
     ${pt.track.length>1&&window.L?`<div class="split"><button class="btn ghost sm" data-ptmap="live">경로 지도</button></div>`:""}
     <div class="split"><button class="btn ghost sm" id="ptDiscard">저장하지 않고 닫기</button>${navigator.share?`<button class="btn ghost sm" id="ptShare">일지 공유</button>`:""}</div>
-    <div class="sheet-foot"><button class="btn sodium block" id="ptSave" ${S.canWrite&&(pt.passed.size||pt.marks.length)?"":"disabled"}>순찰 결과 저장</button></div>`;
+    <div class="sheet-foot"><button class="btn sodium block" id="ptSave" ${S.canWrite&&(pt.passed.size||pt.marks.length||pt.spots.length)?"":"disabled"}>순찰 결과 저장</button></div>`;
 }
 function ptReportText(p){
   const marks=p.marks||[],spots=p.spots||[];const mins=Math.max(1,Math.round(((p.end||Date.now())-p.start)/60000));
@@ -3258,9 +3332,10 @@ function applyScan(what){
   if(what==="quick"){if(!scan.pos){toast("위치를 아직 못 잡았어요.");return}const id=newIdFor(p);if(byId(id)){toast("이미 저장된 번호예요.");return}
     const rec={code:txt,dong:p.dong||(DONGS.includes(p.road)?p.road:""),kind:p.kind,num:p.num||null,road:p.road||null,main:p.main||null,sub:p.sub||null,poleNo:r.pole||null,address:"",lampType:"",status:"정상",lastInspected:null,reg:"미등록",lat:scan.pos.lat,lng:scan.pos.lng,acc:Math.round(scan.pos.acc||0),photo:r.plate||null,foundAt:Date.now(),foundBy:S.me||null,updatedAt:Date.now(),note:"표찰 스캔에서 바로 저장"};
     if(!rec.dong){const near=S.lights.filter(x=>typeof x.lat==="number").map(x=>({x,d:distM(scan.pos,x)})).sort((a,b)=>a.d-b.d)[0];if(near)rec.dong=near.x.dong}
-    write(()=>db.doc("lights/"+id).set(rec),`${txt}을(를) 미등록으로 저장했어요. 관리 현황에서 확인하세요.`).then(ok=>{if(ok){closeSheet();S.tab="admin";render();openAdminSection("pend")}});return}
-  stopCam(false);closeSheet();
-  if(what==="inbox"||scan.ctx==="inbox"){closeSheet();S.tab="admin";render();openAdminSection("inbox");const x=$("#ibNum");if(x){x.value=txt;x.dataset.lightId=p.lightId||(l&&l.id)||"";x.dataset.lightCode=txt.trim()}toast(`${txt} 번호를 넣었어요.`);return}
+    write(()=>db.doc("lights/"+id).set(rec),`${txt}을(를) 미등록으로 저장했어요. 관리 현황에서 확인하세요.`).then(ok=>{if(ok){closeSheet(true);S.tab="admin";render();openAdminSection("pend")}});return}
+  // Sheet replacements keep the current history entry; a late history.back must not close the new form.
+  stopCam(false);closeSheet(what==="inbox"||scan.ctx==="inbox"||what==="register");
+  if(what==="inbox"||scan.ctx==="inbox"){S.tab="admin";render();openAdminSection("inbox");const x=$("#ibNum");if(x){x.value=txt;x.dataset.lightId=p.lightId||(l&&l.id)||"";x.dataset.lightCode=txt.trim()}toast(`${txt} 번호를 넣었어요.`);return}
   if(what==="report"){S.tab="report";render();$("#rNum").value=p.kind==="가로등"?txt:p.num;if(p.dong)$("#rDong").value=p.dong;else if(l)$("#rDong").value=l.dong;$("#rLoc").focus();toast(`${txt} 번호를 넣었어요.`);return}
   if(what==="register"){S.tab="admin";render();openAdminSection("reg");const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
     $("#nNoPlate").checked=false;["nNum","nRoad"].forEach(x=>{const el=$("#"+x);if(el)el.disabled=false});

@@ -64,6 +64,7 @@ function fixture(backend, collections, overwrite = false) {
     listAllRecords: (collection, options) => backend.db.readAll(collection, options), confirm: () => true, render() {}, toast() {},
     dl: { save: async value => { downloads.push(value); } }
   });
+  vm.runInContext(source('app/restore.js'), context);
   vm.runInContext(source('app/lighting.js'), context);
   context.DGLighting.attach({ state: () => state, can: () => true, database: () => backend.db, firebase: () => backend.fb || null,
     readAll: (collection, options) => backend.db.readAll(collection, options), esc: String, render() {}, toast() {}, invalidateLighting() {} });

@@ -3,11 +3,14 @@
   const C = root.DGOperationsCore;
   let api, attached = false, loading = null, registryLoad = 0;
   const today = new Date(), localDate = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  const state = { from: localDate(new Date(today.getFullYear(), today.getMonth(), 1)), to: localDate(today), analytics: null, loadedRange: '', error: '', at: 0, registry: null, source: '', registryError: '', registryProgress: '', audit: [], auditLoaded: false, auditLoading: false };
+  const state = { from: localDate(new Date(today.getFullYear(), today.getMonth(), 1)), to: localDate(today), analytics: null, loadedRange: '', error: '', at: 0, registry: null, source: '', registryError: '', registryProgress: '', dashboardSource: 'unknown', dashboardComplete: false, audit: [], auditLoaded: false, auditLoading: false, auditAttempted: false, auditError: '', auditCursor: null, auditMore: false, auditAt: 0, health: null, healthLoading: false, healthAttempted: false, healthError: '' };
   const E = v => api.esc(v), Q = s => document.querySelector(s), notify = () => api.render();
   const heading = (title, sub) => '<div class="sheet-head"><div><h3>' + E(title) + '</h3><p class="muted">' + E(sub || '') + '</p></div><button class="x" data-close aria-label="닫기">×</button></div>';
   const bounds = () => ({ from: new Date(state.from + 'T00:00:00').getTime(), to: new Date(state.to + 'T23:59:59.999').getTime() });
   function supported() { return api.state().me === 'local' || !!api.firebase(); }
+  const sourceLabel = source => ({ server: '서버에서 전체 조회', local: '이 기기 저장 자료', cache: '오프라인 보관 자료 · 전체 자료가 아닐 수 있음', mixed: '서버·기기 보관 자료 혼합 · 일부 자료일 수 있음', artifact: '공유 저장소 조회 · 서버의 전체 범위 보증 없음', unknown: '자료 출처 확인 필요' }[source] || '자료 출처 확인 필요');
+  const dashboardReady = () => !!state.analytics && !loading && !state.error && state.loadedRange === state.from + '/' + state.to;
+  function requireDashboard() { if (!dashboardReady()) throw new Error('선택한 기간을 다시 조회한 뒤 내보내 주세요.'); }
   async function loadDashboard() {
     if (loading) return loading;
     const range = state.from + '/' + state.to, b = bounds();
@@ -15,13 +18,16 @@
     state.error = '';
     loading = (async () => {
       try {
-        const request = { requireServer: !!api.firebase() && navigator.onLine !== false };
+        const metadata = [], request = { requireServer: !!api.firebase() && navigator.onLine !== false, onMetadata: value => metadata.push(value) };
         const [inspections, orders, reports, events] = await Promise.all([
           api.readAll('inspections', { ...request, where: [['date', '>=', b.from], ['date', '<=', b.to]], orderBy: [['date', 'desc']] }),
           api.readAll('workOrders', request), api.readAll('reports', request),
           api.readAll('workEvents', { ...request, where: [['at', '>=', b.from], ['at', '<=', b.to]], orderBy: [['at', 'desc']] })
         ]);
         state.analytics = C.analytics(inspections, orders, reports, api.state().lights, b.from, b.to, events);
+        const sources = [...new Set(metadata.map(value => value.source))];
+        state.dashboardSource = sources.length === 1 ? sources[0] : sources.length > 1 ? 'mixed' : api.state().me === 'local' ? 'local' : request.requireServer ? 'server' : api.firebase() ? 'cache' : 'unknown';
+        state.dashboardComplete = metadata.length ? metadata.every(value => value.complete) : ['local', 'server'].includes(state.dashboardSource);
         state.loadedRange = range; state.at = Date.now();
       } catch (error) { state.error = error.message || '기간 자료를 불러오지 못했어요.'; }
       finally { loading = null; notify(); }
@@ -32,13 +38,13 @@
     if (!state.analytics && !loading && !state.error) setTimeout(loadDashboard, 0);
     const a = state.analytics, stale = state.loadedRange !== state.from + '/' + state.to;
     const metrics = a ? [['기간 점검', a.inspectionCount + '건'], ['점검한 시설', a.uniqueInspected + '개'], ['기간 작업 접수', a.opened + '건'], ['기간 검수 완료 횟수', a.verified + '건'], ['현재 미완료 작업', a.unresolved + '건'], ['현재 기한 초과', a.overdue + '건'], ['현재 미처리 신고', a.pendingReports + '건'], ['검수까지 평균 소요일', a.averageDays == null ? '자료 없음' : a.averageDays.toFixed(1) + '일'], ['기간 자재비 증감', a.cost.toLocaleString() + '원']] : [];
-    return '<div class="panel"><div class="grid2"><div><label class="f" for="dgDashFrom">시작일</label><input class="f-in" id="dgDashFrom" type="date" value="' + state.from + '"></div><div><label class="f" for="dgDashTo">종료일</label><input class="f-in" id="dgDashTo" type="date" value="' + state.to + '"></div></div><div class="split"><button class="btn sodium" data-mgmt="dashboard-load">기간 조회</button><button class="btn ghost" data-mgmt="dashboard-csv"' + (!a || stale ? ' disabled' : '') + '>CSV</button><button class="btn ghost" data-mgmt="dashboard-print"' + (!a || stale ? ' disabled' : '') + '>인쇄 / PDF</button></div><p class="muted">기간 자료를 끝까지 조회해 집계해요. 미완료·기한 초과·미처리 신고는 조회 시점 기준이에요. 검수 실적은 변경 불가 이력으로 집계하며, 재검수 자재비는 이전 검수와의 차이(반납은 음수)만 반영해요.</p></div>' +
+    return '<div class="panel"><div class="grid2"><div><label class="f" for="dgDashFrom">시작일</label><input class="f-in" id="dgDashFrom" type="date" value="' + state.from + '"></div><div><label class="f" for="dgDashTo">종료일</label><input class="f-in" id="dgDashTo" type="date" value="' + state.to + '"></div></div><div class="split"><button class="btn sodium" data-mgmt="dashboard-load"' + (loading ? ' disabled' : '') + '>기간 조회</button><button class="btn ghost" data-mgmt="dashboard-csv"' + (!dashboardReady() ? ' disabled' : '') + '>CSV</button><button class="btn ghost" data-mgmt="dashboard-print"' + (!dashboardReady() ? ' disabled' : '') + '>인쇄 / PDF</button></div><p class="muted">기간 자료를 끝까지 조회해 집계해요. 미완료·기한 초과·미처리 신고는 조회 시점 기준이에요. 검수 실적은 변경 불가 이력으로 집계하며, 재검수 자재비는 이전 검수와의 차이(반납은 음수)만 반영해요.</p></div>' +
       (state.error ? '<div class="notice" role="alert">' + E(state.error) + '</div>' : '') + (loading ? '<p role="status">기간 전체 자료를 불러오는 중…</p>' : '') +
-      (a ? '<div id="dgDashboardReport"><h3>' + E(state.loadedRange.replace('/', ' ~ ')) + ' 업무 현황</h3><p class="muted">조회 ' + api.fmtDT(state.at) + (navigator.onLine === false ? ' · 오프라인 보관 자료: 서버 최신 상태와 다를 수 있어요.' : '') + (stale ? ' · 날짜가 바뀌었어요. 다시 조회해 주세요.' : '') + '</p><div class="dg-metrics">' + metrics.map(([name, value]) => '<div class="panel"><span>' + E(name) + '</span><strong>' + E(value) + '</strong></div>').join('') + '</div><h3>반복 고장 시설</h3><p class="muted">선택 기간에 고장 점검이 두 번 이상 기록된 시설이에요. 원인 확인과 교체 검토 후보로 사용해요.</p>' + (a.repeated.length ? '<div class="list">' + a.repeated.map(([id, n]) => '<button class="light-row" data-light="' + E(id) + '"><b>' + E((api.byId(id) || {}).code || id) + '</b><span>' + n + '회</span></button>').join('') + '</div>' : '<p class="empty">반복 고장 기록이 없어요.</p>') + '<h3>점멸기·회로별 고장 기록</h3><div class="dg-table"><table><thead><tr><th>대장 점멸기</th><th>고장 점검</th></tr></thead><tbody>' + a.circuits.map(([id, n]) => '<tr><td>' + E(id) + '</td><td>' + n + '회</td></tr>').join('') + '</tbody></table></div><p class="muted">대장의 점멸기 값으로 묶은 통계예요. 실제 전기 회로 연결은 현장에서 확인해 주세요.</p></div>' : '');
+      (a ? '<div id="dgDashboardReport"><h3>' + E(state.loadedRange.replace('/', ' ~ ')) + ' 업무 현황</h3><p class="muted">조회 ' + api.fmtDT(state.at) + ' · ' + E(sourceLabel(state.dashboardSource)) + (state.dashboardComplete ? '' : ' · 참고용 집계') + (stale ? ' · 날짜가 바뀌었어요. 다시 조회해 주세요.' : '') + '</p><div class="dg-metrics">' + metrics.map(([name, value]) => '<div class="panel"><span>' + E(name) + '</span><strong>' + E(value) + '</strong></div>').join('') + '</div><h3>반복 고장 시설</h3><p class="muted">선택 기간에 고장 점검이 두 번 이상 기록된 시설이에요. 원인 확인과 교체 검토 후보로 사용해요.</p>' + (a.repeated.length ? '<div class="list">' + a.repeated.map(([id, n]) => '<button class="light-row" data-light="' + E(id) + '"><b>' + E((api.byId(id) || {}).code || id) + '</b><span>' + n + '회</span></button>').join('') + '</div>' : '<p class="empty">반복 고장 기록이 없어요.</p>') + '<h3>점멸기·회로별 고장 기록</h3><div class="dg-table"><table><thead><tr><th>대장 점멸기</th><th>고장 점검</th></tr></thead><tbody>' + a.circuits.map(([id, n]) => '<tr><td>' + E(id) + '</td><td>' + n + '회</td></tr>').join('') + '</tbody></table></div><p class="muted">대장의 점멸기 값으로 묶은 통계예요. 실제 전기 회로 연결은 현장에서 확인해 주세요.</p></div>' : '');
   }
   function dashboardRows() {
-    const a = state.analytics; if (!a) return [];
-    return [['기간', state.loadedRange], ['조회 시각', api.fmtDT(state.at)], ['지표', '값'], ['기간 점검', a.inspectionCount], ['점검 시설', a.uniqueInspected], ['기간 작업 접수', a.opened], ['기간 검수 완료 횟수', a.verified], ['현재 미완료', a.unresolved], ['현재 기한 초과', a.overdue], ['현재 미처리 신고', a.pendingReports], ['평균 완료 일수', a.averageDays == null ? '' : a.averageDays.toFixed(2)], ['기간 자재비 증감', a.cost], [], ['반복 고장 시설', '횟수'], ...a.repeated.map(([id, n]) => [(api.byId(id) || {}).code || id, n]), [], ['점멸기', '고장 점검'], ...a.circuits];
+    requireDashboard(); const a = state.analytics;
+    return [['기간', state.loadedRange], ['조회 시각', api.fmtDT(state.at)], ['자료 출처', sourceLabel(state.dashboardSource)], ['조회 범위', state.dashboardComplete ? '전체 조회' : '참고용 · 누락된 자료가 있을 수 있음'], ['지표', '값'], ['기간 점검', a.inspectionCount], ['점검 시설', a.uniqueInspected], ['기간 작업 접수', a.opened], ['기간 검수 완료 횟수', a.verified], ['현재 미완료', a.unresolved], ['현재 기한 초과', a.overdue], ['현재 미처리 신고', a.pendingReports], ['평균 완료 일수', a.averageDays == null ? '' : a.averageDays.toFixed(2)], ['기간 자재비 증감', a.cost], [], ['반복 고장 시설', '횟수'], ...a.repeated.map(([id, n]) => [(api.byId(id) || {}).code || id, n]), [], ['점멸기', '고장 점검'], ...a.circuits];
   }
   function registryView() {
     const diff = state.registry;
@@ -128,21 +134,55 @@
     const result = await root.DGOffline.submit('privacy', job, { id: job.id, summary: '연락처 보관 기간 만료 · ' + values.length + '건' });
     api.toast(result.state === 'synced' ? '기한이 지난 연락처를 파기했어요.' : result.error || '저장 대기함에서 처리를 이어가요.');
   }
-  async function auditLoad() {
-    if (state.auditLoading) return; state.auditLoading = true;
-    try { state.audit = (await api.readAll(api.firebase() ? 'auditEvents' : 'workEvents', { requireServer: !!api.firebase() })).sort((a, b) => Number(b.at) - Number(a.at)); state.auditLoaded = true; }
-    catch (error) { state.error = error.message; }
+  async function auditLoad(more = false) {
+    if (state.auditLoading) return;
+    state.auditLoading = true; state.auditAttempted = true; state.auditError = '';
+    try {
+      const collection = api.firebase() ? 'auditEvents' : 'workEvents';
+      const options = { requireServer: !!api.firebase(), orderBy: [['at', 'desc']], pageSize: 40, cursor: more ? state.auditCursor : null };
+      const page = api.readPage ? await api.readPage(collection, options) : { rows: await api.readAll(collection, options), nextCursor: null, hasMore: false };
+      state.audit = more ? [...new Map([...state.audit, ...page.rows].map(row => [row.id, row])).values()] : page.rows;
+      state.auditCursor = page.nextCursor; state.auditMore = page.hasMore;
+      state.auditLoaded = true; state.auditAt = Date.now();
+    } catch (error) { state.auditError = error.message || '감사 기록을 불러오지 못했어요.'; }
     finally { state.auditLoading = false; notify(); }
   }
   function auditView() {
-    if (!state.auditLoaded && !state.auditLoading) setTimeout(auditLoad, 0);
-    return '<div class="panel"><p>' + (api.firebase() ? '서버 감사 함수가 남긴 변경 이벤트를 조회해요. 함수 배포 전의 과거 변경은 여기에 생성되지 않아요.' : '로컬 체험의 보수 작업 이력이에요. 서버가 보증하는 감사 로그는 Firebase 환경에서 제공돼요.') + '</p><button class="btn ghost" data-mgmt="audit-refresh">새로고침</button><button class="btn ghost" data-mgmt="audit-csv">전체 CSV</button></div>' + (state.auditLoading ? '<p>감사 기록 조회 중…</p>' : '') + (state.error ? '<p class="notice">' + E(state.error) + '</p>' : '') + '<div class="list">' + state.audit.slice(0, 200).map(r => '<div class="hist"><b>' + E(r.action || r.type || '변경') + '</b> ' + E(r.path || r.workId || '') + '<div>' + E(r.note || (r.fromStatus ? r.fromStatus + ' → ' + r.toStatus : '')) + '</div><small>' + api.fmtDT(typeof r.at === 'number' ? r.at : r.at && r.at.seconds * 1000) + ' · ' + E(r.actor || r.by || '서버') + '</small></div>').join('') + '</div><p class="muted">전체 ' + state.audit.length + '건 · 화면 최근 200건, CSV 전체</p>';
+    if (!state.auditAttempted && !state.auditLoading) { state.auditAttempted = true; setTimeout(() => auditLoad(), 0); }
+    return '<div class="panel"><p>' + (api.firebase() ? '서버 감사 함수가 남긴 변경 이벤트를 조회해요. 함수 배포 전의 과거 변경은 여기에 생성되지 않아요.' : '로컬 체험의 보수 작업 이력이에요. 서버가 보증하는 감사 로그는 Firebase 환경에서 제공돼요.') + '</p><button class="btn ghost" data-mgmt="audit-refresh"' + (state.auditLoading ? ' disabled' : '') + '>다시 조회</button><button class="btn ghost" data-mgmt="audit-csv"' + (state.auditLoading ? ' disabled' : '') + '>전체 CSV</button></div>' +
+      (state.auditLoading ? '<p role="status">감사 기록 조회 중…</p>' : '') +
+      (state.auditError ? '<p class="notice" role="alert">' + E(state.auditError) + ' 다시 조회를 누르면 재시도해요.</p>' : '') +
+      '<div class="list">' + state.audit.map(r => '<div class="hist"><b>' + E(r.action || r.type || '변경') + '</b> ' + E(r.path || r.workId || '') + '<div>' + E(r.note || (r.fromStatus ? r.fromStatus + ' → ' + r.toStatus : '')) + '</div><small>' + api.fmtDT(typeof r.at === 'number' ? r.at : r.at && r.at.seconds * 1000) + ' · ' + E(r.actor || r.by || '서버') + '</small></div>').join('') + '</div>' +
+      '<p class="muted">조회한 기록 ' + state.audit.length + '건' + (state.auditAt ? ' · ' + api.fmtDT(state.auditAt) : '') + ' · 전체 CSV는 서버 자료를 끝까지 다시 조회해요.</p>' +
+      (state.auditMore ? '<button class="btn ghost block" data-mgmt="audit-more"' + (state.auditLoading ? ' disabled' : '') + '>이전 기록 더 보기</button>' : '');
+  }
+  async function healthLoad() {
+    if (state.healthLoading) return;
+    state.healthAttempted = true; state.healthLoading = true; state.healthError = '';
+    try {
+      if (!api.firebase() || !root.FIREBASE_CONFIG?.functionsEnabled || !root.DGSecurity?.call) throw new Error('공유 서버와 운영 함수를 연결한 뒤 확인할 수 있어요.');
+      state.health = await root.DGSecurity.call('getOperationalHealth', {});
+    } catch (error) { state.healthError = error.message || '운영 상태를 확인하지 못했어요.'; }
+    finally { state.healthLoading = false; notify(); }
+  }
+  function healthView() {
+    const enabled = !!api.firebase() && !!root.FIREBASE_CONFIG?.functionsEnabled;
+    if (enabled && !state.healthAttempted && !state.healthLoading) { state.healthAttempted = true; setTimeout(healthLoad, 0); }
+    const h = state.health, labels = { gateway: '주민 접수', audit: '변경 이력 기록', retention: '보관 기간 정리' }, statuses = { unknown: '확인 기록 없음', ok: '정상 기록 있음', error: '최근 실패', stale: '최근 성공 확인 필요' };
+    return '<div class="panel"><h3>공유 운영 상태</h3><p>서버가 기록한 최근 실행 결과와 처리 대기 건수를 확인해요.</p>' +
+      (!enabled ? '<p class="notice">현재는 공유 운영 서버가 연결되지 않았어요. 직원 로그인·공유 업무·주민 접수·예약 정리를 실제 운영하려면 서버 설정과 배포가 필요해요.</p>' : '<button class="btn ghost" data-mgmt="health-refresh"' + (state.healthLoading ? ' disabled' : '') + '>운영 상태 다시 확인</button>') +
+      (state.healthLoading ? '<p role="status">서버 상태 확인 중…</p>' : '') + (state.healthError ? '<p class="notice" role="alert">' + E(state.healthError) + '</p>' : '') + '</div>' +
+      (h ? (h.maintenance?.active ? '<p class="notice" role="alert">업무 자료 이전이 진행 중이에요. 완료 전까지 공동 자료의 조회·편집이 일시 중지됩니다.</p>' : '') + '<p class="muted">서버 확인 ' + api.fmtDT(h.checkedAt) + (state.healthError ? ' · 이전 조회 결과' : '') + '</p><div class="grid2">' + Object.entries(labels).map(([key, label]) => {
+        const item = h.services?.[key] || {}, status = statuses[item.state] || statuses.unknown;
+        return '<div class="panel"><h3>' + label + '</h3><b>' + E(status) + '</b><p class="muted">마지막 성공 ' + (item.lastSuccessAt ? api.fmtDT(item.lastSuccessAt) : '기록 없음') + '</p>' + (item.lastFailureAt ? '<p class="notice">실패 ' + api.fmtDT(item.lastFailureAt) + (item.lastErrorCode ? ' · ' + E(item.lastErrorCode) : '') + '</p>' : '') + '</div>';
+      }).join('') + '</div><div class="panel"><h3>처리 대기 업무</h3><p>' + (h.scope === 'assigned' ? '본인에게 배정된 범위' : '조회 권한에 맞는 업무 범위') + '</p>' + Object.entries({ unimportedReports: '직원 신고함으로 옮기지 않은 접수', openWorkOrders: '미완료 보수 작업', overdueWorkOrders: '기한 초과 작업', myOpenWorkOrders: '내 미완료 작업' }).filter(([key]) => h.counts?.[key] != null).map(([key, label]) => '<p>' + label + ' <b>' + E(h.counts[key]) + '건</b></p>').join('') + '<button class="btn ghost" data-asec="works">보수 작업 보기</button></div>' : '');
   }
   async function handle(button) {
     const action = button.dataset.mgmt;
     if (action === 'dashboard-load') { state.from = Q('#dgDashFrom').value; state.to = Q('#dgDashTo').value; return loadDashboard(); }
     if (action === 'dashboard-csv') return root.DGOperations.download('동구_업무현황_' + state.from + '_' + state.to, dashboardRows());
-    if (action === 'dashboard-print') return api.print(Q('#dgDashboardReport').innerHTML);
+    if (action === 'dashboard-print') { requireDashboard(); return api.print(Q('#dgDashboardReport').innerHTML); }
+    if (action === 'health-refresh') return healthLoad();
     if (!api.can('admin')) throw new Error('관리자 권한이 필요해요.');
     if (action === 'registry-apply') return applyRegistry(button);
     if (action === 'registry-csv') { const d = state.registry; return root.DGOperations.download('동구_대장비교', [['구분', 'ID', '표찰', '변경 필드', '현장 충돌'], ...d.added.map(r => ['신규', r.id, r.code, '', '']), ...d.changed.map(r => ['변경', r.id, r.code, Object.keys(r.changes).join(', '), r.conflicts.join(', ')]), ...d.missing.map(r => ['누락', r.id, r.code, '', ''])]); }
@@ -158,8 +198,12 @@
     }
     if (action === 'settings-save') return saveSettings();
     if (action === 'privacy-purge') return purgeContacts();
-    if (action === 'audit-refresh') { state.error = ''; return auditLoad(); }
-    if (action === 'audit-csv') return root.DGOperations.download('동구_감사기록', [['ID', '구분', '대상', '행위자', '시각'], ...state.audit.map(r => [r.id, r.action || r.type, r.path || r.workId, r.actor || r.by, api.fmtDT(typeof r.at === 'number' ? r.at : r.at && r.at.seconds * 1000)])]);
+    if (action === 'audit-refresh') return auditLoad();
+    if (action === 'audit-more') return auditLoad(true);
+    if (action === 'audit-csv') {
+      const rows = await api.readAll(api.firebase() ? 'auditEvents' : 'workEvents', { requireServer: !!api.firebase(), orderBy: [['at', 'desc']] });
+      return root.DGOperations.download('동구_감사기록', [['ID', '구분', '대상', '행위자', '시각'], ...rows.map(r => [r.id, r.action || r.type, r.path || r.workId, r.actor || r.by, api.fmtDT(typeof r.at === 'number' ? r.at : r.at && r.at.seconds * 1000)])]);
+    }
   }
   function attach(context) {
     api = context;
@@ -173,7 +217,7 @@
     });
     if (attached) return; attached = true;
     document.addEventListener('click', e => { const b = e.target.closest('[data-mgmt]'); if (b) Promise.resolve().then(() => handle(b)).catch(error => api.toast(error.message || '처리하지 못했어요.')); });
-    document.addEventListener('change', e => { if (e.target.id === 'dgRegistryFile' && e.target.files[0]) registryFile(e.target.files[0]); });
+    document.addEventListener('change', e => { if (e.target.id === 'dgDashFrom' || e.target.id === 'dgDashTo') { state[e.target.id === 'dgDashFrom' ? 'from' : 'to'] = e.target.value; notify(); } if (e.target.id === 'dgRegistryFile' && e.target.files[0]) registryFile(e.target.files[0]); });
   }
-  root.DGManagement = { attach, dashboard, registryView, inventoryView, settingsView, auditView, state };
+  root.DGManagement = { attach, dashboard, registryView, inventoryView, settingsView, auditView, healthView, state };
 })(globalThis);

@@ -78,13 +78,36 @@
     const elapsed = Math.floor(Math.max(0, now - light.lastInspected) / 86400000);
     return elapsed > days ? { key: 'overdue', label: '기한 ' + (elapsed - days) + '일 초과', priority: 1, overdueDays: elapsed - days } : { key: 'current', label: '기한 내 점검', priority: 3, remainingDays: days - elapsed };
   }
+  function kstDateKey(at = Date.now()) { return new Date(at + 9 * 3600000).toISOString().slice(0, 10); }
+  function workQuery(filters, user, now = Date.now()) {
+    const where = [], status = filters.status || 'open';
+    if (status === 'open') where.push(['status', 'in', ['draft', 'assigned', 'in_progress', 'completed']]);
+    else if (status !== 'all') where.push(['status', '==', status]);
+    if (filters.mine) where.push(['assignedTo', '==', user]);
+    if (filters.urgent) where.push(['priority', '==', '긴급']);
+    const start = Date.parse(kstDateKey(now) + 'T00:00:00+09:00');
+    if (filters.deadline === 'today') where.push(['dueAt', '>=', start], ['dueAt', '<', start + 86400000]);
+    if (filters.deadline === 'overdue') where.push(['dueAt', '>', 0], ['dueAt', '<', now]);
+    return { where, orderBy: filters.deadline && filters.deadline !== 'all' ? [['dueAt', 'asc']] : [['updatedAt', 'desc']] };
+  }
+  function filterOrders(orders, filters, options = {}) {
+    const now = options.now || Date.now(), day = kstDateKey(now), { user, inDong, byId } = options;
+    return orders.filter(w => {
+      const open = !['verified', 'cancelled'].includes(w.status), status = filters.status || 'open';
+      return (status === 'all' || status === 'open' ? status === 'all' || open : w.status === status)
+        && (!filters.mine || w.assignedTo === user) && (!filters.urgent || w.priority === '긴급')
+        && (filters.deadline !== 'today' || !!w.dueAt && kstDateKey(w.dueAt) === day)
+        && (filters.deadline !== 'overdue' || !!w.dueAt && w.dueAt < now)
+        && (!filters.dong || filters.dong === '전체' || (inDong ? inDong(byId?.(w.lightId) || w, filters.dong) : w.dong === filters.dong));
+    });
+  }
   function distance(a, b) {
     const rad = Math.PI / 180, dlat = (b.lat - a.lat) * rad, dlng = (b.lng - a.lng) * rad;
     const x = Math.sin(dlat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dlng / 2) ** 2;
     return 6371000 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(Math.max(0, 1 - x)));
   }
   function planVisits(lights, origin) {
-    const left = lights.filter(l => !l.removed && Number.isFinite(l.lat) && Number.isFinite(l.lng)).map(l => ({ id: l.id, code: l.code, dong: l.dong, lat: l.lat, lng: l.lng }));
+    const left = [...new Map(lights.filter(l => !l.removed && Number.isFinite(l.lat) && Number.isFinite(l.lng)).map(l => [l.id, l])).values()].map(l => ({ id: l.id, code: l.code, dong: l.dong, lat: l.lat, lng: l.lng, workIds: Array.isArray(l.workIds) ? [...new Set(l.workIds)] : [] }));
     if (left.length > 200) fail('한 방문 계획에는 최대 200개 시설을 선택해 주세요.');
     const result = []; let current = origin || left[0], total = 0;
     while (left.length) {
@@ -162,5 +185,5 @@
     if (next < 0) fail('재고보다 많은 수량을 출고할 수 없어요.');
     return { ...item, quantity: Math.round(next * 1000) / 1000, revision: item.revision + 1 };
   }
-  return { STATES, PRIORITIES, TYPES, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, transition, inspectionState, distance, planVisits, normalizeRegistry, registryDiff, analytics, inventoryChange };
+  return { STATES, PRIORITIES, TYPES, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, transition, inspectionState, kstDateKey, workQuery, filterOrders, distance, planVisits, normalizeRegistry, registryDiff, analytics, inventoryChange };
 });

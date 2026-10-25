@@ -43,6 +43,12 @@
     const old = await read(path);
     if (expectedRevision === 0 ? !!old : !old || old.revision !== expectedRevision) fail('다른 직원이 기록을 변경했어요. 최신 내용을 확인한 뒤 다시 저장해 주세요.', 'conflict');
     if (old && !context.admin && old.createdBy !== actor) fail('다른 직원이 작성한 관찰은 관리자만 수정할 수 있어요.', 'permission-denied');
+    const provenance = ['sourceAgency', 'sourceRecordId', 'sourceDataset', 'sourceUpdatedAt', 'importedAt', 'importBatchId'];
+    if (!context.admin && (old ? provenance.some(key => !data.equal(old[key] ?? null, normalized[key] ?? null)) : !!normalized.sourceAgency)) fail('외부 자료의 반입과 출처 변경은 관리자만 할 수 있어요.', 'permission-denied');
+    if (job.importSource) {
+      if (!context.admin || old || expectedRevision !== 0) fail('반입은 관리자가 새 기록만 추가할 수 있어요. 기존 현장 기록은 보존해요.', 'permission-denied');
+      if (!normalized.sourceAgency || normalized.nightConfirmed || normalized.status !== 'unknown' || normalized.schedule !== 'unknown' || normalized.level !== 'unknown' || normalized.lux !== null || normalized.distinct || normalized.linkedLightId) fail('자료 반입만으로 야간·점등·현장 확인을 확정할 수 없어요.');
+    }
     if (!old && normalized.removed) fail('새 기록은 삭제된 상태로 등록할 수 없어요.');
     if (old && (!Number.isSafeInteger(old.createdAt) || at < old.createdAt)) fail('기록의 작성 시각보다 이른 시각으로 수정할 수 없어요.');
     const record = { schemaVersion: 1, ...normalized, createdAt: old ? old.createdAt : at, createdBy: old ? old.createdBy : actor,
