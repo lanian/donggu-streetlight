@@ -147,7 +147,7 @@ const server = http.createServer((req, res) => {
     await page.evaluate(() => failedLinkRace.calls[0].reject(new Error('이전 신고 연결 지연 실패')));
     await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('이전 신고 연결 지연 실패'));
     assert.equal(await page.evaluate(() => DGWorkflows.state.reportJob?.id === failedLinkRace.calls[1].job.id), true);
-    assert.equal(await page.locator('#dgReportWork fieldset').isDisabled(), true); assert.equal(await page.locator('#dgWorkLinkState').textContent(), '');
+    assert.equal(await page.locator('#dgReportWork fieldset').evaluate(el => el.disabled), true); assert.equal(await page.locator('[data-fw="link-existing-work"]').isDisabled(), true); assert.equal(await page.locator('#dgWorkLinkState').textContent(), '');
     await page.evaluate(() => failedLinkRace.calls[1].resolve({ state: 'queued' })); await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
     await page.evaluate(() => failedLinkRace.restore());
     results.push('older link failure cannot clear or unlock a newer report submission');
