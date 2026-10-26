@@ -2,7 +2,7 @@
 (function(root,factory){const api=factory(root);if(typeof module==='object'&&module.exports)module.exports=api;root.DGRestore=api;})(typeof globalThis==='object'?globalThis:this,function(root){
   'use strict';
   const PRIMARY=['workOrders','workEvents','inventory','inventoryMoves','reportEvents','lightingTasks','lightingRuns'];
-  const EXCLUDED=['restoreOperations','systemHealth','lightingOperations','lightingWorkflowOperations','auditEvents'];
+  const EXCLUDED=['restoreOperations','systemHealth','lightingOperations','lightingWorkflowOperations','lightingAreaOperations','auditEvents'];
   const MAX_DOCUMENTS=200,MAX_BYTES=4*1024*1024;
   const uuid=()=> 'restore-'+(root.crypto?.randomUUID?root.crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));
   const fail=message=>{throw new Error(message);};

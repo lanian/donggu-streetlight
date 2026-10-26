@@ -6,7 +6,7 @@
   root.DGLightingWorkflowCore = api;
 })(typeof globalThis === 'object' ? globalThis : this, function (Model, crypto) {
   'use strict';
-  const MODEL_VERSION = 'relative-screening-20261025-v2', RUN_BYTES = 600000, IMPORT_BYTES = 5000000, IMPORT_ROWS = 5000;
+  const MODEL_VERSION = 'relative-screening-20261026-v3', RUN_BYTES = 600000, IMPORT_BYTES = 5000000, IMPORT_ROWS = 5000;
   const fail = (message, code = 'invalid-argument') => { throw Object.assign(new Error(message), { code }); };
   const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
   function text(value, max, label, required = false) { if (typeof value !== 'string' || value.length > max || required && !value.trim()) fail(label + '을 확인해 주세요.'); return value.trim(); }
@@ -73,10 +73,11 @@
     return { at: ctx.now, minute: ctx.minute, weak: ctx.weak, counts, rows, excluded };
   }
   async function buildRun({ review, lights, records, roads, model, calibration, baseAt }) {
+    const areaScope = { records: review.areas || [], summary: review.areaSummary || {}, automaticExclusions: review.automaticExclusions || {} };
     const now = review.at, evaluation = evaluateObservations(records, lights, { now, minute: review.minute, weak: model.weak, baseAt });
-    const candidates = review.cands.map(c => ({ title: c.a ? c.a.code + ' ↔ ' + c.b.code : c.name, dong: c.dong || '', lat: c.mid.lat, lng: c.mid.lng, length: c.len ?? null, classification: c.context.classification, base: c.context.base, adjusted: c.context.adjusted, coverage: c.context.coverage, sourceIds: c.context.sources.map(x => x.id), observationIds: c.context.observations.map(x => x.id) }));
-    const versions = { registry: lights.map(l => [l.id, l.revision || 0, l.updatedAt || 0]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), context: records.map(r => [r.id, r.revision || 0]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), roads: { version: roads?.ver || 0, at: roads?.at || 0 } };
-    const data = { modelVersion: MODEL_VERSION, reviewedAt: now, minute: review.minute, mode: review.mode, dong: review.dong || '', facilityKind: review.kind || '', registryCount: lights.length, contextCount: records.length, roadCount: roads?.ways?.length || 0, candidateCount: candidates.length, inputDigest: await digest({ lights, records, roads: roads || null, model, calibration: calibration || null }), inputVersionsJson: JSON.stringify(versions), settingsJson: JSON.stringify({ model, calibration: calibration || null }), candidatesJson: JSON.stringify(candidates), evaluationJson: JSON.stringify(evaluation) };
+    const candidates = review.cands.map(c => ({ title: c.a ? c.a.code + ' ↔ ' + c.b.code : c.name, dong: c.dong || '', lat: c.mid.lat, lng: c.mid.lng, length: c.len ?? null, classification: c.context.classification, base: c.context.base, adjusted: c.context.adjusted, coverage: c.context.coverage, sourceIds: c.context.sources.map(x => x.id), observationIds: c.context.observations.map(x => x.id), scopeException: c.scopeException || [] }));
+    const versions = { registry: lights.map(l => [l.id, l.revision || 0, l.updatedAt || 0]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), context: records.map(r => [r.id, r.revision || 0]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), roads: { version: roads?.ver || 0, at: roads?.at || 0 }, reviewAreas: areaScope };
+    const data = { modelVersion: MODEL_VERSION, reviewedAt: now, minute: review.minute, mode: review.mode, dong: review.dong || '', facilityKind: review.kind || '', registryCount: lights.length, contextCount: records.length, roadCount: roads?.ways?.length || 0, candidateCount: candidates.length, inputDigest: await digest({ lights, records, roads: roads || null, model, calibration: calibration || null, areaScope }), inputVersionsJson: JSON.stringify(versions), settingsJson: JSON.stringify({ model, calibration: calibration || null }), candidatesJson: JSON.stringify(candidates), evaluationJson: JSON.stringify(evaluation) };
     return normalizeRun(data);
   }
   function parseCSV(input) {

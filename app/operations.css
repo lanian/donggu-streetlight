@@ -15,5 +15,14 @@
 #woNewForm input[type=file],.dg-work-detail input[type=file],#dgRegistryFile{max-width:100%;padding:10px 0}
 .dg-recovery{border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}.dg-recovery button{margin-top:8px}
 .dg-save-state{font-size:12px;color:var(--ink-2);margin-top:6px;min-height:18px}
+.rv-toolbar{padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface,#fff);margin:12px 0}
+.rv-toolbar .grid2>div{min-width:0}.rv-toolbar select{width:100%;max-width:100%}
+.rv-scope-summary{padding:10px 12px;background:var(--wash,#f3f5f7);border-radius:10px;font-size:13px}
+.rv-candidate{scroll-margin-top:100px;overflow-wrap:anywhere}.rv-candidate.rv-selected{outline:2px solid var(--sodium,#d87900);outline-offset:2px}
+.rv-candidate>details,.rv-extra{margin-top:12px}.rv-advice{font-weight:600;line-height:1.6}.rv-actions{gap:8px;margin-top:12px}.rv-actions .btn{min-height:44px}
+.rv-map-nav{position:sticky;top:0;z-index:1100;padding:10px 0;background:var(--surface,#fff);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+.rv-map-nav .split{gap:8px;justify-content:space-between;flex:1;min-width:260px}.rv-map-nav span{font-size:12px;white-space:nowrap}
+.rv-map{height:clamp(260px,44vh,480px);margin-top:10px}.rv-map-nav button{min-height:44px}
+@media(max-width:480px){.rv-toolbar .grid2{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:480px){.dg-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.dg-metrics strong{font-size:19px}.dg-table th,.dg-table td{padding:8px 5px}}
 @media print{.dg-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.dg-table{overflow:visible}.dg-table tr{break-inside:avoid}}

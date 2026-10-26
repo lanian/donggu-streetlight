@@ -4,7 +4,8 @@
   const C = root.DGLightingWorkflowCore, Commands = root.DGLightingWorkflowCommands;
   const state = { tasks: [], tasksLoaded: false, tasksError: '', taskFilter: 'open', taskShow: 40, runs: [], runsLoaded: false, runsError: '', runShow: 30, draft: null,
     import: { parsed: null, name: '', agency: '', dataset: '', mapping: {}, preview: null, busy: false, progress: '', show: 50 } };
-  let api, attached = false, taskLoading, taskReload = false, historyLoading, taskWrites = Promise.resolve(), draftWriteCount = 0, unsubscribe, generation = 0;
+  let api, attached = false, taskLoading, taskReload = false, historyLoading, taskWrites = Promise.resolve(), draftWriteCount = 0, unsubscribe, generation = 0, taskEditorSequence = 0;
+  const appliedTaskOperations = new Set(), taskSettlements = new Map(), taskSaveViews = new Map();
   const Q = selector => document.querySelector(selector), E = value => api.esc(value == null ? '' : value), copy = value => value == null ? null : JSON.parse(JSON.stringify(value));
   const uid = prefix => root.DGData.newId(prefix), actor = () => api.state().me;
   const supported = () => api.state().canWrite && api.can('inspect') && (!!api.firebase() || typeof api.database()?.commitMany === 'function');
@@ -54,18 +55,20 @@
   }
   function readTaskForm() {
     const d = state.draft, form = Q('#lwTaskForm');
-    if (!d || d.readonly || d.pending || form?.dataset.recordId !== d.recordId) return d;
+    if (!d || d.readonly || d.pending || form?.dataset.recordId !== d.recordId || !Q('#sheet.open')) return d;
     Object.assign(d.data, { title: Q('#lwTitle').value, lat: Q('#lwLat').value, lng: Q('#lwLng').value, radius: Q('#lwRadius').value, assignedTo: Q('#lwAssigned').value, dueAt: Date.parse(Q('#lwDue').value + '+09:00'), reviewMinute: root.DGLighting.parseMinute(Q('#lwMinute').value), note: Q('#lwNote').value });
     if (Q('#lwObservation')) { d.data.observationId = Q('#lwObservation').value; d.data.completionNote = Q('#lwCompletion').value; }
     return d;
   }
-  function persistDraft(read = true) {
-    const d = read ? readTaskForm() : state.draft;
+  function persistDraft(read = true, owner = state.draft) {
+    const d = read && owner === state.draft ? readTaskForm() : owner;
     if (!d || d.readonly || !root.DGOffline.ready) return taskWrites;
+    if (d.pending && appliedTaskOperations.has(d.pending)) return taskWrites;
     const value = copy(d), scope = generation;
     draftWriteCount++;
     taskWrites = taskWrites.catch(() => {}).then(async () => {
       if (scope !== generation) C.fail('계정이 바뀌어 이전 초안 쓰기를 중단했어요.', 'account-changed');
+      if (value.pending && appliedTaskOperations.has(value.pending)) return;
       if (d.conflict) C.fail('다른 탭의 초안이 바뀌었어요. 최신 초안을 다시 열어 주세요.', 'conflict');
       if (!root.DGOffline.putIfCurrent) C.fail('새 버전을 적용한 뒤 재확인 업무를 작성해 주세요.', 'unsupported-backend');
       try { const saved = await root.DGOffline.putIfCurrent('lightingTaskDraft', d.recordId, value, d.draftRevision ?? null); d.draftRevision = saved.draftRevision; }
@@ -73,11 +76,54 @@
     }).finally(() => { draftWriteCount--; });
     return taskWrites;
   }
-  async function clearTaskDraft(owner) {
-    await taskWrites.catch(() => {}); if (!owner || !root.DGOffline.ready) return;
-    const saved = await root.DGOffline.get('lightingTaskDraft', owner.recordId);
-    if (saved && saved.pending === owner.pending) await root.DGOffline.removeIfCurrent('lightingTaskDraft', owner.recordId, saved.draftRevision ?? 0);
-    if (state.draft === owner) state.draft = null;
+  function clearTaskDraft(owner) {
+    if (!owner || !root.DGOffline.ready) return taskWrites;
+    const scope = generation;
+    if (owner.pending) appliedTaskOperations.add(owner.pending);
+    taskWrites = taskWrites.catch(() => {}).then(async () => {
+      if (scope !== generation) return;
+      const saved = await root.DGOffline.get('lightingTaskDraft', owner.recordId);
+      if (saved && saved.pending === owner.pending) {
+        try { await root.DGOffline.removeIfCurrent('lightingTaskDraft', owner.recordId, saved.draftRevision ?? 0); }
+        catch (error) {
+          const latest = await root.DGOffline.get('lightingTaskDraft', owner.recordId);
+          if (error.code !== 'conflict' || latest?.pending === owner.pending) throw error;
+        }
+      }
+      if (scope === generation && state.draft === owner) state.draft = null;
+    });
+    return taskWrites;
+  }
+  async function taskDraftApplied(draft) {
+    if (!draft?.pending) return false;
+    if (appliedTaskOperations.has(draft.pending)) return true;
+    const receipt = Commands.dataOf(await api.database().doc('lightingWorkflowOperations/' + C.id(draft.pending)).get(api.firebase() ? { source: 'server' } : undefined));
+    return receipt?.entity === 'task' && receipt.recordId === draft.recordId && receipt.by === actor() && receipt.revision === draft.expectedRevision + 1;
+  }
+  const taskViewOwned = view => view && view.scope === generation && view.sequence === taskEditorSequence && view.form?.isConnected && Q('#lwTaskForm') === view.form && view.form.dataset.recordId === view.draft.recordId && view.form.dataset.editorSequence === String(view.sequence) && !!Q('#sheet.open');
+  const taskReadonly = task => !!task && (!api.can('admin') && task.assignedTo !== actor() || task.status !== 'open');
+  function taskFromRecord(task, draftRevision = null) { return { recordId: task.id, data: C.normalizeTask(task), expectedRevision: task.revision, readonly: taskReadonly(task), pending: null, draftRevision }; }
+  function settleTask(job, fallbackOwner) {
+    if (taskSettlements.has(job.id)) return taskSettlements.get(job.id);
+    const scope = generation, original = taskSaveViews.get(job.id), owner = original?.draft || fallbackOwner || { recordId: job.payload?.recordId, pending: job.id };
+    if (!owner.recordId) return Promise.resolve();
+    appliedTaskOperations.add(job.id);
+    const work = (async () => {
+      await clearTaskDraft(owner); if (scope !== generation) return;
+      await loadTasks(); if (scope !== generation) return;
+      if (taskViewOwned(original)) { api.closeSheet(); return; }
+      // A pending task may have been reopened before its acknowledgement. Refresh
+      // that current locked view from the committed record, without closing it.
+      const active = state.draft, form = Q('#lwTaskForm'), sequence = taskEditorSequence;
+      if (!active || active.pending !== job.id || !taskViewOwned({ draft: active, form, sequence, scope })) return;
+      const task = state.tasks.find(t => t.id === active.recordId); if (!task) return;
+      const saved = await root.DGOffline.get('lightingTaskDraft', active.recordId);
+      if (state.draft !== active || !taskViewOwned({ draft: active, form, sequence, scope })) return;
+      state.draft = saved && !saved.pending ? saved : taskFromRecord(task);
+      if (!state.draft.readonly) await persistDraft(false);
+      if (taskViewOwned({ draft: active, form, sequence, scope })) renderTask();
+    })();
+    taskSettlements.set(job.id, work); return work;
   }
   async function discardDraft(recordId) {
     await taskWrites.catch(() => {}); const saved = await root.DGOffline.get('lightingTaskDraft', recordId);
@@ -85,33 +131,43 @@
     if (saved.pending) C.fail('전송 중인 업무는 저장 대기함에서 먼저 처리해 주세요.');
     const active = state.draft?.recordId === recordId ? state.draft : null;
     await root.DGOffline.removeIfCurrent('lightingTaskDraft', recordId, active?.draftRevision ?? saved.draftRevision ?? 0);
-    if (active) state.draft = null;
+    if (active && state.draft === active) state.draft = null;
   }
   async function openTask(input = null, recordId = null, resume = false) {
     if (!supported()) return api.toast('재확인 업무에는 점검 권한과 저장소가 필요해요.');
-    await persistDraft();
-    if (!state.tasksLoaded) await loadTasks();
+    const sequence = ++taskEditorSequence, scope = generation, current = () => sequence === taskEditorSequence && scope === generation;
+    await persistDraft(); if (!current()) return;
+    if (recordId || !state.tasksLoaded) await loadTasks(); if (!current()) return;
     if (state.tasksError) C.fail('최신 재확인 업무를 읽은 뒤 다시 열어 주세요.');
-    if (resume) {
-      const saved = await root.DGOffline.get('lightingTaskDraft', recordId); if (!saved) C.fail('이어 쓸 재확인 초안이 없어요.'); state.draft = saved;
-    } else {
-      if (!recordId && input?.originId) { const existing = state.tasks.find(t => t.status === 'open' && t.originKind === input.originKind && t.originId === input.originId && t.reviewMinute === input.reviewMinute); if (existing) recordId = existing.id; }
-      const old = recordId && state.tasks.find(t => t.id === recordId); if (recordId && !old) C.fail('업무를 찾지 못했어요. 새로고침해 주세요.');
-      const previous = old && await root.DGOffline.get('lightingTaskDraft', recordId);
-      if (previous && confirm('작성 중인 재확인 초안을 이어 쓸까요?')) state.draft = previous;
-      else {
-        const now = Date.now(), data = old ? C.normalizeTask(old) : { title: input?.title || '', lat: input?.lat ?? '', lng: input?.lng ?? '', radius: input?.radius || 10, note: input?.note || '', originKind: input?.originKind || 'manual', originId: input?.originId || '', evidenceIds: input?.evidenceIds || [], assignedTo: actor(), dueAt: now + 86400000, reviewMinute: input?.reviewMinute ?? 1260, status: 'open', observationId: '', completionNote: '', completedAt: 0, completedBy: '' };
-        state.draft = { recordId: old?.id || uid('lighting-task'), data, expectedRevision: old?.revision || 0, readonly: old ? !api.can('admin') && old.assignedTo !== actor() || old.status !== 'open' : false, pending: null, draftRevision: previous?.draftRevision ?? null };
-        if (!state.draft.readonly) await persistDraft(false);
-      }
+    if (!recordId && input?.originId) { const existing = state.tasks.find(t => t.status === 'open' && t.originKind === input.originKind && t.originId === input.originId && t.reviewMinute === input.reviewMinute); if (existing) recordId = existing.id; }
+    let old = recordId && state.tasks.find(t => t.id === recordId), previous = recordId && await root.DGOffline.get('lightingTaskDraft', recordId);
+    if (!current()) return;
+    if (previous?.pending && await taskDraftApplied(previous)) {
+      if (!current()) return;
+      await clearTaskDraft(previous); if (!current()) return;
+      await loadTasks(); if (!current()) return;
+      previous = await root.DGOffline.get('lightingTaskDraft', recordId); if (!current()) return;
+      old = state.tasks.find(t => t.id === recordId);
     }
-    renderTask();
+    if (!current()) return;
+    if (recordId && !old && !(resume && previous)) C.fail('업무를 찾지 못했어요. 새로고침해 주세요.');
+    if (resume && !previous && !old) C.fail('이어 쓸 재확인 초안이 없어요.');
+    if (previous && (resume || previous.pending || confirm('작성 중인 재확인 초안을 이어 쓸까요?'))) { state.draft = previous; if (old) state.draft.readonly = taskReadonly(old); }
+    else if (old) state.draft = taskFromRecord(old, previous?.draftRevision ?? null);
+    else {
+      const now = Date.now(), data = { title: input?.title || '', lat: input?.lat ?? '', lng: input?.lng ?? '', radius: input?.radius || 10, note: input?.note || '', originKind: input?.originKind || 'manual', originId: input?.originId || '', evidenceIds: input?.evidenceIds || [], assignedTo: actor(), dueAt: now + 86400000, reviewMinute: input?.reviewMinute ?? 1260, status: 'open', observationId: '', completionNote: '', completedAt: 0, completedBy: '' };
+      state.draft = { recordId: uid('lighting-task'), data, expectedRevision: 0, readonly: false, pending: null, draftRevision: null };
+    }
+    const draft = state.draft;
+    if (!draft.readonly) await persistDraft(false, draft);
+    if (current() && state.draft === draft) renderTask();
   }
   function renderTask() {
-    const draft = state.draft, d = draft.data, old = state.tasks.find(t => t.id === draft.recordId), locked = draft.readonly || !!draft.pending, mayAssign = api.can('admin');
+    const draft = state.draft; if (!draft) return;
+    const d = draft.data, old = state.tasks.find(t => t.id === draft.recordId), locked = draft.readonly || !!draft.pending, mayAssign = api.can('admin');
     const people = { [actor()]: names()[actor()] || '나', ...names() }; if (!people[d.assignedTo]) people[d.assignedTo] = d.assignedTo;
     const compatible = root.DGLighting.state.records.filter(r => { if (d.status === 'completed' && r.id === d.observationId) return true; try { C.checkCompletion({ ...d, createdAt: old?.createdAt || Date.now() }, r, Date.now()); return true; } catch (_) { return false; } });
-    api.navigate(heading('밝기 재확인 업무') + '<form id="lwTaskForm" data-record-id="' + E(draft.recordId) + '" class="panel"><fieldset' + (locked ? ' disabled' : '') + ' style="border:0;padding:0;min-width:0"><label class="f" for="lwTitle">업무 제목</label><input class="f-in" id="lwTitle" maxlength="120" value="' + E(d.title) + '" required><div class="grid2"><div><label class="f" for="lwLat">위도</label><input class="f-in" id="lwLat" type="number" step="any" value="' + E(d.lat) + '" required></div><div><label class="f" for="lwLng">경도</label><input class="f-in" id="lwLng" type="number" step="any" value="' + E(d.lng) + '" required></div></div><label class="f" for="lwRadius">확인 범위 반경 (5–80m)</label><input class="f-in" id="lwRadius" type="number" min="5" max="80" value="' + E(d.radius) + '"><label class="f" for="lwAssigned">담당자</label><select class="f-in" id="lwAssigned"' + (mayAssign ? '' : ' disabled') + '>' + Object.entries(people).map(([id, name]) => '<option value="' + E(id) + '"' + (id === d.assignedTo ? ' selected' : '') + '>' + E(name) + '</option>').join('') + '</select><label class="f" for="lwDue">확인 기한 (한국 시간)</label><input class="f-in" id="lwDue" type="datetime-local" value="' + E(dateInput(d.dueAt)) + '" required><label class="f" for="lwMinute">현장에서 확인할 시간 (KST)</label><input class="f-in" id="lwMinute" type="time" value="' + E(minuteText(d.reviewMinute)) + '" required><label class="f" for="lwNote">확인할 내용</label><textarea class="f-in" id="lwNote" maxlength="1500">' + E(d.note) + '</textarea>' +
+    api.navigate(heading('밝기 재확인 업무') + '<form id="lwTaskForm" data-record-id="' + E(draft.recordId) + '" data-editor-sequence="' + taskEditorSequence + '" class="panel"><fieldset' + (locked ? ' disabled' : '') + ' style="border:0;padding:0;min-width:0"><label class="f" for="lwTitle">업무 제목</label><input class="f-in" id="lwTitle" maxlength="120" value="' + E(d.title) + '" required><div class="grid2"><div><label class="f" for="lwLat">위도</label><input class="f-in" id="lwLat" type="number" step="any" value="' + E(d.lat) + '" required></div><div><label class="f" for="lwLng">경도</label><input class="f-in" id="lwLng" type="number" step="any" value="' + E(d.lng) + '" required></div></div><label class="f" for="lwRadius">확인 범위 반경 (5–80m)</label><input class="f-in" id="lwRadius" type="number" min="5" max="80" value="' + E(d.radius) + '"><label class="f" for="lwAssigned">담당자</label><select class="f-in" id="lwAssigned"' + (mayAssign ? '' : ' disabled') + '>' + Object.entries(people).map(([id, name]) => '<option value="' + E(id) + '"' + (id === d.assignedTo ? ' selected' : '') + '>' + E(name) + '</option>').join('') + '</select><label class="f" for="lwDue">확인 기한 (한국 시간)</label><input class="f-in" id="lwDue" type="datetime-local" value="' + E(dateInput(d.dueAt)) + '" required><label class="f" for="lwMinute">현장에서 확인할 시간 (KST)</label><input class="f-in" id="lwMinute" type="time" value="' + E(minuteText(d.reviewMinute)) + '" required><label class="f" for="lwNote">확인할 내용</label><textarea class="f-in" id="lwNote" maxlength="1500">' + E(d.note) + '</textarea>' +
       (old ? '<h4>현장 결과 연결</h4><label class="f" for="lwObservation">이 업무 이후의 유효한 관찰</label><select class="f-in" id="lwObservation"><option value="">현장 관찰을 선택해 주세요</option>' + compatible.map(r => '<option value="' + E(r.id) + '"' + (d.observationId === r.id ? ' selected' : '') + '>' + E(r.label + ' · ' + root.DGLighting.levels[r.level] + ' · ' + time(r.observedAt)) + '</option>').join('') + '</select><label class="f" for="lwCompletion">확인 결과와 다음 조치</label><textarea class="f-in" id="lwCompletion" maxlength="1000">' + E(d.completionNote) + '</textarea><p class="muted">새 관찰을 저장한 뒤 이 업무를 다시 열어 연결하세요. 완료해도 시설 상태나 보수 완료를 자동 변경하지 않아요.</p>' : '') + '</fieldset><p id="lwTaskState" class="notice" role="status">' + (draft.pending ? '저장 대기함에서 전송 결과를 확인해 주세요.' : draft.readonly ? E(statusLabel[d.status]) : '초안은 기록별로 보관하며 다른 탭과 충돌하면 덮어쓰지 않아요.') + '</p>' +
       '<div id="lwDraftConflict"' + (draft.conflict ? '' : ' hidden') + '><button class="btn ghost" type="button" data-lw="task-reload-draft">최신 초안 다시 열기</button><button class="btn ghost" type="button" data-lw="task-copy-draft">현재 입력을 새 업무 초안으로 복사</button></div>' +
       (!locked ? '<div class="split"><button class="btn" type="submit">업무 저장</button>' + (old ? '<button class="btn ghost" type="button" data-lw="task-complete">현장 확인 완료</button><button class="btn ghost" type="button" data-lw="task-cancel">업무 취소</button>' : '') + '<button class="btn ghost" type="button" data-lw="task-discard">초안 버리기</button></div>' : '') +
@@ -122,14 +178,20 @@
     const draft = readTaskForm(); if (!draft || draft.readonly || draft.pending || draft.conflict) return;
     const at = Date.now(), data = { ...draft.data, status, completedAt: status === 'completed' ? at : 0, completedBy: status === 'completed' ? actor() : '', observationId: status === 'completed' ? draft.data.observationId : '' };
     const normalized = C.normalizeTask(data), job = { id: uid('lighting-workflow'), entity: 'task', recordId: draft.recordId, actor: actor(), at, expectedRevision: draft.expectedRevision, data: normalized };
-    const form = Q('#lwTaskForm'); draft.pending = job.id; if (form?.isConnected) form.querySelector('fieldset').disabled = true;
+    const form = Q('#lwTaskForm'), view = { draft, form, sequence: taskEditorSequence, scope: generation }; taskSaveViews.set(job.id, view);
+    draft.pending = job.id; if (form?.isConnected) form.querySelector('fieldset').disabled = true;
     try {
-      await persistDraft(false);
+      await persistDraft(false, draft);
       const result = await root.DGOffline.submit('lighting-workflow', job, { id: job.id, summary: '밝기 재확인 · ' + data.title });
-      if (result.state === 'synced') { await clearTaskDraft(draft); await loadTasks(); if (form?.isConnected && Q('#lwTaskForm') === form) api.closeSheet(); api.toast('재확인 업무를 저장했어요.'); }
-      else { api.toast(result.error || '업무를 저장 대기함에 보관했어요.'); if (state.draft === draft) renderTask(); }
-    } catch (error) { draft.pending = null; await persistDraft(false).catch(() => {}); throw error; }
-    finally { if (form?.isConnected && !draft.pending) form.querySelector('fieldset').disabled = false; }
+      if (view.scope !== generation) return;
+      if (result.state === 'synced') { await settleTask(result, draft); api.toast('재확인 업무를 저장했어요.'); }
+      else { api.toast(result.error || '업무를 저장 대기함에 보관했어요.'); if (state.draft === draft && taskViewOwned(view)) renderTask(); }
+    } catch (error) {
+      const queued = (await root.DGOffline.jobs().catch(() => [])).find(j => j.id === job.id);
+      if (!queued && view.scope === generation) { draft.pending = null; await persistDraft(false, draft).catch(() => {}); }
+      throw error;
+    }
+    finally { if (taskViewOwned(view) && !draft.pending) form.querySelector('fieldset').disabled = false; }
   }
   async function reopenTask(id) {
     const old = state.tasks.find(t => t.id === id); if (!old || !api.can('admin')) C.fail('관리자만 완료·취소 업무를 다시 열 수 있어요.', 'permission-denied');
@@ -269,7 +331,7 @@
     if (action === 'import-csv') { const p = state.import.preview; if (!p) return; return exportCSV('동구_기관조명반입_' + p.batchId, [['원본행', '기관', '기관시설ID', '이름', '검토구분', '처리결과', '확인내용'], ...p.rows.map(r => [r.row, p.agency, r.sourceId, r.label, r.status, r.result || '미처리', r.error || r.message])]); }
   }
   async function ready() {
-    generation++; taskLoading = null; historyLoading = null; state.tasksLoaded = false; state.tasksError = ''; state.runsLoaded = false; state.runsError = ''; state.runs = []; state.tasks = [];
+    generation++; taskEditorSequence++; taskSettlements.clear(); taskSaveViews.clear(); appliedTaskOperations.clear(); taskLoading = null; historyLoading = null; state.tasksLoaded = false; state.tasksError = ''; state.runsLoaded = false; state.runsError = ''; state.runs = []; state.tasks = []; state.draft = null;
     state.import = { parsed: null, name: '', agency: '', dataset: '', mapping: {}, preview: null, busy: false, progress: '', show: 50 };
     const jobs = new Map((await root.DGOffline.jobs()).map(j => [j.id, j]));
     for (const entry of await root.DGOffline.list('lightingTaskDraft')) {
@@ -303,15 +365,13 @@
     root.DGOffline.subscribe(event => {
       if (event.job?.kind !== 'lighting-workflow') return;
       if (event.type === 'synced') {
-        const draft = state.draft?.pending === event.job.id ? state.draft : null;
-        if (draft) { const form = Q('#lwTaskForm'); clearTaskDraft(draft).then(() => { if (form?.isConnected && Q('#lwTaskForm') === form && form.dataset.recordId === draft.recordId) api.closeSheet(); }).catch(error => api.toast(errorText(error))); }
-        else if (event.job.payload?.entity === 'task') clearTaskDraft({ recordId: event.job.payload.recordId, pending: event.job.id }).catch(() => {});
+        if (event.job.payload?.entity === 'task') settleTask(event.job).catch(error => api.toast(errorText(error)));
         if (event.job.payload?.entity === 'run') { const review = api.lightingReview(); if (review?.historyJob?.id === event.job.id) { review.historyState = 'synced'; review.historyError = ''; } state.runsLoaded = false; }
         loadTasks();
       }
       if (event.type === 'discarded' && event.job.payload?.entity === 'task') {
         const id = event.job.payload.recordId;
-        taskWrites = taskWrites.catch(() => {}).then(async () => { const saved = await root.DGOffline.get('lightingTaskDraft', id); if (saved?.pending === event.job.id) { saved.pending = null; const next = await root.DGOffline.putIfCurrent('lightingTaskDraft', id, saved, saved.draftRevision ?? 0); if (state.draft?.recordId === id) { Object.assign(state.draft, next); if (Q('#lwTaskForm')?.dataset.recordId === id) renderTask(); } } }).catch(error => api.toast(errorText(error)));
+        taskWrites = taskWrites.catch(() => {}).then(async () => { const saved = await root.DGOffline.get('lightingTaskDraft', id); if (saved?.pending === event.job.id) { saved.pending = null; const next = await root.DGOffline.putIfCurrent('lightingTaskDraft', id, saved, saved.draftRevision ?? 0); if (state.draft?.recordId === id && state.draft.pending === event.job.id) { Object.assign(state.draft, next); if (Q('#lwTaskForm')?.dataset.recordId === id && Q('#sheet.open')) renderTask(); } } }).catch(error => api.toast(errorText(error)));
       }
     });
   }

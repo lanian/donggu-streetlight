@@ -96,7 +96,7 @@ exports.submitCitizenReport=onRequest({region,cors:false,secrets:[rateSecret],ma
 
 // Server-owned audit entries use the trigger's authenticated actor, never a client-provided "by" as proof.
 exports.recordAudit=onDocumentWrittenWithAuthContext({document:'{collection}/{id}',region},async event=>{
-  if(!['roles','joinRequests','lights','photos','inspections','reports','citizen_reports','patrols','workOrders','workEvents','inventory','inventoryMoves','settings','lightingContext','lightingTasks','lightingRuns','reportEvents'].includes(event.params.collection)||!event.data)return;
+  if(!['roles','joinRequests','lights','photos','inspections','reports','citizen_reports','patrols','workOrders','workEvents','inventory','inventoryMoves','settings','lightingContext','lightingTasks','lightingRuns','lightingAreas','reportEvents'].includes(event.params.collection)||!event.data)return;
   try{
   const before=event.data.before.exists?event.data.before.data():null,after=event.data.after.exists?event.data.after.data():null;
   const record={eventId:event.id,at:Date.parse(event.time)||Date.now(),path:event.params.collection+'/'+event.params.id,by:event.authId||null,actorType:event.authType||'unknown',...C.auditSummary(before,after)};

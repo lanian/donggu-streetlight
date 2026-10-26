@@ -72,7 +72,7 @@ node functions/scripts/restore-backup.cjs --project PROJECT_ID --uid VERIFIED_AD
 
 대량 적용이 시작되면 `meta/operationalRestore.status=partial`이 되어 클라이언트 업무 접근을 일시 차단합니다. 각 묶음의 영수증과 완료 수를 기록하며, 전체 대조가 끝나야 `applied`로 변경하고 접근을 되살립니다. 중간 실패는 **부분 완료**입니다. 같은 파일·프로젝트·관리자·operation ID로 `--apply`를 재실행하면 완료 묶음의 내용까지 대조하고 이어갑니다. 이미 완료된 작업의 재실행은 영수증만 확인합니다. 실패 뒤 잠금이나 영수증을 임의로 삭제하지 말고 실패 원인을 해결해 같은 작업을 완료하세요. 작업 중 다른 자격증명으로 문서를 수정하거나 직원 역할을 추가하면 재개가 거절될 수 있습니다.
 
-`restoreOperations`, 하위 묶음 영수증, `systemHealth`, `lightingOperations`, `lightingWorkflowOperations`는 사용자 JSON에서 직접 복원하지 않습니다. `lightingRuns`와 처리 이력의 원본은 서버가 검증한 복원 대상에 포함할 수 있지만 기존 불변 이력을 교체하지 않습니다.
+`restoreOperations`, 하위 묶음 영수증, `systemHealth`, `lightingOperations`, `lightingWorkflowOperations`, `lightingAreaOperations`는 사용자 JSON에서 직접 복원하지 않습니다. `lightingRuns`와 처리 이력의 원본은 서버가 검증한 복원 대상에 포함할 수 있지만 기존 불변 이력을 교체하지 않습니다.
 
 로컬 에뮬레이터에서는 `FIRESTORE_EMULATOR_HOST=127.0.0.1:8098` 같은 loopback 주소와 `--emulator`를 함께 명시합니다. 이 구현 작업에서는 실제 운영 Firebase로 이전하거나 배포하지 않았습니다.
 
@@ -87,6 +87,10 @@ node functions/scripts/restore-backup.cjs --project PROJECT_ID --uid VERIFIED_AD
 신규 `reportEvents`는 관리자만 신고의 시설 연결 변경과 같은 트랜잭션에서 생성하며 수정·삭제할 수 없습니다. 원문·접수번호를 그대로 두고 `reports.linkRevision/linkEventId/linkUpdatedBy`로 연결 이력을 확인합니다. 다른 활성 작업에 묶인 신고를 새 작업으로 이동하거나 다른 시설로 바꾸는 쓰기는 거절합니다.
 
 `lightingTasks`는 직원이 본인에게 생성하거나 관리자가 다른 직원에게 배정할 수 있습니다. 배정된 직원 또는 관리자가 갱신하고, 완료에는 시간대·확인 시각·야간 확인·위치 범위가 맞는 관찰 근거가 필요합니다. 완료/취소의 재개는 관리자만 가능합니다. `lightingRuns`는 크기를 제한한 불변 검토 실행 이력입니다. 두 컬렉션의 변경과 `lightingWorkflowOperations` 영수증은 원자적으로 기록합니다. 외부 광원 반입의 출처 6개 필드는 함께 저장하며, 최초 반입은 관리자만 미확인 상태로 생성할 수 있습니다. 반입했다고 점등을 확인한 것으로 만들지 않습니다.
+
+`lightingAreas`는 산·숲 등의 검토 제외 구역과 보행로 등의 포함 예외를 저장합니다. 직원은 조회할 수 있고 관리자가 생성·변경·해제·재적용합니다. 시설 대장과 광원·현장 관찰을 삭제하거나 밝음으로 바꾸는 기능이 아닙니다. 변경할 때마다 현재 문서와 전체 변경 내용을 담은 불변 `lightingAreaOperations` 영수증을 원자적으로 저장합니다. 최초 작성자·시각은 유지하고 revision을 한 단계씩 올리며, 이전 수정 시각보다 이른 변경·직접 삭제·영수증만 생성하는 쓰기는 차단합니다. 같은 저장 요청의 재시도는 기존 영수증으로 확인하여 나중의 변경을 되돌리지 않습니다.
+
+구역은 반경 5~1,000m의 원 또는 3~32개 꼭짓점의 다각형입니다. 규칙은 관리자 권한·필드·모든 꼭짓점의 좌표 범위·원 반경·연결된 전체 스냅샷을 검증합니다. 다각형의 자기 교차·중복 점·퇴화 형상·중심에서 5,000m를 넘는 범위는 공용 명령 검증기가 거절하며, Firestore 규칙이 다각형의 지리적 타당성이나 실제 관리 경계를 판정하는 것은 아닙니다. 포함 예외가 겹친 제외 구역보다 우선하며 현장 어두움·충돌 근거는 검토 결과에 남깁니다. 대량 이전 잠금 중에는 구역과 영수증의 클라이언트 조회·변경도 차단합니다. 독립 구역 백업은 현재 revision을 확인하는 새 관리자 명령으로 복원하고 과거 영수증을 덮어쓰지 않습니다.
 
 ## 로컬 검사 명령
 

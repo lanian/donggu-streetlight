@@ -357,13 +357,13 @@
   async function refreshQueue() {
     if (!root.DGOffline.ready) return;
     state.jobs = await root.DGOffline.jobs();
-    const kinds = await Promise.all(['draft', 'patrol', 'workDraft', 'workCompletion', 'lightingDraft', 'lightingTaskDraft'].map(kind => root.DGOffline.list(kind)));
+    const kinds = await Promise.all(['draft', 'patrol', 'workDraft', 'workCompletion', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(kind => root.DGOffline.list(kind)));
     state.drafts = kinds.flat(); notify();
   }
   function queueView() {
     const statuses = { queued: '전송 대기', sending: '서버 확인 중', failed: '실패 · 재시도 가능', conflict: '변경 충돌 · 확인 필요', synced: '서버/저장소 반영 완료' };
     return '<div class="panel"><p>' + (root.DGOffline.durable ? '이 기기에 초안과 미전송 작업을 보관해요.' : '공유 기기 모드: 현재 창에서만 대기해요. 전송 완료를 확인한 뒤 닫아 주세요.') + '</p><div class="split"><button class="btn sodium" data-dg="retry-all">대기 작업 전송</button><button class="btn ghost" data-dg="queue-refresh">새로고침</button></div></div><h3>저장 작업 ' + state.jobs.filter(j => j.state !== 'synced').length + '건 대기</h3>' + (state.jobs.length ? state.jobs.map(j => '<div class="panel"><b>' + E(j.summary) + '</b><p>' + statuses[j.state] + ' · ' + time(j.updatedAt) + '</p>' + (j.error ? '<p class="notice">' + E(j.error) + '</p>' : '') + '<div class="split">' + (['queued', 'failed', 'conflict'].includes(j.state) ? '<button class="btn ghost sm" data-dg="retry-job" data-id="' + E(j.id) + '">재시도</button>' : '') + (j.state !== 'sending' ? '<button class="btn ghost sm" data-dg="discard-job" data-id="' + E(j.id) + '">' + (j.state === 'synced' ? '완료 목록에서 지우기' : '대기 작업 폐기') + '</button>' : '') + '</div></div>').join('') : '<div class="empty">대기 중인 저장 작업이 없어요.</div>') +
-      '<h3>작성 중인 초안</h3>' + state.drafts.map(d => '<div class="panel"><b>' + E(d.kind === 'draft' ? (api.byId(d.id) || {}).code || d.id : d.kind === 'patrol' ? '이전 순찰' : d.kind === 'lightingDraft' ? '외부 광원·현장 밝기 초안' : d.kind === 'lightingTaskDraft' ? '밝기 재확인 업무 초안' : (d.value?.title || (api.byId(d.value?.lightId) || {}).code || '보수 작업 초안')) + '</b><p class="muted">' + time(d.updatedAt) + '</p><div class="split"><button class="btn ghost sm" data-dg="recover-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '">이어 쓰기</button><button class="btn ghost sm" data-dg="discard-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '">초안 폐기</button></div></div>').join('');
+      '<h3>작성 중인 초안</h3>' + state.drafts.map(d => '<div class="panel"><b>' + E(d.kind === 'draft' ? (api.byId(d.id) || {}).code || d.id : d.kind === 'patrol' ? '이전 순찰' : d.kind === 'lightingDraft' ? '외부 광원·현장 밝기 초안' : d.kind === 'lightingAreaDraft' ? '밝기 검토 구역 초안' : d.kind === 'lightingTaskDraft' ? '밝기 재확인 업무 초안' : (d.value?.title || (api.byId(d.value?.lightId) || {}).code || '보수 작업 초안')) + '</b><p class="muted">' + time(d.updatedAt) + '</p><div class="split"><button class="btn ghost sm" data-dg="recover-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '">이어 쓰기</button><button class="btn ghost sm" data-dg="discard-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '">초안 폐기</button></div></div>').join('');
   }
   async function download(name, rows) {
     const cell = root.DGSecurity ? root.DGSecurity.csvCell : v => '"' + (/^[=+@\-\t\r\n]/.test(String(v || '')) ? "'" : '') + String(v == null ? '' : v).replace(/"/g, '""') + '"';
@@ -408,10 +408,11 @@
       if (job && job.kind === 'work' && job.payload) await releasePending(job);
       return refreshQueue();
     }
-    if (action === 'recover-draft') { if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return api.openLight(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
+    if (action === 'recover-draft') { if (button.dataset.kind === 'lightingAreaDraft') return root.DGLightingAreas.openEditor(null, button.dataset.id, true); if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return api.openLight(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
     if (action === 'discard-draft') {
       if (!confirm('작성 중인 이 초안을 폐기할까요?')) return;
       const kind = button.dataset.kind, id = button.dataset.id, saved = await root.DGOffline.get(kind, id);
+      if (kind === 'lightingAreaDraft') { await root.DGLightingAreas.discardDraft(id); return refreshQueue(); }
       if (kind === 'lightingTaskDraft') { await root.DGLightingWorkflows.discardDraft(id); return refreshQueue(); }
       if (kind === 'lightingDraft') { const active = root.DGLighting.state.draft; await root.DGLighting.clearDraft(active?.recordId === id ? active : saved); return refreshQueue(); }
       if (kind === 'patrol' && saved) api.removePatrolDraft(saved.sessionId);
