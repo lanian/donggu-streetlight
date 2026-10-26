@@ -101,11 +101,11 @@
   }
   async function hasUnsaved() {
     if (!root.DGOffline.ready) return hasUnsavedSync();
-    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'workDraft', 'workCompletion', 'lightingDraft', 'lightingTaskDraft'].map(k => root.DGOffline.list(k))]);
+    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'workDraft', 'workCompletion', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(k => root.DGOffline.list(k))]);
     memoryPending = jobs.some(j => j.state !== 'synced') || drafts.some(values => values.length);
     return memoryPending || hasActiveDraft();
   }
-  function hasActiveDraft() { return !!api.draftDirty(syncMemo(api.activeDraft())) || !!patrolSnapshot() || !!root.DGOperations?.hasActiveDraft?.() || !!root.DGLightingWorkflows?.hasActiveDraft?.(); }
+  function hasActiveDraft() { return !!api.draftDirty(syncMemo(api.activeDraft())) || !!patrolSnapshot() || !!root.DGOperations?.hasActiveDraft?.() || !!root.DGLightingWorkflows?.hasActiveDraft?.() || !!root.DGLightingAreas?.hasActiveDraft?.(); }
   function hasUnsavedSync() { return memoryPending || hasActiveDraft(); }
   async function ready() {
     try {

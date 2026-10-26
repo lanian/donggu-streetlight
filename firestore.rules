@@ -356,6 +356,81 @@ service cloud.firestore {
       && lightingText(d.createdBy,128) && d.createdBy.size()>0 && d.updatedAt is int && d.updatedAt>=d.createdAt
       && d.updatedAt<=request.time.toMillis()+300000 && d.updatedBy==request.auth.uid
       && d.revision is int && d.revision>=1 && d.revision<=9007199254740991 && lightingId(d.operationId);}
+    // Area decisions change screening scope, so only administrators may change them.
+    // Keep both the active record and an immutable complete version in the same write.
+    function lightingAreaPoint(p){
+      // abs() rejects non-numbers; finite bounds reject NaN/Infinity; keys() requires a map.
+      return p.keys().hasOnly(['lat','lng']) && math.abs(p.lat)<=85 && math.abs(p.lng)<=180;}
+    // The area and its identical receipt snapshot each validate half of the vertices.
+    // The atomic equality prevents unvalidated tails and bounds the per-write rule work.
+    function lightingAreaVertices(v){let n=v.size();return v is list && n>=3 && n<=32
+      && lightingAreaPoint(v[0])
+      && lightingAreaPoint(v[1])
+      && lightingAreaPoint(v[2])
+      && (n<=3 || lightingAreaPoint(v[3]))
+      && (n<=4 || lightingAreaPoint(v[4]))
+      && (n<=5 || lightingAreaPoint(v[5]))
+      && (n<=6 || lightingAreaPoint(v[6]))
+      && (n<=7 || lightingAreaPoint(v[7]))
+      && (n<=8 || lightingAreaPoint(v[8]))
+      && (n<=9 || lightingAreaPoint(v[9]))
+      && (n<=10 || lightingAreaPoint(v[10]))
+      && (n<=11 || lightingAreaPoint(v[11]))
+      && (n<=12 || lightingAreaPoint(v[12]))
+      && (n<=13 || lightingAreaPoint(v[13]))
+      && (n<=14 || lightingAreaPoint(v[14]))
+      && (n<=15 || lightingAreaPoint(v[15]));}
+    function lightingAreaFinalVertices(v){let n=v.size();return v is list && n>=3 && n<=32
+      && (n<=16 || lightingAreaPoint(v[16]))
+      && (n<=17 || lightingAreaPoint(v[17]))
+      && (n<=18 || lightingAreaPoint(v[18]))
+      && (n<=19 || lightingAreaPoint(v[19]))
+      && (n<=20 || lightingAreaPoint(v[20]))
+      && (n<=21 || lightingAreaPoint(v[21]))
+      && (n<=22 || lightingAreaPoint(v[22]))
+      && (n<=23 || lightingAreaPoint(v[23]))
+      && (n<=24 || lightingAreaPoint(v[24]))
+      && (n<=25 || lightingAreaPoint(v[25]))
+      && (n<=26 || lightingAreaPoint(v[26]))
+      && (n<=27 || lightingAreaPoint(v[27]))
+      && (n<=28 || lightingAreaPoint(v[28]))
+      && (n<=29 || lightingAreaPoint(v[29]))
+      && (n<=30 || lightingAreaPoint(v[30]))
+      && (n<=31 || lightingAreaPoint(v[31]));}
+    function validLightingArea(d){return d.keys().hasOnly(['schemaVersion','label','effect','reason','note','shape','lat','lng','radius','vertices','disabled','createdAt','createdBy','updatedAt','updatedBy','revision','operationId'])
+      && lightingWorkflowMeta(d) && lightingText(d.label,100) && d.label.size()>0 && lightingText(d.note,1000)
+      && d.effect in ['exclude','include'] && d.reason in ['mountain','private','non_walkway','water','other','public_path']
+      && (d.effect!='include' || d.reason in ['public_path','other'])
+      && d.lat is number && d.lat>=-85 && d.lat<=85 && d.lng is number && d.lng>=-180 && d.lng<=180
+      && d.radius is number && d.disabled is bool
+      && ((d.shape=='circle' && d.radius>=5 && d.radius<=1000 && d.vertices is list && d.vertices.size()==0)
+        || (d.shape=='polygon' && d.radius==0 && lightingAreaVertices(d.vertices)));}
+    function newLightingAreaReceipt(id,d){let ref=/databases/$(db)/documents/lightingAreaOperations/$(d.operationId);let receipt=getAfter(ref).data;
+      return !exists(ref) && lightingReceiptMatches(receipt,d,id) && receipt.snapshot==d;}
+    match /lightingAreas/{id}{
+      allow read: if isStaff();
+      allow create: if isAdmin() && request.resource.data.revision==1 && request.resource.data.disabled==false
+        && request.resource.data.createdBy==request.auth.uid && request.resource.data.createdAt==request.resource.data.updatedAt
+        && lightingId(id) && validLightingArea(request.resource.data)
+        && newLightingAreaReceipt(id,request.resource.data);
+      allow update: if isAdmin() && request.resource.data.revision==resource.data.revision+1
+        && request.resource.data.createdBy==resource.data.createdBy && request.resource.data.createdAt==resource.data.createdAt
+        && request.resource.data.updatedAt>=resource.data.updatedAt && lightingId(id) && validLightingArea(request.resource.data)
+        && newLightingAreaReceipt(id,request.resource.data);
+      allow delete: if false;
+    }
+    function validLightingAreaOperation(id,d){let ref=/databases/$(db)/documents/lightingAreas/$(d.recordId);let a=getAfter(ref).data;
+      let old=exists(ref)?get(ref).data:{'revision':0,'operationId':''};
+      return d.keys().hasOnly(['schemaVersion','recordId','by','at','revision','requestHash','snapshot']) && d.schemaVersion==1
+        && lightingId(id) && lightingId(d.recordId) && d.by==request.auth.uid && d.at is int && d.revision is int
+        && d.requestHash is string && d.requestHash.matches('[a-f0-9]{64}') && d.snapshot is map && d.snapshot==a
+        && a.operationId==id && old.operationId!=id && lightingReceiptMatches(d,a,d.recordId) && a.revision==old.revision+1
+        && (a.shape!='polygon' || lightingAreaFinalVertices(a.vertices));}
+    match /lightingAreaOperations/{id}{
+      allow read: if isStaff();
+      allow create: if isAdmin() && validLightingAreaOperation(id,request.resource.data);
+      allow update,delete: if false;
+    }
     function workflowReceipt(d,id,entity){let ref=/databases/$(db)/documents/lightingWorkflowOperations/$(d.operationId);let r=getAfter(ref).data;
       return !exists(ref) && r.recordId==id && r.entity==entity && r.by==d.updatedBy && r.at==d.updatedAt && r.revision==d.revision;}
     function validLightingTask(d){return d.keys().hasOnly(['schemaVersion','title','lat','lng','radius','note','originKind','originId','evidenceIds','assignedTo','dueAt','reviewMinute','status','observationId','completionNote','completedAt','completedBy','createdAt','createdBy','updatedAt','updatedBy','revision','operationId'])

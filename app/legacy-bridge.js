@@ -7,6 +7,8 @@ function initializeOperations() {
     openSection: key => openAdminSection(key),
     lightingReview: () => rvFresh(), lightingCandidates: rv => rvList(rv), lightingGrid: () => lightGrid(),
     lightingModel: () => ({ model: LIGHT_MODEL, calibration: CALIB }), lightingRoads: () => ROADS,
+    returnLightingReview: () => returnLightingReview(),
+    rememberLightingCandidate: index => rememberLightingReviewCandidate(index),
     registry: () => BASE, overrides: () => OV,
     invalidateLighting: reason => invalidateLightingReview(reason),
     download: async options => {
@@ -46,7 +48,7 @@ function initializeOperations() {
   DGIntegration.attach(api);
   DGWorkflows.attach(api);
   const originalClose = closeSheet;
-  closeSheet = function (fromHistory) { DGOperations.persistActive().catch(e => toast(e.message)); DGIntegration.persistDraft().catch(e => toast(e.message)); DGIntegration.persistPatrol().catch(e => toast(e.message)); return originalClose(fromHistory); };
+  closeSheet = function (fromHistory) { DGOperations.persistActive().catch(e => toast(e.message)); globalThis.DGLightingAreas?.persistActive().catch(e => toast(e.message)); DGIntegration.persistDraft().catch(e => toast(e.message)); DGIntegration.persistPatrol().catch(e => toast(e.message)); return originalClose(fromHistory); };
   const originalLight = openLight;
   openLight = async function (id) {
     if (!DGIntegration.initialized && !(await DGIntegration.whenReady())) return toast('초안 복구와 저장소 연결을 마친 뒤 다시 열어 주세요.');
@@ -66,7 +68,7 @@ function initializeOperations() {
   openAdminSection = function (key) { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; if (key === 'outbox') DGOperations.refreshQueue().catch(e => toast(e.message)); return originalAdmin(key); };
   refreshAdminSection = function () {
     const key = S.asec, body = $('#asecBody'); if (!key || !body || !$('#sheet').classList.contains('open')) return;
-    const section = ADMIN_SECTIONS[key]; if (!section) return;
+    const section = ADMIN_SECTIONS[key]; if (!section || globalThis.rvQueryComposing && document.activeElement?.id === "rvQuery") return;
     // Snapshot form fields and selection, even when a real-time event arrives while focus is elsewhere.
     const fields = DGIntegration.captureForm(body), scroll = $('#sheet').scrollTop;
     // A live refresh can arrive while the native file chooser is open. Keep its target alive.
@@ -92,6 +94,7 @@ function initializeOperations() {
     health: { t: '공유 운영 상태', d: '접수·감사·보관 정리와 처리 대기', body: () => DGManagement.healthView() },
     lightingtasks: { t: '밝기 재확인 업무', d: '자료 부족·현장 확인 배정과 완료', write: true, body: () => DGLightingWorkflows.tasksView() },
     lightinghistory: { t: '밝기 검토 이력', d: '검토 조건·근거·비교 이력', body: () => DGLightingWorkflows.historyView() },
+    lightingareas: { t: '밝기 검토 제외 구역', d: '산·숲 등 제외 범위와 보행로 예외', body: () => DGLightingAreas.view() },
     lightingimport: { t: '외부 광원 가져오기', d: '다른 기관 자료 비교·확인', admin: true, body: () => DGLightingWorkflows.importView() },
     works: { t: '보수 작업', d: '담당 배정·조치 전후 사진·완료 검수', write: true, body: () => DGOperations.view() },
     due: { t: '미점검·방문 계획', d: '정기 점검 기한·재점검·현장 방문 순서', write: true, body: () => DGOperations.dueView() },

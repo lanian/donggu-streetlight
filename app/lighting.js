@@ -216,6 +216,7 @@
     }
     state.draft = (await root.DGOffline.list('lightingDraft')).sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value || null; await load();
     if (root.DGLightingWorkflows) await root.DGLightingWorkflows.ready();
+    if (root.DGLightingAreas) await root.DGLightingAreas.ready();
     if (unsubscribe) unsubscribe();
     if (api.state().me === 'local' || api.firebase()) {
       try { unsubscribe = api.database().collection('lightingContext').onSnapshot(() => load(), error => { state.error = error.message || '실시간 갱신 실패'; notify(); }); } catch (_) { /* The refresh button remains available. */ }
@@ -224,6 +225,7 @@
   function attach(contextApi) {
     api = contextApi; root.DGOffline.register('lighting', job => root.DGLightingCommands.execute(job, { db: api.database(), fb: api.firebase(), user: api.state().me, admin: api.can('admin') }));
     if (root.DGLightingWorkflows) root.DGLightingWorkflows.attach(contextApi);
+    if (root.DGLightingAreas) root.DGLightingAreas.attach(contextApi);
     if (attached) return; attached = true;
     document.addEventListener('click', event => { const b = event.target.closest('[data-lc]'); if (b) Promise.resolve().then(() => handle(b)).catch(error => api.toast(error.message)); });
     document.addEventListener('submit', event => { if (event.target.id !== 'lcForm') return; event.preventDefault(); save(Q('#lcSave')).catch(error => api.toast(error.message)); });

@@ -49,9 +49,26 @@ const server = http.createServer((req, res) => {
     assert.equal(firstRun.length, 1); assert.equal(firstRun[0].candidateCount, 1); assert.equal(JSON.parse(firstRun[0].candidatesJson).length, 1);
     await page.locator('[data-lw="candidate-task"]').first().click(); await page.locator('#lwTaskForm').waitFor();
     const taskId = await page.evaluate(() => DGLightingWorkflows.state.draft.recordId);
+    await page.evaluate(() => {
+      window.__taskAcknowledgement = { committed: false, resolve: null };
+      DGOffline.register('lighting-workflow', async job => {
+        const result = await DGLightingWorkflowCommands.execute(job, { db, fb: FB && FB.fs, user: S.me, admin: can('admin') });
+        if (job.entity === 'task' && !__taskAcknowledgement.committed) { __taskAcknowledgement.committed = true; await new Promise(resolve => { __taskAcknowledgement.resolve = resolve; }); }
+        return result;
+      });
+    });
     await page.locator('#lwTitle').fill('현장 검증 재확인 업무'); await page.locator('#lwMinute').fill(time); await page.locator('#lwTaskForm button[type="submit"]').click();
-    await poll(page, async id => (await db.doc('lightingTasks/' + id).get()).exists, taskId, 'task create');
+    await poll(page, async id => __taskAcknowledgement.committed && (await db.doc('lightingTasks/' + id).get()).exists, taskId, 'task committed before acknowledgement');
+    const pendingTaskOperation = await page.evaluate(() => DGLightingWorkflows.state.draft.pending);
     await page.evaluate(id => DGLightingWorkflows.openTask(null, id), taskId);
+    assert.equal(await page.evaluate(() => DGLightingWorkflows.state.draft.pending), null, 'a committed task must reopen from its receipt instead of a stale pending draft');
+    assert.equal(await page.locator('[data-lw="task-observe"]').count(), 1);
+    await page.locator('#lwNote').fill('저장 직후 다시 열어 추가한 검토 내용');
+    await page.evaluate(() => { __taskAcknowledgement.resolve(); DGOffline.register('lighting-workflow', job => DGLightingWorkflowCommands.execute(job, { db, fb: FB && FB.fs, user: S.me, admin: can('admin') })); });
+    await poll(page, async id => (await DGOffline.jobs()).find(j => j.id === id)?.state === 'synced', pendingTaskOperation, 'delayed task acknowledgement');
+    assert.equal(await page.locator('#lwNote').inputValue(), '저장 직후 다시 열어 추가한 검토 내용');
+    assert.equal(await page.evaluate(() => DGLightingWorkflows.state.draft?.recordId), taskId);
+    record('a task reopened after commit but before acknowledgement stays editable and retains later input');
     await page.locator('[data-lw="task-observe"]').click(); await page.locator('#lcForm').waitFor();
     const observationId = await page.evaluate(() => DGLighting.state.draft.recordId);
     assert.equal(await page.evaluate(() => DGLighting.state.draft.data.originId), taskId);

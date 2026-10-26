@@ -522,7 +522,7 @@ test('road area holes remain eligible for review, and administrative-dong map fi
   const candidate = { name: 'road', pts: [l], mid: l, near: [l], len: 24, E: 0, context };
   const map = lightingContext({ S: { review: { mode: 'roads', dong: 'a:충장동', cands: [candidate], inputRevision: 0, validUntil: Infinity, minute: 1260 }, lights: [l, { ...l, id: 'other', dong: '지원동' }] },
     inDong: (x, d) => x.dong === '금동' && d === 'a:충장동',
-    openSheet() {}, window: { L }, L, DongguPWA: { tileLayer: layer }, gmap: null, gmapLayer: null, gmapPts: [],
+    $: () => null, openSheet() {}, window: { L }, L, DongguPWA: { tileLayer: layer }, gmap: null, gmapLayer: null, gmapPts: [],
     meStop() {}, setTimeout() {}, onOf: () => 1, reachOf: () => 20, kindBadge: () => '', esc: String
   });
   map.openReviewMap('all'); assert.equal(lampCircles, 1); assert.equal(candidateMarkers, 1);

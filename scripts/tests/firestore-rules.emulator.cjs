@@ -43,6 +43,17 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
     batch.set(doc(client, 'lightingOperations/' + record.operationId), receipt);
     return batch.commit();
   }
+  const lightingArea = (extra = {}) => ({ schemaVersion: 1, label: '산림 내부 검토 제외', effect: 'exclude', reason: 'mountain', note: '관리자가 지정한 범위',
+    shape: 'circle', lat: 35.15, lng: 126.92, radius: 30, vertices: [], disabled: false,
+    createdAt: 1000, createdBy: 'admin', updatedAt: 1000, updatedBy: 'admin', revision: 1, operationId: 'area-create', ...extra });
+  const areaReceipt = (id, record, patch = {}) => ({ schemaVersion: 1, recordId: id, by: record.updatedBy, at: record.updatedAt,
+    revision: record.revision, requestHash: 'a'.repeat(64), snapshot: record, ...patch });
+  function areaWrite(client, id, record, receiptPatch = {}) {
+    const batch = writeBatch(client);
+    batch.set(doc(client, 'lightingAreas/' + id), record);
+    batch.set(doc(client, 'lightingAreaOperations/' + record.operationId), areaReceipt(id, record, receiptPatch));
+    return batch.commit();
+  }
   async function seed(records) {
     await env.withSecurityRulesDisabled(async context => {
       const db = context.firestore();
@@ -409,6 +420,106 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       assert.equal(latest.removed, true); assert.equal(latest.status, 'off'); assert.equal(latest.revision, 3);
       await assert.rejects(commands.execute({ ...edited, data: { ...raw, label: '다른 요청' } }, context), { code: 'conflict' });
       await assert.rejects(commands.execute({ ...edited, id: 'stale-update' }, context), { code: 'conflict' });
+    });
+
+    test('screening areas require an administrator and atomic complete snapshots but remain readable by staff', async () => {
+      const manager = admin(), record = lightingArea();
+      await assertFails(setDoc(doc(manager, 'lightingAreas/mountain'), record));
+      await assertFails(areaWrite(staff(), 'mountain', { ...record, createdBy: 'inspector-a', updatedBy: 'inspector-a' }));
+      await assertSucceeds(areaWrite(manager, 'mountain', record));
+      await assertSucceeds(getDoc(doc(staff(), 'lightingAreas/mountain')));
+      await assertSucceeds(getDoc(doc(otherStaff(), 'lightingAreaOperations/area-create')));
+      for (const client of [anonymous(), env.authenticatedContext('outsider').firestore()]) {
+        await assertFails(getDoc(doc(client, 'lightingAreas/mountain')));
+        await assertFails(getDoc(doc(client, 'lightingAreaOperations/area-create')));
+        await assertFails(areaWrite(client, 'forged', lightingArea({ operationId: 'area-forged' })));
+      }
+      await assertFails(areaWrite(staff(), 'mountain', lightingArea({ operationId: 'staff-area-edit', revision: 2, updatedAt: 2000, updatedBy: 'inspector-a', disabled: true })));
+      for (const client of [manager, staff()]) await assertFails(deleteDoc(doc(client, 'lightingAreas/mountain')));
+    });
+
+    test('area disable and reapply preserve creation, monotonic revisions and each historical full snapshot', async () => {
+      const manager = admin(), initial = lightingArea();
+      await assertFails(areaWrite(manager, 'born-disabled', lightingArea({ disabled: true, operationId: 'area-born-disabled' })));
+      await assertSucceeds(areaWrite(manager, 'mountain', initial));
+      const disabled = lightingArea({ disabled: true, revision: 2, updatedAt: 2000, operationId: 'area-disable' });
+      for (const patch of [{ revision: 3 }, { createdBy: 'someone' }, { createdAt: 900 }, { updatedBy: 'inspector-a' }]) {
+        await assertFails(areaWrite(manager, 'mountain', { ...disabled, ...patch }));
+      }
+      await assertSucceeds(areaWrite(manager, 'mountain', disabled));
+      const reapplied = { ...disabled, disabled: false, revision: 3, updatedAt: 3000, operationId: 'area-reapply', label: '수정된 산림 범위' };
+      await assertSucceeds(areaWrite(manager, 'mountain', reapplied));
+      await assertFails(areaWrite(manager, 'mountain', { ...reapplied, revision: 4, updatedAt: 2000, operationId: 'area-backdated' }));
+      await assertFails(setDoc(doc(manager, 'lightingAreas/mountain'), reapplied));
+      assert.deepEqual((await getDoc(doc(manager, 'lightingAreaOperations/area-create'))).data().snapshot, initial);
+      assert.deepEqual((await getDoc(doc(manager, 'lightingAreaOperations/area-disable'))).data().snapshot, disabled);
+      assert.equal((await getDoc(doc(staff(), 'lightingAreas/mountain'))).data().disabled, false);
+    });
+
+    test('area schema checks every polygon vertex including the final allowed one and rejects invalid scopes', async () => {
+      const manager = admin();
+      const vertices = Array.from({ length: 32 }, (_, i) => ({ lat: 35.15 + Math.sin(i * Math.PI / 16) * .001, lng: 126.92 + Math.cos(i * Math.PI / 16) * .001 }));
+      const polygon = lightingArea({ shape: 'polygon', radius: 0, vertices, operationId: 'area-polygon' });
+      await assertSucceeds(areaWrite(manager, 'polygon', polygon));
+      await assertSucceeds(areaWrite(manager, 'polygon', { ...polygon, disabled: true, revision: 2, updatedAt: 2000, operationId: 'area-polygon-disable' }));
+      await assertSucceeds(areaWrite(manager, 'public-path', lightingArea({ effect: 'include', reason: 'public_path', radius: 5, operationId: 'area-path' })));
+      const invalid = [{ label: '' }, { note: 'x'.repeat(1001) }, { lat: NaN }, { lat: 86 }, { lng: Infinity }, { lng: 181 },
+        { radius: 4 }, { radius: 1001 }, { radius: NaN }, { vertices: [vertices[0]] }, { shape: 'rectangle' },
+        { effect: 'hidden' }, { effect: 'include', reason: 'mountain' }, { reason: 'unknown' }, { disabled: 'yes' }, { extra: true },
+        { shape: 'polygon', radius: 0, vertices: vertices.slice(0, 2) }, { shape: 'polygon', radius: 0, vertices: [...vertices, vertices[0]] },
+        { shape: 'polygon', radius: 5, vertices }, { shape: 'polygon', radius: 0, vertices: [...vertices.slice(0, 31), { lat: 91, lng: 126.92 }] },
+        { shape: 'polygon', radius: 0, vertices: [...vertices.slice(0, 31), { lat: NaN, lng: 126.92 }] },
+        { shape: 'polygon', radius: 0, vertices: [...vertices.slice(0, 31), { lat: 35.15, lng: Infinity }] },
+        { shape: 'polygon', radius: 0, vertices: [...vertices.slice(0, 31), { lat: 35.15, lng: '126.92' }] },
+        { shape: 'polygon', radius: 0, vertices: [...vertices.slice(0, 31), { lat: 35.15, lng: 126.92, unexpected: true }] },
+        { shape: 'polygon', radius: 0, vertices: [null, ...vertices.slice(1)] }];
+      for (let i = 0; i < invalid.length; i++) await assertFails(areaWrite(manager, 'invalid-area-' + i, lightingArea({ ...invalid[i], operationId: 'area-invalid-' + i })));
+    });
+
+    test('area receipts cannot be detached, forged, reused or appended to an unchanged area', async () => {
+      const manager = admin(), record = lightingArea();
+      await assertFails(setDoc(doc(manager, 'lightingAreaOperations/area-create'), areaReceipt('mountain', record)));
+      for (const patch of [{ recordId: 'other' }, { by: 'inspector-a' }, { at: 999 }, { revision: 2 }, { requestHash: 'bad' },
+        { snapshot: { ...record, reason: 'other' } }, { extra: true }]) await assertFails(areaWrite(manager, 'mountain', record, patch));
+      await assertSucceeds(areaWrite(manager, 'mountain', record));
+      await assertFails(setDoc(doc(manager, 'lightingAreaOperations/append-only'), areaReceipt('mountain', { ...record, operationId: 'append-only', revision: 2 })));
+      await assertFails(areaWrite(manager, 'mountain', { ...record, revision: 2, updatedAt: 2000 }));
+      for (const client of [manager, staff()]) {
+        await assertFails(updateDoc(doc(client, 'lightingAreaOperations/area-create'), { snapshot: { ...record, disabled: true } }));
+        await assertFails(deleteDoc(doc(client, 'lightingAreaOperations/area-create')));
+      }
+      // Even a preexisting malformed area cannot mint a new receipt without an area revision change.
+      const seeded = lightingArea({ operationId: 'unrecorded-operation' });
+      await seed({ 'lightingAreas/unrecorded': seeded });
+      await assertFails(setDoc(doc(manager, 'lightingAreaOperations/unrecorded-operation'), areaReceipt('unrecorded', seeded)));
+    });
+
+    test('area reads and writes remain locked during an incomplete operational restore', async () => {
+      const record = lightingArea();
+      await seed({ 'lightingAreas/mountain': record, 'lightingAreaOperations/area-create': areaReceipt('mountain', record),
+        'meta/operationalRestore': { status: 'partial', operationId: 'bulk' } });
+      for (const client of [admin(), staff()]) {
+        await assertFails(getDoc(doc(client, 'lightingAreas/mountain')));
+        await assertFails(getDoc(doc(client, 'lightingAreaOperations/area-create')));
+      }
+      await assertFails(areaWrite(admin(), 'mountain', lightingArea({ revision: 2, updatedAt: 2000, disabled: true, operationId: 'area-during-restore' })));
+    });
+
+    test('actual area transactions deduplicate concurrent saves and retries without undoing later scope decisions', async () => {
+      const commands = require('../../app/lighting-area-commands.js'), client = admin();
+      const adapter = { doc: key => doc(client, key), runTransaction: fn => runTransaction(client, fn) };
+      const context = { db: adapter, fb: adapter, user: 'admin', admin: true }, raw = lightingArea();
+      const first = { id: 'actual-area-create', recordId: 'actual-area', actor: 'admin', at: 1000, expectedRevision: 0, data: raw };
+      const results = await Promise.all([commands.execute(first, context), commands.execute(first, context)]);
+      assert.equal(results.filter(result => result.alreadyApplied).length, 1);
+      const second = { ...first, id: 'actual-area-disable', at: 2000, expectedRevision: 1, data: { ...raw, disabled: true } };
+      await commands.execute(second, context);
+      assert.equal((await commands.execute(first, context)).alreadyApplied, true);
+      assert.equal((await commands.execute(second, context)).alreadyApplied, true);
+      const latest = (await getDoc(doc(client, 'lightingAreas/actual-area'))).data();
+      assert.equal(latest.disabled, true); assert.equal(latest.revision, 2);
+      await assert.rejects(commands.execute({ ...first, data: { ...raw, label: '다른 요청' } }, context), { code: 'conflict' });
+      await assert.rejects(commands.execute({ ...first, id: 'stale-area-create' }, context), { code: 'conflict' });
     });
 
     test('users without staff roles cannot read or write staff records or self-assign a role after setup', async () => {

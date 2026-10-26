@@ -42,6 +42,9 @@
 <script src="app/lighting-workflow-core.js"></script>
 <script src="app/lighting-workflow-commands.js"></script>
 <script src="app/lighting-workflows.js"></script>
+<script src="app/lighting-area-core.js"></script>
+<script src="app/lighting-area-commands.js"></script>
+<script src="app/lighting-areas.js"></script>
 <script src="app/lighting.js"></script>
 <script src="app/lighting-review.js"></script>
 <script src="app/operations.js"></script>
@@ -1025,11 +1028,11 @@ function vReport(){
 
 /* ---------- sheets ---------- */
 let sheetHist=false;
-function openSheet(html){cancelPhotoEditor();cancelScanPhoto();$("#sheetIn").innerHTML=`<div class="grab"></div>`+html;$("#sheet").classList.add("open");$("#sheetBg").classList.add("open");$("#sheet").scrollTop=0;document.body.style.overflow="hidden";DongguUI.open($("#sheet"),{label:$("#sheet h3")?.textContent||"상세 화면",close:()=>closeSheet()});setTimeout(()=>{const h=$("#sheet .sheet-head"),n=$("#sheet .subnav");if(h&&n)n.style.top=h.offsetHeight+"px"},30);
+function openSheet(html){if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();cancelScanPhoto();$("#sheetIn").innerHTML=`<div class="grab"></div>`+html;$("#sheet").classList.add("open");$("#sheetBg").classList.add("open");$("#sheet").scrollTop=0;document.body.style.overflow="hidden";DongguUI.open($("#sheet"),{label:$("#sheet h3")?.textContent||"상세 화면",close:()=>closeSheet()});setTimeout(()=>{const h=$("#sheet .sheet-head"),n=$("#sheet .subnav")||$("#sheet .rv-map-nav");if(h&&n)n.style.top=h.offsetHeight+"px"},30);
   if(!sheetHist){try{history.pushState({sheet:1},"");sheetHist=true}catch(e){}}}
 // the phone's back button closes the sheet instead of leaving the app
-window.addEventListener("popstate",()=>{const overlay=["#ovl","#cmpSheet"].map($).find(el=>el&&!el.hidden);if(overlay){if(photoEditor)cancelPhotoEditor();else{const x=overlay.querySelector('.x');if(x)x.click();else overlay.hidden=true}if(sheetHist||pt.hist)try{history.pushState(pt.hist?{pt:1}:{sheet:1},"")}catch(e){}return}if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}if(sheetHist){sheetHist=false;if($("#sheet").classList.contains("open"))closeSheet(true)}});
-let closeSheet=function(fromHistory){cancelPhotoEditor();if(stashDraft())setTimeout(render,0);$("#sheet").classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close($("#sheet"));document.body.style.overflow="";draft=null;if(sheetHist&&!fromHistory){sheetHist=false;try{history.back()}catch(e){}}};
+window.addEventListener("popstate",()=>{const overlay=["#ovl","#cmpSheet"].map($).find(el=>el&&!el.hidden);if(overlay){if(photoEditor)cancelPhotoEditor();else{const x=overlay.querySelector('.x');if(x)x.click();else overlay.hidden=true}if(sheetHist||pt.hist)try{history.pushState(pt.hist?{pt:1}:{sheet:1},"")}catch(e){}return}if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}if(sheetHist&&$("#sheet").classList.contains("open")&&$("#rvMapSummary")&&S.review){try{history.pushState({sheet:1},"")}catch(e){}returnLightingReview();return}if(sheetHist){sheetHist=false;if($("#sheet").classList.contains("open"))closeSheet(true)}});
+let closeSheet=function(fromHistory){if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();if(stashDraft())setTimeout(render,0);$("#sheet").classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close($("#sheet"));document.body.style.overflow="";draft=null;if(sheetHist&&!fromHistory){sheetHist=false;try{history.back()}catch(e){}}};
 let draft=null;const DRAFTS={};
 function draftDirty(d){return d&&(Object.keys(d.checks||{}).length||d.result||(d.photos&&d.photos.length)||d.memo||typeof d.tilt==="number")}
 function stashDraft(){if(!draft||!draft.lightId)return false;const m=$("#iMemo");if(m)draft.memo=m.value;const had=!!DRAFTS[draft.lightId];if(draftDirty(draft))DRAFTS[draft.lightId]=draft;else delete DRAFTS[draft.lightId];return had!==!!DRAFTS[draft.lightId]}
@@ -1173,7 +1176,10 @@ document.addEventListener("click",async e=>{
   if(t.dataset.rvmode){S.rvMode=t.dataset.rvmode;invalidateLightingReview("검토 방식이 바뀌었어요.");render();return}
   if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");invalidateLightingReview("도로망을 갱신하고 있어요.");if(t.dataset.refetch){ROADS=null;idbSet("roads",null)}roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";invalidateLightingReview("도로망이 바뀌었어요.");S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
   if(t.id==="rvMore"){S.review.show+=30;render();return}
-  if(t.dataset.rvmap){openReviewMap(t.dataset.rvmap);return}
+  if(t.hasAttribute("data-rvback")){returnLightingReview();return}
+  if(t.dataset.rvpage!==undefined){openReviewMap("all",+t.dataset.rvpage);return}
+  if(t.hasAttribute("data-rvclear")){S.rvQuery="";S.rvEvidence="all";S.rvSort="priority";if(S.review)S.review.show=20;for(const[id,value]of [["rvQuery",""],["rvEvidence","all"],["rvSort","priority"]]){const el=document.getElementById(id);if(el)el.value=value}render();return}
+  if(t.dataset.rvmap!==undefined){openReviewMap(t.dataset.rvmap);return}
   if(t.dataset.rvreg){reviewToForm(t.dataset.rvreg);return}
   if(t.id==="csv4"){exportReviewCSV();return}
   if(t.dataset.asec){openAdminSection(t.dataset.asec);return}
@@ -1317,9 +1323,11 @@ document.addEventListener("click",async e=>{
 });
 $("#sheetBg").addEventListener("click",()=>closeSheet());
 document.addEventListener("keydown",e=>{if(e.defaultPrevented)return;const tab=e.target.closest('[role="tab"]');if(tab&&["ArrowLeft","ArrowRight","Home","End"].includes(e.key)){const tabs=[...document.querySelectorAll('nav [role="tab"]')].filter(b=>!b.hidden);const i=tabs.indexOf(tab),n=e.key==="Home"?0:e.key==="End"?tabs.length-1:(i+(e.key==="ArrowRight"?1:-1)+tabs.length)%tabs.length;e.preventDefault();tabs[n].focus();tabs[n].click()}});
-document.addEventListener("input",e=>{if(e.target.id==="ibNum"){delete e.target.dataset.lightId;delete e.target.dataset.lightCode;return}if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;renderList()}});
+document.addEventListener("input",e=>{if(e.target.id==="rvQuery"){S.rvQuery=e.target.value;if(S.review)S.review.show=20;clearTimeout(window.rvQueryTimer);if(e.isComposing||window.rvQueryComposing)return;window.rvQueryTimer=setTimeout(()=>{if(document.getElementById("rvQuery"))render()},150);return}if(e.target.id==="ibNum"){delete e.target.dataset.lightId;delete e.target.dataset.lightCode;return}if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;renderList()}});
+document.addEventListener("compositionstart",e=>{if(e.target.id==="rvQuery"){window.rvQueryComposing=true;clearTimeout(window.rvQueryTimer)}});
+document.addEventListener("compositionend",e=>{if(e.target.id==="rvQuery"){window.rvQueryComposing=false;S.rvQuery=e.target.value;if(S.review)S.review.show=20;clearTimeout(window.rvQueryTimer);window.rvQueryTimer=setTimeout(()=>{if(document.getElementById("rvQuery"))render()},150)}});
 document.addEventListener("change",async e=>{
-  if(e.target.id==="rvEvidence"){S.rvEvidence=e.target.value;if(S.review)S.review.show=20;render();return}
+  if(["rvEvidence","rvSort"].includes(e.target.id)){S[e.target.id]=e.target.value;if(S.review)S.review.show=20;render();return}
   if(["rvDong","rvKind","rvTime"].includes(e.target.id)){const id=e.target.id;S[id==="rvTime"?"rvMinute":id]=id==="rvTime"?DGLighting.parseMinute(e.target.value):e.target.value;invalidateLightingReview("검토 조건이 바뀌었어요.");render();return}
   if(e.target.id==="ibOnly"){IB.only=e.target.checked;render();return}
   if(e.target.id==="qrDong"){QR.dong=e.target.value;render();return}
@@ -1541,7 +1549,7 @@ function qrSection(){
 }
 /* ---------- backup: every collection as one JSON, and the reverse — for moving between the artifact, Firebase and other backends ---------- */
 const BK={busy:false,msg:"",photos:true,overwrite:false,roles:false,file:null,preview:null};
-const BK_COLS=["lights","lightFields","inspections","reports","reportEvents","patrols","roles","photos","workOrders","workEvents","auditEvents","settings","inventory","inventoryMoves","lightingContext","lightingOperations","lightingTasks","lightingRuns","lightingWorkflowOperations"];
+const BK_COLS=["lights","lightFields","inspections","reports","reportEvents","patrols","roles","photos","workOrders","workEvents","auditEvents","settings","inventory","inventoryMoves","lightingContext","lightingOperations","lightingTasks","lightingRuns","lightingWorkflowOperations","lightingAreas","lightingAreaOperations"];
 function backupSection(){
   const p=BK.preview;
   return `<details class="help"><summary>백업과 복원</summary><p>배포 대장을 제외한 운영 기록을 전체 조회해 JSON으로 내려받아요. 먼저 추가·건너뜀·덮어쓰기 건수를 확인하세요. Firebase의 보수·재고·재확인 업무와 불변 이력은 관리자 서버에서 연결 관계를 검증하고 원작성자를 보존해 복원해요. 이 묶음은 200문서·4MB까지 한 번에 반영하며 큰 자료는 관리자 대량 이전 도구를 사용해요. 사용자 역할은 별도로 선택하며 서버 감사 기록과 처리 영수증은 직접 복원하지 않아요.</p></details>
@@ -1578,10 +1586,10 @@ async function backupPreview(){
     }
     const handled=new Set(plan.operational?.handledPaths||[]);
     for(const[c,rows]of Object.entries(input.collections)){
-      if(!BK_COLS.includes(c)||c==="roles"&&!plan.roles||c==="auditEvents"&&FB||c==="lightFields"&&FB||["lightingOperations","lightingWorkflowOperations","restoreOperations","systemHealth"].includes(c)){plan.excluded+=rows.length;if(rows.length)plan.notes.push(c+" 제외");continue}
+      if(!BK_COLS.includes(c)||c==="roles"&&!plan.roles||c==="auditEvents"&&FB||c==="lightFields"&&FB||["lightingOperations","lightingWorkflowOperations","lightingAreaOperations","restoreOperations","systemHealth"].includes(c)){plan.excluded+=rows.length;if(rows.length)plan.notes.push(c+" 제외");continue}
       const remaining=rows.filter(r=>!handled.has(c+"/"+r.id));if(!remaining.length)continue;
       const current=new Set((await listAllRecords(c,{requireServer:!!FB})).map(r=>r.id));plan.collections[c]=[];
-      for(const r of remaining){if(c==="lightingContext"&&r.removed&&!current.has(r.id)){plan.excluded++;continue}if(c==="lightingContext")DGLightingCommands.normalize(r);plan.collections[c].push(r);if(!current.has(r.id))plan.add++;else if(plan.overwrite)plan.replace++;else plan.skip++}
+      for(const r of remaining){if(c==="lightingContext"&&r.removed&&!current.has(r.id)){plan.excluded++;continue}if(c==="lightingAreas"&&r.disabled&&!current.has(r.id)){plan.excluded++;continue}if(c==="lightingAreas")DGLightingAreaCore.normalize(r);if(c==="lightingContext")DGLightingCommands.normalize(r);plan.collections[c].push(r);if(!current.has(r.id))plan.add++;else if(plan.overwrite)plan.replace++;else plan.skip++}
     }
     if(!FB&&typeof db.commitMany!=="function"&&!plan.overwrite)plan.notes.push("이 공유 저장소는 원자적 신규 생성 기능이 없어 덮어쓰기 방지 복원을 실행할 수 없어요. Firebase 또는 기기 저장 모드로 이관하세요.");
     if(BK.file!==selected.file||BK.overwrite!==selected.overwrite||BK.roles!==selected.roles)throw new Error("파일 또는 복원 선택이 바뀌었어요. 선택한 내용으로 다시 검토해 주세요.");
@@ -1603,7 +1611,8 @@ async function backupImport(){
   const collections=Object.entries(plan.collections).sort(([a],[b])=>(a==="roles")-(b==="roles"));
   for(const[c,rows]of collections)for(const row of (c==="roles"?[...rows].sort((a,b)=>(a.id===S.me)-(b.id===S.me)):rows)){const{id,...original}=row;let data=original;
     try{let skipped=false;
-      if(c==="lightingContext"){const result=await DGLighting.restoreRecord(row,plan.overwrite);skipped=result.skipped}
+      if(c==="lightingAreas"){const result=await DGLightingAreas.restoreRecord(row,plan.overwrite);skipped=result.skipped}
+      else if(c==="lightingContext"){const result=await DGLighting.restoreRecord(row,plan.overwrite);skipped=result.skipped}
       else if(FB){await FB.fs.runTransaction(async tx=>{const ref=FB.fs.doc(c+"/"+id),snap=await tx.get(ref);if(snap.exists&&!plan.overwrite){skipped=true;return}
         let value=data;if(c==="lights"&&plan.overwrite)value={...data,restoredAt:Math.max(plan.at,(snap.exists&&snap.data().restoredAt||0)+1),restoredBy:S.me};tx.set(ref,value);
       })}
@@ -1617,6 +1626,7 @@ async function backupImport(){
   BK.preview=null;
   try{
   if(plan.collections.lightingContext||plan.operational?.payload.collections.lightingContext)await DGLighting.load();
+  if(plan.collections.lightingAreas)await DGLightingAreas.load();
   if(plan.operational){await DGOperations.load(true).catch(()=>{});await DGLightingWorkflows.loadTasks().catch(()=>{});await DGLightingWorkflows.loadHistory().catch(()=>{})}
   }catch(e){BK.msg+=" 화면 자료를 새로고침해 주세요."}finally{BK.busy=false}
   if(failures.length){BK.msg+=" 실패 목록을 내려받아 확인하고 다시 시도하세요.";try{await dl.save({filename:"동구가로등_복원실패.json",data:new Blob([JSON.stringify({at:Date.now(),failures},null,2)],{type:"application/json"})})}catch(e){}}
@@ -3414,7 +3424,7 @@ async function readLabelPhoto(file){
   }finally{job.finish()}
 }
 document.addEventListener("change",e=>{if(e.target.id==="scanPhoto"||e.target.id==="scanPhotoLib"){const f=e.target.files&&e.target.files[0];if(f)readLabelPhoto(f)}});
-const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;repConfirmClose();posCheckStop();cancelScanPhoto();scan.active=false;stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap){meStop();gmap.remove();gmap=null;gmapMe=null;gmapPts=[]}_close(fromHistory)};
+const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;repConfirmClose();posCheckStop();cancelScanPhoto();scan.active=false;stopCam(false);stopTilt();arStop();if(pt.on&&!$("#ptSumm")){ptReset()}if(gmap)cleanupLightingReviewMap();_close(fromHistory)};
 
 initializeOperations();
 render();
