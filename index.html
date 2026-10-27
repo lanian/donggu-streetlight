@@ -743,7 +743,7 @@ const PWA={prompt:null,canInstall:false,iosHint:false,waiting:null,standalone:ma
   // shortcuts from the home-screen icon
   const go=new URLSearchParams(location.search).get("go");if(go)window.addEventListener("load",()=>setTimeout(()=>{if(go==="scan")openScanner("inspect");else if(go==="patrol"&&can("inspect"))openPatrol()},900));
 })();
-function hasUnsavedFieldData(){return !!(draftDirty(draft)||Object.values(DRAFTS).some(draftDirty)||pt.on||pt.marks.length||pt.spots.length||pt.track.length||photoEditor||scan.busy||window.DG_HAS_UNSAVED_WORK_SYNC?.()||["#rNum","#rDesc","#ibNum","#ibDesc"].some(s=>$(s)?.value?.trim()))}
+function hasUnsavedFieldData(){const fdOpen=Object.keys(FD.state).some(k=>navTop()&&navTop().key===k&&fdDirty(k)&&!(DGOffline.ready&&DGOffline.durable&&FD.state[k].persisted));return !!(fdOpen||draftDirty(draft)||Object.values(DRAFTS).some(draftDirty)||pt.on||pt.marks.length||pt.spots.length||pt.track.length||photoEditor||scan.busy||window.DG_HAS_UNSAVED_WORK_SYNC?.()||["#rNum","#rDesc","#ibNum","#ibDesc"].some(s=>$(s)?.value?.trim()))}
 async function hasPendingFieldWork(){if(hasUnsavedFieldData()||DongguUI.hasModal())return true;const external=await window.DG_HAS_UNSAVED_WORK?.();return !!external||hasUnsavedFieldData()||DongguUI.hasModal()}
 window.addEventListener("beforeunload",e=>{if(hasUnsavedFieldData()){e.preventDefault();e.returnValue=""}});
 /* theme: auto → dark → light; night crews want dark whatever the phone says */
@@ -983,8 +983,9 @@ const ADMIN_SECTIONS={
 function adminKeys(){return Object.keys(ADMIN_SECTIONS).filter(k=>{const x=ADMIN_SECTIONS[k];if(x.admin&&!can("admin"))return false;if(x.write&&!S.canWrite)return false;return true})}
 function openAdminSection(key){
   const x=ADMIN_SECTIONS[key];if(!x)return;S.asec=key;
-  navRoute("asec:"+key,()=>openAdminSection(key));
+  navRoute("asec:"+key,()=>openAdminSection(key),{guard:fdKind("asec:"+key)?()=>fdGuard("asec:"+key):null});
   openSheet(`<div class="sheet-head"><div><h3>${esc(x.t)}</h3><div class="muted">${esc(x.d)}</div></div><button class="x" aria-label="뒤로" data-close>×</button></div><div id="asecBody">${x.body()}</div>`);
+  if(fdKind("asec:"+key))fdArm("asec:"+key);
 }
 function refreshAdminSection(){
   const key=S.asec;if(!key||!$("#sheet").classList.contains("open"))return;const x=ADMIN_SECTIONS[key];const body=$("#asecBody");if(!x||!body)return;
@@ -1027,6 +1028,44 @@ function vReport(){
   <div class="list">${mine.length?mine.map(r=>reportCard(r,false)).join(""):`<div class="empty">아직 접수한 신고가 없어요.</div>`}</div>`;
 }
 
+/* ---------- form drafts: 현장 등록·신고 접수·등 정보 수정 keep what was typed ----------
+   Covered screens restore from memory (navCapture). Leaving the form itself keeps a draft on the device when storage is
+   durable (DGOffline), keyed by account namespace and by this browser tab, and restores it on the next open and after a
+   reload. On a shared device (not durable) nothing is written and leaving unsaved input asks first. */
+const FD={timer:null,state:{}};
+const DG_TAB=(()=>{try{let t=sessionStorage.getItem("dg-tab");if(!t){t=Math.random().toString(36).slice(2,10);sessionStorage.setItem("dg-tab",t)}return t}catch(e){return "tab"}})();
+const FD_FORMS={"asec:reg":{sel:"#asecBody",extra:()=>({photo:window.__nPhoto||null,acc:window.__nAcc||null}),apply:x=>{window.__nPhoto=x.photo||null;window.__nAcc=x.acc||null;const p=$("#nPrev");if(p&&x.photo){p.src=x.photo;p.hidden=false}},label:"등록 내용"},
+  "asec:inbox":{sel:"#asecBody",label:"신고 접수 내용"},
+  "ledit":{sel:"#sheetIn",label:"정보 수정 내용"}};
+function fdKind(key){return FD_FORMS[key]?key:FD_FORMS[navFamily(key)]?navFamily(key):null}
+function fdId(key){return key.replace(/[^\w:.-]/g,"_")+"@"+DG_TAB}
+function fdSnapshot(key){const spec=FD_FORMS[fdKind(key)];const body=$(spec.sel);if(!body)return null;const form=DGIntegration.captureForm(body).map(f=>({key:f.key,value:f.value,checked:f.checked,pressed:f.pressed,data:f.data}));return{form,extra:spec.extra?spec.extra():null,at:Date.now()}}
+function fdFingerprint(snap){return snap?JSON.stringify(snap.form.map(f=>[f.key,f.value,f.checked,f.pressed]))+(snap.extra&&snap.extra.photo?"+photo":""):""}
+function fdArm(key){ // called right after the form rendered: baseline + restore a kept draft
+  const kind=fdKind(key);if(!kind)return;const st=FD.state[key]={key,kind,baseline:fdFingerprint(fdSnapshot(key)),persisted:false,error:""};
+  setTimeout(()=>{if(FD.state[key]===st&&fdDirty(key))fdPersist(key)},600); // fields filled by code (scan result, GPS) count as input too
+  if(!DGOffline.ready||!DGOffline.durable)return;
+  DGOffline.get("formDraft",fdId(key)).then(saved=>{if(!saved||FD.state[key]!==st)return;const spec=FD_FORMS[kind],body=$(spec.sel);if(!body||fdFingerprint(fdSnapshot(key))!==st.baseline)return; // the user already typed: keep theirs
+    DGIntegration.restoreForm(body,saved.form.map(f=>({...f,focused:false})));if(spec.apply&&saved.extra)spec.apply(saved.extra);st.persisted=true;
+    const note=document.createElement("div");note.className="notice slim";note.innerHTML=`<b>작성 중이던 ${esc(spec.label)}을 불러왔어요</b> <span class="muted">${fmtDT(saved.at)}</span><button class="btn ghost sm" data-fdclear="${esc(key)}" style="margin-left:auto">입력 비우기</button>`;
+    body.prepend(note)}).catch(()=>{})
+}
+function fdDirty(key){const st=FD.state[key];if(!st)return false;return fdFingerprint(fdSnapshot(key))!==st.baseline}
+function fdSchedule(key){clearTimeout(FD.timer);FD.timer=setTimeout(()=>fdPersist(key),400)}
+async function fdPersist(key){
+  const st=FD.state[key];if(!st||!DGOffline.ready||!DGOffline.durable)return;
+  const snap=fdSnapshot(key);if(!snap)return;const fp=fdFingerprint(snap);
+  try{if(fp===st.baseline){await DGOffline.remove("formDraft",fdId(key));st.persisted=false}else{await DGOffline.put("formDraft",fdId(key),snap);st.persisted=true}st.error=""}
+  catch(e){st.persisted=false;st.error=e&&e.message||"저장 실패"}
+}
+async function fdClear(key){const st=FD.state[key];try{if(DGOffline.ready)await DGOffline.remove("formDraft",fdId(key))}catch(e){}if(st){st.persisted=false;st.error=""}}
+function fdGuard(key){ // may this form be left? kept on the device → yes; otherwise the person decides
+  const st=FD.state[key];if(!st||!fdDirty(key))return true;
+  if(DGOffline.ready&&DGOffline.durable&&st.persisted&&!st.error)return true;
+  const why=DGOffline.ready&&DGOffline.durable?`입력을 이 기기에 보관하지 못했어요${st.error?` (${st.error})`:""}.`:"이 기기에서는 입력을 보관하지 않아요.";
+  return confirm(`${why}\n\n[확인] 입력을 버리고 이동 · [취소] 이 화면에 머무르기`);
+}
+for(const type of ["input","change"])document.addEventListener(type,e=>{if(typeof navTop!=="function")return;const top=navTop();if(!top||!fdKind(top.key))return;const spec=FD_FORMS[fdKind(top.key)];if(e.target.closest(spec.sel))fdSchedule(top.key)});
 /* ---------- sheets ---------- */
 /* ---------- navigation: a stack of sheet screens with one History entry per level ----------
    Every screen that opens a sheet registers how to reopen itself (navRoute) right before openSheet. Back pops one
@@ -1036,8 +1075,35 @@ const NAV={stack:[],pending:null,restoring:null,replaceNext:false,seq:0,gen:0,sy
 let sheetHist=false; // kept for older call sites: true while at least one level is open
 // A reload or direct entry starts with no screens: the current entry may still carry a stale depth from before.
 try{if(history.state&&(typeof history.state.nav==="number"||history.state.sheet||history.state.pt))history.replaceState({nav:0},"")}catch(e){}
-function navRoute(key,reopen,opts){NAV.pending={key,reopen,back:opts&&opts.back||null,replace:!!(opts&&opts.replace),push:!!(opts&&opts.push)}}
+function navRoute(key,reopen,opts){NAV.pending={key,reopen,back:opts&&opts.back||null,replace:!!(opts&&opts.replace),push:!!(opts&&opts.push),guard:opts&&opts.guard||null,capture:opts&&opts.capture||null}}
 const navFamily=k=>String(k||"").split(":")[0];
+/* View state of a level that is about to be covered: scroll, form fields and previews, the element the user activated,
+   the map view. Restored after the level is re-rendered on the way back. */
+function navSelectorOf(el){
+  if(!el)return null;if(el.id)return "#"+CSS.escape(el.id);
+  const keys=Object.keys(el.dataset||{}).filter(k=>!/^(ctx|lib|slot|kind|to)$/.test(k)).slice(0,2);
+  return keys.length?keys.map(k=>"[data-"+k.replace(/[A-Z]/g,m=>"-"+m.toLowerCase())+'="'+CSS.escape(el.dataset[k])+'"]').join(""):null;
+}
+function navCapture(entry){
+  const sheet=$("#sheet"),body=$("#sheetIn");if(!entry||!body)return;
+  entry.scroll=sheet.scrollTop;
+  try{entry.form=DGIntegration.captureForm(body)}catch(e){entry.form=null}
+  entry.previews=[...body.querySelectorAll("img[id]")].map(el=>({id:el.id,src:el.getAttribute("src"),hidden:el.hidden}));
+  entry.map=typeof gmap!=="undefined"&&gmap&&gmap.getCenter?{center:gmap.getCenter(),zoom:gmap.getZoom()}:null;
+  if(entry.capture)try{entry.state=entry.capture()}catch(e){}
+}
+function navRestoreState(entry){
+  const sheet=$("#sheet"),body=$("#sheetIn");if(!entry||!body)return;
+  if(entry.form)try{DGIntegration.restoreForm(body,entry.form.map(f=>({...f,focused:false})))}catch(e){}
+  for(const p of entry.previews||[]){const el=document.getElementById(p.id);if(el&&body.contains(el)&&p.src){el.src=p.src;el.hidden=p.hidden}}
+  sheet.scrollTop=entry.scroll||0;
+  const sel=entry.focusSel;
+  requestAnimationFrame(()=>{if(navTop()!==entry)return;sheet.scrollTop=entry.scroll||0;
+    const el=sel?body.querySelector(sel):null;if(!el)return;el.focus({preventScroll:true});
+    const r=el.getBoundingClientRect(),h=sheet.getBoundingClientRect();if(r.bottom<h.top||r.top>h.bottom)el.scrollIntoView({block:"center"})});
+}
+// remember which control the user activated on the current level: Back puts focus (and the view) back on it
+document.addEventListener("click",e=>{const top=navTop();if(!top||!$("#sheet").classList.contains("open"))return;const b=e.target.closest("#sheetIn button,#sheetIn a,#sheetIn .row");if(!b)return;const sel=navSelectorOf(b);if(sel)top.focusSel=sel},true);
 function navDepth(){return NAV.stack.length}
 function navGen(){return NAV.gen}
 function navAlive(g){return g===NAV.gen}
@@ -1051,26 +1117,29 @@ function sheetLeave(){
   if(typeof gmap!=="undefined"&&gmap)cleanupLightingReviewMap();
 }
 function openSheet(html){
-  sheetLeave();
   const p=NAV.pending;NAV.pending=null;const top=navTop();const sheet=$("#sheet");
   const wasOpen=sheet.classList.contains("open");
+  // the covered level's view (scroll, fields, map view) is captured before its camera/map are released
+  if(top&&wasOpen&&!(NAV.restoring&&NAV.restoring.gen===NAV.gen)&&!NAV.replaceNext)navCapture(top);
+  sheetLeave();
   // closeSheet() was just called and its history.back has not landed yet: this screen takes the leaving level's place
   if(NAV.leaving&&NAV.leaving===NAV.stack.length&&!NAV.restoring){NAV.leaving=0;NAV.replaceNext=true;NAV.absorb=(NAV.absorb||0)+1}
   const rs=NAV.restoring&&NAV.restoring.gen===NAV.gen?NAV.restoring.e:null;NAV.restoring=null;
   if(rs){ // re-rendering an existing level after back: no History change
-    if(p&&p.key!==rs.key){NAV.gen++;rs.key=p.key;rs.reopen=p.reopen;rs.back=p.back} // a different screen took the level: the pending restore is cancelled
-    else if(p){rs.reopen=p.reopen||rs.reopen;rs.back=p.back||rs.back}
+    if(p&&p.key!==rs.key){NAV.gen++;rs.key=p.key;rs.reopen=p.reopen;rs.back=p.back;rs.guard=p.guard;rs.capture=p.capture;rs.form=null;rs.previews=null;rs.focusSel=null;rs.scroll=0;rs.map=null} // a different screen took the level: the pending restore is cancelled
+    else if(p){rs.reopen=p.reopen||rs.reopen;rs.back=p.back||rs.back;rs.guard=p.guard||rs.guard;rs.capture=p.capture||rs.capture}
+    NAV.mapView=rs.map||null;
   }else if(top&&(NAV.replaceNext||(p&&(p.replace||p.key===top.key||(!p.push&&navFamily(p.key)===navFamily(top.key)))))){ // same level, new content (same screen, or a sibling of the same kind: candidate next/previous, another item of the same list)
-    if(p){top.key=p.key;top.reopen=p.reopen;top.back=p.back}else if(NAV.replaceNext){top.key="screen:"+(++NAV.seq);top.reopen=null;top.back=null}
-    top.scroll=0;
+    if(p){top.key=p.key;top.reopen=p.reopen;top.back=p.back;top.guard=p.guard;top.capture=p.capture}else if(NAV.replaceNext){top.key="screen:"+(++NAV.seq);top.reopen=null;top.back=null;top.guard=null;top.capture=null}
+    top.scroll=0;top.form=null;top.previews=null;top.focusSel=null;top.map=null;top.state=null;
   }else{ // a new level on top of the current one
-    if(top&&wasOpen)top.scroll=sheet.scrollTop;
-    NAV.stack.push({key:p?p.key:"screen:"+(++NAV.seq),reopen:p?p.reopen:null,back:p?p.back:null,scroll:0});
+    NAV.stack.push({key:p?p.key:"screen:"+(++NAV.seq),reopen:p?p.reopen:null,back:p?p.back:null,guard:p?p.guard:null,capture:p?p.capture:null,scroll:0});
     try{history.pushState(navState(),"")}catch(e){}
   }
+  if(!rs)NAV.mapView=null;
   NAV.replaceNext=false;sheetHist=true;if(!rs)NAV.gen++; // a restore re-renders a level the user already returned to; leaving it bumped the generation
   $("#sheetIn").innerHTML=`<div class="grab"></div>`+html;sheet.classList.add("open");$("#sheetBg").classList.add("open");
-  sheet.scrollTop=rs?rs.scroll||0:0;
+  if(rs)navRestoreState(rs);else sheet.scrollTop=0;
   document.body.style.overflow="hidden";
   const x=sheet.querySelector(".sheet-head .x[data-close]");if(x)x.setAttribute("aria-label",NAV.stack.length>1?"뒤로":"닫기");
   DongguUI.open(sheet,{label:$("#sheet h3")?.textContent||"상세 화면",close:()=>closeSheet()});
@@ -1089,6 +1158,7 @@ function navSyncTo(target,fromLeave){
     target=Math.max(0,target|0);
     if(target>NAV.stack.length){try{history.go(NAV.stack.length-target)}catch(e){}return} // forward to a level we cannot rebuild: realign
     if(target===NAV.stack.length&&!NAV.forceRender)return;NAV.forceRender=false;
+    if(target<NAV.stack.length&&!fromLeave&&!navMayLeave()){try{history.pushState(navState(),"")}catch(e){}return} // stay: restore the depth Back took away
     let popped=null;
     while(NAV.stack.length>target){popped=NAV.stack.pop();closeSheet({pop:true})}
     if(!fromLeave)NAV.gen++; // phone/browser Back: anything still loading for the popped screens must not render
@@ -1118,6 +1188,7 @@ window.addEventListener("popstate",e=>{
    openSheet replaces it (older call sites that close-then-open); "all" → close every level; {pop:true} → internal,
    cleanup only while navSyncTo pops. */
 let closeSheet=function(mode){
+  if((mode===undefined||mode==="all")&&!navMayLeave())return false; // the screen keeps its unsaved input
   if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();if(stashDraft())setTimeout(render,0);draft=null;
   if(mode&&typeof mode==="object"&&mode.pop)return;
   NAV.gen++;
@@ -1127,6 +1198,8 @@ let closeSheet=function(mode){
   if(mode==="all"){const n=NAV.stack.length;if(n){try{history.go(-n)}catch(e){sheetHide()}}else sheetHide();return}
   if(NAV.stack.length){NAV.leaving=NAV.stack.length;try{history.back()}catch(e){NAV.leaving=0;sheetHide()}}else sheetHide();
 };
+// Ask the top level whether it may be left (guard returns true to allow). Used by ×/Escape and by Back.
+function navMayLeave(){const top=navTop();if(!top||!top.guard)return true;try{return top.guard()!==false}catch(e){return true}}
 let draft=null;const DRAFTS={};
 function draftDirty(d){return d&&(Object.keys(d.checks||{}).length||d.result||(d.photos&&d.photos.length)||d.memo||typeof d.tilt==="number")}
 function stashDraft(){if(!draft||!draft.lightId)return false;const m=$("#iMemo");if(m)draft.memo=m.value;const had=!!DRAFTS[draft.lightId];if(draftDirty(draft))DRAFTS[draft.lightId]=draft;else delete DRAFTS[draft.lightId];return had!==!!DRAFTS[draft.lightId]}
@@ -1325,6 +1398,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.pedit){const ph=draft&&draft.photos&&draft.photos[+t.dataset.pedit];if(ph)editPhotoMeta(ph);return}
   if(t.dataset.pview){openPhotoViewer(t.dataset.pview);return}
   if(t.dataset.repview){openRepPhoto(t.dataset.repview,t.dataset.slot);return}
+  if(t.dataset.fdclear){const key=t.dataset.fdclear;fdClear(key).then(()=>{window.__nPhoto=null;window.__nAcc=null;if(navFamily(key)==="asec")openAdminSection(key.slice(5));else if(navFamily(key)==="ledit")openLightEdit(key.slice(6))});return}
   if(t.id==="posAgain"){if(PK.id)posCheckStart(PK.id);return}
   if(t.id==="posFix"){if(!need("inspect"))return;posFix();return}
   if(t.id==="posMapBtn"){if(PK.map){$("#posMap").hidden=true;PK.map.remove();PK.map=null;t.textContent="지도 보기"}else{posMapShow();t.textContent="지도 닫기"}return}
@@ -1484,7 +1558,7 @@ async function addLight(){
   if(window.__nPhoto)rec.photo=window.__nPhoto;
   if(isFinite(lat)&&isFinite(lng)){rec.lat=lat;rec.lng=lng;if(window.__nAcc)rec.acc=window.__nAcc}
   if(await write(()=>db.doc("lights/"+id).set(rec),`${code}을(를) 미등록으로 저장했어요.`)){
-    window.__nPhoto=null;window.__nAcc=null;
+    window.__nPhoto=null;window.__nAcc=null;if(typeof fdClear==="function")fdClear("asec:reg");
     for(const key of ["nNum","nRoad","nPole","nAddr","nLat","nLng","nNote"]){const el=$("#"+key);if(el)el.value=""}
     for(const key of ["nPhoto","nPhotoLib"]){const el=$("#"+key);if(el)el.value=""}
     const preview=$("#nPrev");if(preview){preview.removeAttribute("src");preview.hidden=true}
@@ -1619,7 +1693,7 @@ async function addInboxReport(btn){
   const rec={issue,location:loc.slice(0,200),dong:l?l.dong:"",code,lightId:l?l.id:null,desc:desc.slice(0,1000),via:$("#ibVia").value,receipt:$("#ibRc").value.trim().slice(0,20),contact:$("#ibContact").value.trim().slice(0,40),status:"접수",createdAt:Date.now(),reporterId:S.me||null};
   btn.disabled=true;btn.textContent="접수 중…";
   const ok=await write(()=>db.collection("reports").add(rec),`신고를 접수했어요${l?` (${l.code}에 연결)`:""}.`);
-  if(ok){for(const id of ["ibNum","ibLoc","ibDesc","ibRc","ibContact"]){const el=$("#"+id);if(el){el.value="";delete el.dataset.lightId;delete el.dataset.lightCode}}render()}else{btn.disabled=false;btn.textContent="신고 접수"}
+  if(ok){if(typeof fdClear==="function")fdClear("asec:inbox");for(const id of ["ibNum","ibLoc","ibDesc","ibRc","ibContact"]){const el=$("#"+id);if(el){el.value="";delete el.dataset.lightId;delete el.dataset.lightCode}}render()}else{btn.disabled=false;btn.textContent="신고 접수"}
 }
 async function exportReportsCSV(){
   const q=csvCell;
@@ -2223,7 +2297,7 @@ let leMap=null,leMarker=null;
 function leMoveMarker(){const la=+$("#leLat").value,ln=+$("#leLng").value;if(!leMap||!leMarker||!la||!ln)return;leMarker.setLatLng([la,ln]);leMap.panTo([la,ln])}
 function openLightEdit(id){
   const l=byId(id);if(!l)return;
-  if(typeof navRoute==="function")navRoute("ledit:"+id,()=>openLightEdit(id));
+  if(typeof navRoute==="function")navRoute("ledit:"+id,()=>openLightEdit(id),{guard:()=>fdGuard("ledit:"+id)});
   const sel=(id,opts,cur)=>`<select class="f-in" id="${id}">${[...opts,...(cur&&!opts.includes(cur)?[cur]:[]),""].map(o=>`<option value="${esc(o)}" ${o===(cur||"")?"selected":""}>${esc(o||"(없음)")}</option>`).join("")}</select>`;
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">등 정보 수정 <span class="muted">${esc(l.code)}</span></h3><div class="muted">대장 원본은 그대로 두고 바뀐 값만 기록해요. 누가 언제 무엇을 바꿨는지 이력이 남아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="grid2"><div><label class="f" for="leLamp">광원</label>${sel("leLamp",LAMP_OPTS,l.lampType)}</div><div><label class="f" for="lePole">등주</label>${sel("lePole",POLE_OPTS,l.pole)}</div></div>
@@ -2238,7 +2312,7 @@ function openLightEdit(id){
     <label class="f" for="leNote">비고</label><textarea class="f-in" id="leNote" placeholder="예: 2025.9 LED 교체, 전주 이설로 위치 변경">${esc(l.note||"")}</textarea>
     <div class="sheet-foot"><button class="btn sodium block" id="leSave" data-id="${esc(l.id)}">변경 내용 저장</button></div>
     ${l.edits&&l.edits.length?`<div class="split" style="margin-top:8px"><button class="btn ghost sm" id="leUndo" data-id="${esc(l.id)}">마지막 변경 되돌리기</button></div><h2>정보 변경 이력</h2><div class="panel">${editHistory(l)}</div>`:""}`);
-  ensureRepPhotos(l).then(()=>refreshRepBox(id));
+  ensureRepPhotos(l).then(()=>refreshRepBox(id));if(typeof fdArm==="function")fdArm("ledit:"+id);
   if(leMap){try{leMap.remove()}catch(e){}leMap=null;leMarker=null}
   if(!window.L){$("#leMapBox").innerHTML=`<div class="empty">지도 라이브러리를 불러오지 못했어요. 좌표를 직접 입력하세요.</div>`;return}
   const ll=typeof l.lat==="number"?[l.lat,l.lng]:(S.pos?[S.pos.lat,S.pos.lng]:[35.146,126.923]);
@@ -2266,7 +2340,7 @@ async function saveLightEdit(id,btn){
   patch.edits=[...(l.edits||[]).slice(-29),entry];patch.updatedAt=entry.at;
   btn.disabled=true;btn.textContent="저장 중…";
   const ok=await write(()=>patchLight(id,patch),`${l.code} 정보를 고쳤어요 (${changes.map(c=>EDIT_FIELDS[c.f]).join(", ")}).`);
-  if(ok)openLight(id);else{btn.disabled=false;btn.textContent="변경 내용 저장"}
+  if(ok){if(typeof fdClear==="function")fdClear("ledit:"+id);openLight(id)}else{btn.disabled=false;btn.textContent="변경 내용 저장"}
 }
 async function undoLightEdit(id){
   const l=byId(id);if(!l||!l.edits||!l.edits.length)return;
@@ -2496,7 +2570,9 @@ function openMap(scope,one){
   let errs=0;tiles.on("tileerror",()=>{if(++errs===4)$("#mapNote").textContent="지도 배경을 불러올 수 없어요. 마커 위치만 표시돼요."});
   gmapLayer=L.layerGroup().addTo(gmap);gmapPts=pts;drawMapMarkers();drawGu(gmap);
   meStop();setTimeout(()=>{if(gmap)meStart(false)},300);
-  if(scope==="one"&&one)gmap.setView([one.lat,one.lng],18);
+  const back=NAV.mapView;NAV.mapView=null;
+  if(back&&back.center)gmap.setView(back.center,back.zoom); // coming back from a screen opened on this map: same view as before
+  else if(scope==="one"&&one)gmap.setView([one.lat,one.lng],18);
   else if(pts.length)gmap.fitBounds(L.latLngBounds(pts.map(l=>[l.lat,l.lng])).pad(.15),{maxZoom:17});
   else gmap.setView([35.146,126.923],13);
   setTimeout(()=>gmap&&gmap.invalidateSize(),250);

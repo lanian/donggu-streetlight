@@ -323,7 +323,9 @@ function openReviewMap(idx, pageIndex) {
     else if (c.a) L.polyline([[c.a.lat, c.a.lng], [c.b.lat, c.b.lng]], { color: rvColor(c), weight: 3, dashArray: '6 5' }).addTo(gmapLayer);
     L.circleMarker([c.mid.lat, c.mid.lng], { radius: 8, color: rvColor(c), fillOpacity: .9 }).bindPopup('<b>#' + (index + 1) + ' ' + esc(rvTitle(c)) + '</b><p>' + esc(rvLabel(c)) + (c.len ? ' · ' + c.len + 'm' : '') + '</p><p>' + esc(rvAdvice(c)) + '</p><button class="btn sm" data-rvmap="' + index + '">이 후보 자세히 확인</button>').addTo(gmapLayer);
   });
-  if (center && !cs[0].pts) gmap.setView([center.lat, center.lng], 18);
+  const backView = typeof NAV !== 'undefined' ? NAV.mapView : null; if (typeof NAV !== 'undefined') NAV.mapView = null;
+  if (backView && backView.center) gmap.setView(backView.center, backView.zoom); // back from a screen opened on this map
+  else if (center && !cs[0].pts) gmap.setView([center.lat, center.lng], 18);
   else gmap.fitBounds(L.latLngBounds(cs.flatMap(c => c.pts || [c.mid]).map(p => [p.lat, p.lng])).pad(.15), { maxZoom: multi ? 17 : 18 });
   setTimeout(() => { if (gmap === ownerMap) ownerMap.invalidateSize(); }, 250);
 }
