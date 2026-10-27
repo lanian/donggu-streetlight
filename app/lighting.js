@@ -85,8 +85,10 @@
     readForm(); const hint = Q('#lcTimeWarning'); if (hint) hint.textContent = observationTimeWarning(draft.data);
   }
   async function openEditor(kind, point, id, resume = false, prefill = null) {
+    const gen = api.navGen ? api.navGen() : null;
     if (!state.loaded) await load();
     await persistDraft();
+    if (gen !== null && !api.navAlive(gen)) return; // the user left this screen while records were loading
     if (resume) { if (id) state.draft = await root.DGOffline.get('lightingDraft', id); else if (!state.draft) state.draft = (await root.DGOffline.list('lightingDraft')).sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value; if (!state.draft) return api.toast('이어 쓸 기록이 없어요.'); }
     else {
       const record = id && state.records.find(r => r.id === id);
@@ -126,7 +128,7 @@
       (source ? '<details><summary>중복 광원 확인</summary>' + field('lcLinked', '같은 시설의 관리 대장 ID (선택)', d.linkedLightId, 'maxlength="180" placeholder="같은 시설이면 연결하고 중복 합산 제외"') + '<label class="f"><input id="lcDistinct" type="checkbox" ' + (d.distinct ? 'checked' : '') + '> 5m 이내 대장 시설과 별개의 광원임을 확인했어요</label><p class="muted">대장 시설과 가까우면 확인 전까지 중복 합산하지 않아요. 동일 이름·관리기관의 가까운 추가 기록도 중복을 확인해요.</p></details>' : '') +
       '<label class="f" for="lcNote">근거·주변 환경 메모</label><textarea class="f-in" id="lcNote" maxlength="1000" placeholder="예: 상가 폐점 후 꺼짐, 가로수 가림, 맞은편 기관 보행등">' + E(d.note) + '</textarea></fieldset>' +
       (draft.pending ? '<p class="notice">전송 중인 내용은 저장 대기함에서 확인해 주세요. 완료 전에는 모델에 반영되지 않아요.</p><button type="button" class="btn ghost" data-asec="outbox">저장 대기함</button>' : draft.readonly ? '<p class="muted">작성자 또는 관리자가 수정할 수 있어요.</p>' : '<div class="split"><button type="submit" class="btn" id="lcSave">기록 저장</button><button type="button" class="btn ghost" data-lc="discard">초안 버리기</button>' + (draft.expectedRevision ? '<button type="button" class="btn ghost" data-lc="remove">' + (d.removed ? '다시 사용' : '검토에서 제외') + '</button>' : '') + '</div>') +
-      '<p id="lcSaveState" class="muted" role="status">' + (root.DGOffline.durable ? '작성 내용은 이 기기에 자동 보관돼요.' : '현재 창에서만 초안을 보관해요.') + '</p></form>');
+      '<p id="lcSaveState" class="muted" role="status">' + (root.DGOffline.durable ? '작성 내용은 이 기기에 자동 보관돼요.' : '현재 창에서만 초안을 보관해요.') + '</p></form>', { key: 'lcedit', reopen: () => renderEditor() });
   }
   function CATEGORIES_SOURCE() { const result = { ...CATEGORIES }; delete result.field; return result; }
   function readForm() {
@@ -191,7 +193,7 @@
     if (action === 'resume') return openEditor(null, null, null, true);
     if (action === 'reload') return load();
     if (action === 'more') { state.show += 40; return notify(); }
-    if (action === 'discard') { if (!confirm('작성 중인 보완 기록을 버릴까요?')) return; await clearDraft(); api.closeSheet(); notify(); return; }
+    if (action === 'discard') { if (!confirm('작성 중인 보완 기록을 버릴까요?')) return; api.closeSheet(); await clearDraft(); notify(); return; } // leave first so an editor opened right after takes this level's place
     if (action === 'remove') { if (confirm(state.draft.data.removed ? '이 기록을 다시 검토에 사용할까요?' : '이 기록을 검토에서 제외할까요? 기록은 남아 있어요.')) return save(button, !state.draft.data.removed); return; }
     if (action === 'pick-map') return pickMap();
     if (action === 'gps') {

@@ -983,6 +983,7 @@ const ADMIN_SECTIONS={
 function adminKeys(){return Object.keys(ADMIN_SECTIONS).filter(k=>{const x=ADMIN_SECTIONS[k];if(x.admin&&!can("admin"))return false;if(x.write&&!S.canWrite)return false;return true})}
 function openAdminSection(key){
   const x=ADMIN_SECTIONS[key];if(!x)return;S.asec=key;
+  navRoute("asec:"+key,()=>openAdminSection(key));
   openSheet(`<div class="sheet-head"><div><h3>${esc(x.t)}</h3><div class="muted">${esc(x.d)}</div></div><button class="x" aria-label="뒤로" data-close>×</button></div><div id="asecBody">${x.body()}</div>`);
 }
 function refreshAdminSection(){
@@ -1027,12 +1028,105 @@ function vReport(){
 }
 
 /* ---------- sheets ---------- */
-let sheetHist=false;
-function openSheet(html){if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();cancelScanPhoto();$("#sheetIn").innerHTML=`<div class="grab"></div>`+html;$("#sheet").classList.add("open");$("#sheetBg").classList.add("open");$("#sheet").scrollTop=0;document.body.style.overflow="hidden";DongguUI.open($("#sheet"),{label:$("#sheet h3")?.textContent||"상세 화면",close:()=>closeSheet()});setTimeout(()=>{const h=$("#sheet .sheet-head"),n=$("#sheet .subnav")||$("#sheet .rv-map-nav");if(h&&n)n.style.top=h.offsetHeight+"px"},30);
-  if(!sheetHist){try{history.pushState({sheet:1},"");sheetHist=true}catch(e){}}}
-// the phone's back button closes the sheet instead of leaving the app
-window.addEventListener("popstate",()=>{const overlay=["#ovl","#cmpSheet"].map($).find(el=>el&&!el.hidden);if(overlay){if(photoEditor)cancelPhotoEditor();else{const x=overlay.querySelector('.x');if(x)x.click();else overlay.hidden=true}if(sheetHist||pt.hist)try{history.pushState(pt.hist?{pt:1}:{sheet:1},"")}catch(e){}return}if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}if(sheetHist&&$("#sheet").classList.contains("open")&&$("#rvMapSummary")&&S.review){try{history.pushState({sheet:1},"")}catch(e){}returnLightingReview();return}if(sheetHist){sheetHist=false;if($("#sheet").classList.contains("open"))closeSheet(true)}});
-let closeSheet=function(fromHistory){if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();if(stashDraft())setTimeout(render,0);$("#sheet").classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close($("#sheet"));document.body.style.overflow="";draft=null;if(sheetHist&&!fromHistory){sheetHist=false;try{history.back()}catch(e){}}};
+/* ---------- navigation: a stack of sheet screens with one History entry per level ----------
+   Every screen that opens a sheet registers how to reopen itself (navRoute) right before openSheet. Back pops one
+   level and re-renders the parent from its route; nothing but {nav:depth} goes into History. Overlays (#ovl,
+   #cmpSheet, photo editor) sit on top of the current level and are closed by one back press on their own. */
+const NAV={stack:[],pending:null,restoring:null,replaceNext:false,seq:0,gen:0,syncing:false,leaving:0,absorb:0,forceRender:false};
+let sheetHist=false; // kept for older call sites: true while at least one level is open
+// A reload or direct entry starts with no screens: the current entry may still carry a stale depth from before.
+try{if(history.state&&(typeof history.state.nav==="number"||history.state.sheet||history.state.pt))history.replaceState({nav:0},"")}catch(e){}
+function navRoute(key,reopen,opts){NAV.pending={key,reopen,back:opts&&opts.back||null,replace:!!(opts&&opts.replace),push:!!(opts&&opts.push)}}
+const navFamily=k=>String(k||"").split(":")[0];
+function navDepth(){return NAV.stack.length}
+function navGen(){return NAV.gen}
+function navAlive(g){return g===NAV.gen}
+function navTop(){return NAV.stack[NAV.stack.length-1]||null}
+function navState(){return{nav:NAV.stack.length}}
+// The screen being covered or replaced releases its camera, sensors, maps and panels first (its DOM is about to go).
+function sheetLeave(){
+  if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();cancelScanPhoto();
+  if(typeof repConfirmClose==="function")repConfirmClose();if(typeof posCheckStop==="function")posCheckStop();
+  if(typeof scan==="object"&&scan)scan.active=false;if(typeof stopCam==="function")stopCam(false);if(typeof stopTilt==="function")stopTilt();if(typeof arStop==="function")arStop();
+  if(typeof gmap!=="undefined"&&gmap)cleanupLightingReviewMap();
+}
+function openSheet(html){
+  sheetLeave();
+  const p=NAV.pending;NAV.pending=null;const top=navTop();const sheet=$("#sheet");
+  const wasOpen=sheet.classList.contains("open");
+  // closeSheet() was just called and its history.back has not landed yet: this screen takes the leaving level's place
+  if(NAV.leaving&&NAV.leaving===NAV.stack.length&&!NAV.restoring){NAV.leaving=0;NAV.replaceNext=true;NAV.absorb=(NAV.absorb||0)+1}
+  const rs=NAV.restoring&&NAV.restoring.gen===NAV.gen?NAV.restoring.e:null;NAV.restoring=null;
+  if(rs){ // re-rendering an existing level after back: no History change
+    if(p&&p.key!==rs.key){NAV.gen++;rs.key=p.key;rs.reopen=p.reopen;rs.back=p.back} // a different screen took the level: the pending restore is cancelled
+    else if(p){rs.reopen=p.reopen||rs.reopen;rs.back=p.back||rs.back}
+  }else if(top&&(NAV.replaceNext||(p&&(p.replace||p.key===top.key||(!p.push&&navFamily(p.key)===navFamily(top.key)))))){ // same level, new content (same screen, or a sibling of the same kind: candidate next/previous, another item of the same list)
+    if(p){top.key=p.key;top.reopen=p.reopen;top.back=p.back}else if(NAV.replaceNext){top.key="screen:"+(++NAV.seq);top.reopen=null;top.back=null}
+    top.scroll=0;
+  }else{ // a new level on top of the current one
+    if(top&&wasOpen)top.scroll=sheet.scrollTop;
+    NAV.stack.push({key:p?p.key:"screen:"+(++NAV.seq),reopen:p?p.reopen:null,back:p?p.back:null,scroll:0});
+    try{history.pushState(navState(),"")}catch(e){}
+  }
+  NAV.replaceNext=false;sheetHist=true;if(!rs)NAV.gen++; // a restore re-renders a level the user already returned to; leaving it bumped the generation
+  $("#sheetIn").innerHTML=`<div class="grab"></div>`+html;sheet.classList.add("open");$("#sheetBg").classList.add("open");
+  sheet.scrollTop=rs?rs.scroll||0:0;
+  document.body.style.overflow="hidden";
+  const x=sheet.querySelector(".sheet-head .x[data-close]");if(x)x.setAttribute("aria-label",NAV.stack.length>1?"뒤로":"닫기");
+  DongguUI.open(sheet,{label:$("#sheet h3")?.textContent||"상세 화면",close:()=>closeSheet()});
+  setTimeout(()=>{const h=$("#sheet .sheet-head"),n=$("#sheet .subnav")||$("#sheet .rv-map-nav");if(h&&n)n.style.top=h.offsetHeight+"px"},30);
+}
+function sheetHide(){
+  const sheet=$("#sheet");sheet.classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close(sheet);document.body.style.overflow="";
+  NAV.stack.length=0;NAV.restoring=null;NAV.replaceNext=false;NAV.leaving=0;sheetHist=false;NAV.gen++;
+}
+// A route that found nothing to show (deleted item, lost permission) calls this instead of opening: drop the level.
+function navAbandon(){if(!NAV.restoring)return false;NAV.restoring=null;NAV.stack.pop();if(!NAV.stack.length){sheetHide();try{history.go(-1)}catch(e){}return true}NAV.forceRender=true;try{history.go(-1)}catch(e){sheetHide()}return true}
+// Bring the stack to `target` levels (the depth stored in the History entry we arrived at) and re-render the new top.
+function navSyncTo(target,fromLeave){
+  if(NAV.syncing)return;NAV.syncing=true;
+  try{
+    target=Math.max(0,target|0);
+    if(target>NAV.stack.length){try{history.go(NAV.stack.length-target)}catch(e){}return} // forward to a level we cannot rebuild: realign
+    if(target===NAV.stack.length&&!NAV.forceRender)return;NAV.forceRender=false;
+    let popped=null;
+    while(NAV.stack.length>target){popped=NAV.stack.pop();closeSheet({pop:true})}
+    if(!fromLeave)NAV.gen++; // phone/browser Back: anything still loading for the popped screens must not render
+    if(!NAV.stack.length){sheetHide();return}
+    const top=navTop();
+    const render=popped&&popped.back?popped.back:top.reopen;
+    if(!render){NAV.stack.pop();NAV.syncing=false;try{history.go(-1)}catch(e){sheetHide()}return}
+    const gen=NAV.gen;NAV.restoring={e:top,gen}; // consumed by the openSheet the route performs (possibly after an await)
+    let r;try{r=render()}catch(e){r=null}
+    // a route that did not open anything (deleted item, lost permission, error) drops its level and goes back once more
+    const settled=()=>{if(NAV.restoring&&NAV.restoring.gen===gen&&NAV.restoring.e===top)navAbandon()};
+    if(r&&typeof r.then==="function")r.then(settled,settled);else settled();
+  }finally{NAV.syncing=false}
+}
+// Back: top overlay first, then the patrol screen, then one sheet level.
+window.addEventListener("popstate",e=>{
+  if(NAV.absorb){NAV.absorb--;try{history.pushState(navState(),"")}catch(err){}return} // a back whose level was replaced before it landed
+  const fromLeave=NAV.leaving>0;NAV.leaving=0;
+  const overlay=["#ovl","#cmpSheet"].map($).find(el=>el&&!el.hidden);
+  if(overlay){if(photoEditor)cancelPhotoEditor();else{const x=overlay.querySelector('.x');if(x)x.click();else overlay.hidden=true}NAV.gen++;
+    if(sheetHist||pt.hist)try{history.pushState(pt.hist?{pt:1}:navState(),"")}catch(err){}return}
+  if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}
+  const st=e&&e.state||{};
+  navSyncTo(typeof st.nav==="number"?st.nav:0,fromLeave);
+});
+/* closeSheet(mode): undefined → back one level (History drives the pop); true → leave this level now, the very next
+   openSheet replaces it (older call sites that close-then-open); "all" → close every level; {pop:true} → internal,
+   cleanup only while navSyncTo pops. */
+let closeSheet=function(mode){
+  if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();if(stashDraft())setTimeout(render,0);draft=null;
+  if(mode&&typeof mode==="object"&&mode.pop)return;
+  NAV.gen++;
+  if(mode===true){ // leave now; the level stays on the stack and the next openSheet takes its place
+    if(!NAV.stack.length){sheetHide();return}
+    NAV.replaceNext=true;const sheet=$("#sheet");sheet.classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close(sheet);document.body.style.overflow="";return}
+  if(mode==="all"){const n=NAV.stack.length;if(n){try{history.go(-n)}catch(e){sheetHide()}}else sheetHide();return}
+  if(NAV.stack.length){NAV.leaving=NAV.stack.length;try{history.back()}catch(e){NAV.leaving=0;sheetHide()}}else sheetHide();
+};
 let draft=null;const DRAFTS={};
 function draftDirty(d){return d&&(Object.keys(d.checks||{}).length||d.result||(d.photos&&d.photos.length)||d.memo||typeof d.tilt==="number")}
 function stashDraft(){if(!draft||!draft.lightId)return false;const m=$("#iMemo");if(m)draft.memo=m.value;const had=!!DRAFTS[draft.lightId];if(draftDirty(draft))DRAFTS[draft.lightId]=draft;else delete DRAFTS[draft.lightId];return had!==!!DRAFTS[draft.lightId]}
@@ -1043,6 +1137,7 @@ function restoreDraft(id){const d=DRAFTS[id];if(!d)return false;draft=d;
 async function openLight(id){
   const l=byId(id);if(!l)return;
   draft={lightId:id,checks:{},photo:null,photos:[],result:null};
+  navRoute("light:"+id,()=>openLight(id));
   openSheet(`<div class="sheet-head st-${esc(l.status)}"><div><h3 style="font-size:19px">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:""}${esc(l.code)} <span class="chip">${esc(l.status)}</span></h3>
     <div class="muted">${esc(adongOf(l)||"")}${adongOf(l)!==l.dong?` · ${esc(l.dong)}`:""}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address)}</div><div class="muted">${esc(l.lampType||"")}${l.installedYear?` · ${esc(l.installedYear)}년 설치`:""}${l.poleNo?` · 전주 ${esc(l.poleNo)}`:""}${l.lampId?` · 관리ID ${esc(l.lampId)}`:""} · 마지막 점검 ${fmtD(l.lastInspected)}${PT_LAST[l.id]?` · 순찰 기록 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" · GPS 근접 통과(점등 미확인)"}`:""}</div></div>
     ${can("admin")?`<button class="btn ghost sm hact" data-ledit="${esc(l.id)}">정보 수정</button>`:""}<button class="x" aria-label="닫기" data-close>×</button></div>
@@ -1176,7 +1271,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.rvmode){S.rvMode=t.dataset.rvmode;invalidateLightingReview("검토 방식이 바뀌었어요.");render();return}
   if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");invalidateLightingReview("도로망을 갱신하고 있어요.");if(t.dataset.refetch){ROADS=null;idbSet("roads",null)}roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";invalidateLightingReview("도로망이 바뀌었어요.");S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
   if(t.id==="rvMore"){S.review.show+=30;render();return}
-  if(t.hasAttribute("data-rvback")){returnLightingReview();return}
+  if(t.hasAttribute("data-rvback")){if(navDepth()>1&&navTop().key==="rvmap")closeSheet();else returnLightingReview();return}
   if(t.dataset.rvpage!==undefined){openReviewMap("all",+t.dataset.rvpage);return}
   if(t.hasAttribute("data-rvclear")){S.rvQuery="";S.rvEvidence="all";S.rvSort="priority";if(S.review)S.review.show=20;for(const[id,value]of [["rvQuery",""],["rvEvidence","all"],["rvSort","priority"]]){const el=document.getElementById(id);if(el)el.value=value}render();return}
   if(t.dataset.rvmap!==undefined){openReviewMap(t.dataset.rvmap);return}
@@ -1285,7 +1380,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.ptspot){ptSpot();return}
   if(t.dataset.ptspotdel){pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
   if(t.dataset.ptspotobserve!==undefined){const i=+t.dataset.ptspotobserve,sp=pt.spots[i];if(!sp||!need("inspect"))return;if(!pt.sessionId)pt.sessionId=DGData.newId("patrol-session");DGLighting.openObservation({lat:sp.lat,lng:sp.lng,observedAt:sp.at,level:"dark",label:"순찰 중 어두운 지점",note:"순찰 기록 · GPS ±"+sp.acc+"m"+(sp.near?" · "+sp.near+" 근처":""),originKind:"patrol",originId:pt.sessionId,originPointId:String(i),positionAccuracy:sp.acc}).catch(error=>toast(error.message));return}
-  if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;closeSheet(true);S.tab="admin";render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
+  if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;S.tab="admin";render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
   if(t.id==="ptListen"){ptListen(!pt.listen);return}
   if(t.dataset.ptview){ptView(t.dataset.ptview);return}
   if(t.id==="ptMapFollow"){pt.mapFollow=true;t.setAttribute("aria-pressed","true");if(pt.map&&pt.pos)pt.map.setView([pt.pos.lat,pt.pos.lng],Math.max(pt.map.getZoom(),17));return}
@@ -1295,7 +1390,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="csv6"){exportPatrolCSV();return}
   if(t.dataset.mapscope){openMap(t.dataset.mapscope);return}
   if(t.id==="mapLoc"){mapLocate();return}
-  if(t.dataset.mapOpen){closeSheet(true);openLight(t.dataset.mapOpen);return}
+  if(t.dataset.mapOpen){openLight(t.dataset.mapOpen);return}
   if(t.dataset.arOpen){arStop();openLight(t.dataset.arOpen);return}
   if(t.dataset.arTarget!==undefined){arSetTarget(t.dataset.arTarget);return}
   if(t.dataset.range){ar.range=+t.dataset.range;document.querySelectorAll("#arRange [data-range]").forEach(b=>b.setAttribute("aria-pressed",b===t));arList();arDraw();return}
@@ -1794,9 +1889,12 @@ async function exportReportCSV(){
 }
 /* per-light dossier: registry, status, inspections, photos — for a complaint file or a repair order */
 async function openLightDossier(id){
-  const l=byId(id);if(!l)return;
-  let rows,photos,workflow;try{[rows,photos,workflow]=await Promise.all([listAllRecords("inspections",{where:[["lightId","==",id]],orderBy:[["date","desc"]]}),listAllRecords("photos",{where:[["lightId","==",id]],orderBy:[["at","desc"]]}),DGWorkflows.facilitySection(id,{omitExistingDetails:true})]);photos.forEach(r=>GAL[r.id]=r)}catch(e){toast("전체 이력을 불러오지 못했어요: "+(e.message||"연결을 확인하세요."));return}
+  const l=byId(id);if(!l)return;const g=navGen();
+  let rows,photos,workflow;try{[rows,photos,workflow]=await Promise.all([listAllRecords("inspections",{where:[["lightId","==",id]],orderBy:[["date","desc"]]}),listAllRecords("photos",{where:[["lightId","==",id]],orderBy:[["at","desc"]]}),DGWorkflows.facilitySection(id,{omitExistingDetails:true})]);photos.forEach(r=>GAL[r.id]=r)}catch(e){if(navAlive(g))toast("전체 이력을 불러오지 못했어요: "+(e.message||"연결을 확인하세요."));return}
+  if(!navAlive(g))return; // the user moved on while records were loading
   await ensureRepPhotos(l);
+  if(!navAlive(g))return;
+  navRoute("dossier:"+id,()=>openLightDossier(id));
   openSheet(`<div class="sheet-head noprint"><div><h3>등 이력서</h3><div class="muted">${esc(l.code)} · 인쇄하거나 PDF로 저장</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="split noprint" style="margin:0 0 10px"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button></div>
     <div class="rep"><div class="cover" style="display:flex;gap:14px;align-items:flex-start"><div style="flex:1;min-width:0"><h2>${kindBadge(l.kind)}${esc(l.code)} <span class="chip st-${esc(l.status)}">${esc(l.status)}</span></h2><div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address||"")} · 출력 ${fmtDT(Date.now())}</div></div>${(()=>{const rs=repSlots(l);const imgs=REP_SLOTS.map(k=>{const e=rs[k];if(!e)return null;const src=e.legacy||(e.id&&GAL[e.id]&&GAL[e.id].data)||(l.photoId===e.id?l.photoT:null);return src?`<img class="repimg" src="${esc(safeImageSrc(src))}" alt="대표 사진 ${k}" title="${k}">`:null}).filter(Boolean);return imgs.length?`<div class="repimgs">${imgs.join("")}</div>`:""})()}</div>
@@ -1966,8 +2064,8 @@ async function clearRepPhoto(id,slot){
 
 async function ensureRepPhotos(l){const ids=Object.values(repSlots(l)).map(x=>x.id).filter(Boolean);await Promise.all(ids.filter(i=>!GAL[i]).map(i=>getPhoto(i)))}
 async function openRepPhoto(id,slot){
-  const l=byId(id);if(!l)return;const e=repSlots(l)[slot];if(!e)return;
-  if(e.id&&await getPhoto(e.id)){openPhotoViewer(e.id);return}
+  const l=byId(id);if(!l)return;const e=repSlots(l)[slot];if(!e)return;const g=navGen();
+  if(e.id){const r=await getPhoto(e.id);if(!navAlive(g))return;if(r){openPhotoViewer(e.id);return}}
   const src=DGSecurity.safeImageSrc(e.legacy||repThumb(l));if(!src)return;const ov=$("#ovl");ov.hidden=false;
   ov.innerHTML=`<div class="bar"><b>${esc(l.code)}</b><span style="color:#A9B6CC">대표 사진 · ${esc(slot)}</span><button class="x" id="pvX" aria-label="닫기">×</button></div><div class="stage"><img class="full" src="${esc(safeImageSrc(src))}" alt="대표 사진"></div>`;
   ov.querySelector("#pvX").onclick=()=>{ov.hidden=true;ov.innerHTML=""};
@@ -2077,9 +2175,9 @@ function repBox(l){
 }
 function refreshRepBox(id){const b=$("#repBox"),l=byId(id);if(!b||!l||b.dataset.id!==id)return;b.outerHTML=repBox(l)}
 async function openPhotoViewer(id){
-  const r=await getPhoto(id);if(!r){toast("사진을 불러오지 못했어요.");return}
+  const g=navGen();const r=await getPhoto(id);if(!navAlive(g))return;if(!r){toast("사진을 불러오지 못했어요.");return}
   const sib=Object.values(GAL).filter(x=>x.lightId===r.lightId).sort((a,b)=>b.at-a.at);let i=Math.max(0,sib.findIndex(x=>x.id===id));
-  const ov=$("#ovl");ov.hidden=false;
+  const ov=$("#ovl");ov.hidden=false;NAV.gen++;
   const show=()=>{const x=sib[i]||r;ov.innerHTML=`<div class="bar"><b>${esc(x.code||"")}</b><span style="color:#A9B6CC">${esc(x.label||"")} · ${fmtDT(x.at)} · ${esc(S.names[x.by]||"점검자")}</span><button class="x" id="pvX" aria-label="닫기">×</button></div>
     <div class="stage"><img class="full" src="${esc(safeImageSrc(x.data))}" alt="${esc(x.label||"")}"></div>
     ${x.note?`<div class="cap">${esc(x.note)}</div>`:""}
@@ -2099,6 +2197,7 @@ function openPhotoCompare(lightId){
 }
 async function openPhotoSheet(lightId){
   const l=byId(lightId);const rows=Object.values(GAL).filter(x=>x.lightId===lightId).sort((a,b)=>a.at-b.at);if(!l||!rows.length)return;
+  navRoute("psheet:"+lightId,()=>openPhotoSheet(lightId));
   openSheet(`<div class="sheet-head noprint"><div><h3 style="font-size:19px">사진 대지</h3><div class="muted">인쇄하거나 PDF로 저장해 점검 보고서에 붙이세요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="split noprint" style="margin:0 0 10px"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button></div>
     <h2 style="margin-top:0">${kindBadge(l.kind)}${esc(l.code)} 현장 사진 대지</h2><div class="muted">${esc(l.dong)} · ${esc(l.address||"")} · 사진 ${rows.length}장 · 출력 ${fmtDT(Date.now())}</div>
@@ -2124,6 +2223,7 @@ let leMap=null,leMarker=null;
 function leMoveMarker(){const la=+$("#leLat").value,ln=+$("#leLng").value;if(!leMap||!leMarker||!la||!ln)return;leMarker.setLatLng([la,ln]);leMap.panTo([la,ln])}
 function openLightEdit(id){
   const l=byId(id);if(!l)return;
+  if(typeof navRoute==="function")navRoute("ledit:"+id,()=>openLightEdit(id));
   const sel=(id,opts,cur)=>`<select class="f-in" id="${id}">${[...opts,...(cur&&!opts.includes(cur)?[cur]:[]),""].map(o=>`<option value="${esc(o)}" ${o===(cur||"")?"selected":""}>${esc(o||"(없음)")}</option>`).join("")}</select>`;
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">등 정보 수정 <span class="muted">${esc(l.code)}</span></h3><div class="muted">대장 원본은 그대로 두고 바뀐 값만 기록해요. 누가 언제 무엇을 바꿨는지 이력이 남아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="grid2"><div><label class="f" for="leLamp">광원</label>${sel("leLamp",LAMP_OPTS,l.lampType)}</div><div><label class="f" for="lePole">등주</label>${sel("lePole",POLE_OPTS,l.pole)}</div></div>
@@ -2383,6 +2483,7 @@ function openMap(scope,one){
   const pts=(scope==="one"?S.lights.filter(l=>l===one||(typeof l.lat==="number"&&distM(one,l)<=150)):scope==="filtered"?filtered():scope==="open"?S.lights.filter(l=>l.status!=="정상"):scope==="custom"?one.pts:S.lights).filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
   const title=scope==="one"?`지도 · ${one.code}`:scope==="filtered"?"지도 · 현재 목록":scope==="open"?"지도 · 조치 필요":scope==="custom"?one.title:"지도 · 전체";
   gmapKind="전체";
+  navRoute("map:"+scope+(scope==="one"&&one?":"+one.id:scope==="custom"&&one?":"+(one.title||""):""),()=>openMap(scope,one));
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted" id="mapCount">${pts.length.toLocaleString()}개</span></h3><div class="muted">마커 속은 상태, 테두리는 종류예요. 고장·수리중은 위에 그려져요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     ${kindChips("전체","mapKind",kindCounts(pts))}
     <div class="gmap" id="gmap"><button class="btn sm locbtn" id="mapLoc" aria-pressed="false">내 위치</button></div>
@@ -2650,6 +2751,10 @@ function ptFinish(){
   pt.hist=false;ptHide();
   ptStopCam();if(pt.map){try{pt.map.remove()}catch(e){}pt.map=null}pt.mapOn=false;
   if(pt.watch!=null)navigator.geolocation.clearWatch(pt.watch);pt.watch=null;pt.on=false;pt.end=Date.now();ptListen(false);ptWakeRelease();
+  ptSummaryOpen();
+}
+function ptSummaryOpen(){
+  navRoute("ptsum",()=>ptSummaryOpen());
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">순찰 결과</h3><div class="muted">표시한 등을 확인하고 저장하세요. 직접 표시한 등만 점검 기록·상태에 반영돼요. GPS 통과는 근접 이동 기록이며 점등 확인을 뜻하지 않아요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div><div id="ptSumm"></div>`);
   ptSummary();
 }
@@ -2740,6 +2845,7 @@ function patrolSection(){
 function openPatrolMap(id){
   const p=id==="live"?{track:pt.track,marks:pt.marks,spots:pt.spots,passed:[...pt.passed.keys()],start:pt.start}:S.patrols.find(x=>x.id===id);if(!p||!p.track||p.track.length<2)return;
   const marks=p.marks||[];const passed=new Set(p.passed||[]);
+  navRoute("ptmap:"+id,()=>openPatrolMap(id));
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">순찰 경로 <span class="muted">${fmtDT(p.start)}</span></h3><div class="muted">파란 선이 이동 경로, 작은 초록 점은 GPS 통과(점등 미확인), 빨강·주황·큰 초록은 표시한 등, 보라는 어두운 지점이에요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="gmap" id="gmap"></div>`);
   if(!window.L)return;
@@ -2755,6 +2861,7 @@ function openPatrolMap(id){
 }
 function openAR(){
   ar.target=null;ar.arrived=false;
+  navRoute("ar",()=>openAR());
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">주변 등 찾기</h3><div class="muted">휴대폰을 세워 주위를 비추면 그 방향의 가로등·보안등이 거리와 함께 떠요. 마커나 목록을 누르면 그 등까지 안내해요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="arwrap" id="arwrap"><video id="arCam" playsinline muted></video><div class="fallback" id="arFb">카메라를 쓸 수 없어요.<br>아래 목록과 방향 안내로 찾으세요.</div>
       <div class="arhud"><span id="arGps">위치 찾는 중…</span><span id="arHead">방향 –</span></div>
@@ -3207,6 +3314,7 @@ function scanLocate(){if(!navigator.geolocation)return;const session=scan,box=$(
 let sampleNs=null;
 async function openScanner(ctx){
   cancelScanPhoto();stopCam(false);scan={ctx,stream:null,raf:0,found:null,busy:false,sampleImg:false,liveKey:null,active:true};ocrState={src:null,box:null};
+  navRoute("scan:"+ctx,()=>openScanner(ctx));
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">표찰 스캔</h3><div class="muted">QR이나 표찰을 비추면 그 등이 화면 위에 바로 떠요. 표찰은 틀이 잡히면 자동으로 번호를 읽어요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div id="camPanel"><div class="panel" style="padding:0;overflow:hidden;position:relative;background:#000"><video id="cam" playsinline muted style="width:100%;max-height:52vh;display:block;object-fit:cover"></video>
       <canvas id="plateOv"></canvas><div class="reticle"></div><div id="camOv" class="ov"></div>
