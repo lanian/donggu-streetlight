@@ -819,6 +819,7 @@ async function compress(file){return (await compressBlob(file)).url}
 
 /* ---------- render ---------- */
 function render(){
+  if(typeof navRevalidate==="function")navRevalidate();
   const allowed={inspect:can("inspect"),admin:can("inspect"),report:FEATURES.reports};
   if(!allowed[S.tab])S.tab=allowed.inspect?"inspect":allowed.report?"report":"none";
   document.querySelectorAll("nav.tabs button").forEach(b=>{b.hidden=!allowed[b.dataset.tab];b.setAttribute("aria-selected",b.dataset.tab===S.tab)});
@@ -982,7 +983,7 @@ const ADMIN_SECTIONS={
 };
 function adminKeys(){return Object.keys(ADMIN_SECTIONS).filter(k=>{const x=ADMIN_SECTIONS[k];if(x.admin&&!can("admin"))return false;if(x.write&&!S.canWrite)return false;return true})}
 function openAdminSection(key){
-  const x=ADMIN_SECTIONS[key];if(!x)return;S.asec=key;
+  const x=ADMIN_SECTIONS[key];if(!x)return;if((x.admin&&!can("admin"))||(x.write&&!S.canWrite)){toast("이 화면을 볼 권한이 없어요.");return}S.asec=key;
   navRoute("asec:"+key,()=>openAdminSection(key),{guard:fdKind("asec:"+key)?()=>fdGuard("asec:"+key):null});
   openSheet(`<div class="sheet-head"><div><h3>${esc(x.t)}</h3><div class="muted">${esc(x.d)}</div></div><button class="x" aria-label="뒤로" data-close>×</button></div><div id="asecBody">${x.body()}</div>`);
   if(fdKind("asec:"+key))fdArm("asec:"+key);
@@ -1071,10 +1072,18 @@ for(const type of ["input","change"])document.addEventListener(type,e=>{if(typeo
    Every screen that opens a sheet registers how to reopen itself (navRoute) right before openSheet. Back pops one
    level and re-renders the parent from its route; nothing but {nav:depth} goes into History. Overlays (#ovl,
    #cmpSheet, photo editor) sit on top of the current level and are closed by one back press on their own. */
-const NAV={stack:[],pending:null,restoring:null,replaceNext:false,seq:0,gen:0,syncing:false,leaving:0,absorb:0,forceRender:false};
+const NAV={stack:[],forward:[],pending:null,restoring:null,replaceNext:false,seq:0,gen:0,syncing:false,leaving:0,absorb:0,forceRender:false};
 let sheetHist=false; // kept for older call sites: true while at least one level is open
 // A reload or direct entry starts with no screens: the current entry may still carry a stale depth from before.
-try{if(history.state&&(typeof history.state.nav==="number"||history.state.sheet||history.state.pt))history.replaceState({nav:0},"")}catch(e){}
+try{history.replaceState({nav:0,tab:(history.state&&history.state.tab)||null},"")}catch(e){}
+// Top-level tab changes are navigation too: Back returns to the previous tab, and from the first entry leaves the app.
+function navTabSwitch(tab){if(S.tab===tab)return;S.tab=tab;if(!NAV.stack.length){NAV.forward.length=0;try{history.pushState({nav:0,tab},"")}catch(e){}}}
+// A permission change while a screen is open: screens the person may no longer see are closed.
+function navRevalidate(){
+  const top=navTop();if(!top||typeof can!=="function")return;const m=/^asec:(.+)$/.exec(top.key);
+  const denied=m?(()=>{const x=ADMIN_SECTIONS[m[1]];return !!x&&((x.admin&&!can("admin"))||(x.write&&!S.canWrite))})():(!can("inspect")&&!/^(screen|print)/.test(top.key));
+  if(denied){toast("권한이 바뀌어 이 화면을 닫았어요.");NAV.forward.length=0;closeSheet("all")}
+}
 function navRoute(key,reopen,opts){NAV.pending={key,reopen,back:opts&&opts.back||null,replace:!!(opts&&opts.replace),push:!!(opts&&opts.push),guard:opts&&opts.guard||null,capture:opts&&opts.capture||null}}
 const navFamily=k=>String(k||"").split(":")[0];
 /* View state of a level that is about to be covered: scroll, form fields and previews, the element the user activated,
@@ -1108,7 +1117,7 @@ function navDepth(){return NAV.stack.length}
 function navGen(){return NAV.gen}
 function navAlive(g){return g===NAV.gen}
 function navTop(){return NAV.stack[NAV.stack.length-1]||null}
-function navState(){return{nav:NAV.stack.length}}
+function navState(){return{nav:NAV.stack.length,tab:S.tab}}
 // The screen being covered or replaced releases its camera, sensors, maps and panels first (its DOM is about to go).
 function sheetLeave(){
   if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();cancelScanPhoto();
@@ -1136,7 +1145,7 @@ function openSheet(html){
     NAV.stack.push({key:p?p.key:"screen:"+(++NAV.seq),reopen:p?p.reopen:null,back:p?p.back:null,guard:p?p.guard:null,capture:p?p.capture:null,scroll:0});
     try{history.pushState(navState(),"")}catch(e){}
   }
-  if(!rs)NAV.mapView=null;
+  if(!rs){NAV.mapView=null;NAV.forward.length=0}
   NAV.replaceNext=false;sheetHist=true;if(!rs)NAV.gen++; // a restore re-renders a level the user already returned to; leaving it bumped the generation
   $("#sheetIn").innerHTML=`<div class="grab"></div>`+html;sheet.classList.add("open");$("#sheetBg").classList.add("open");
   if(rs)navRestoreState(rs);else sheet.scrollTop=0;
@@ -1156,11 +1165,21 @@ function navSyncTo(target,fromLeave){
   if(NAV.syncing)return;NAV.syncing=true;
   try{
     target=Math.max(0,target|0);
-    if(target>NAV.stack.length){try{history.go(NAV.stack.length-target)}catch(e){}return} // forward to a level we cannot rebuild: realign
+    if(target>NAV.stack.length){ // Forward: re-enter the screens Back left, from memory; nothing is submitted again
+      const need=target-NAV.stack.length;
+      if(NAV.forward.length>=need&&NAV.forward.slice(-need).every(e=>e.reopen)){
+        for(let i=0;i<need;i++)NAV.stack.push(NAV.forward.pop());
+        const top=navTop();NAV.gen++;const gen=NAV.gen;NAV.restoring={e:top,gen};
+        let r;try{r=top.reopen()}catch(e){r=null}
+        const settled=()=>{if(NAV.restoring&&NAV.restoring.gen===gen&&NAV.restoring.e===top)navAbandon()};
+        if(r&&typeof r.then==="function")r.then(settled,settled);else settled();
+        return;
+      }
+      try{history.go(NAV.stack.length-target)}catch(e){}return} // a level we cannot rebuild: realign
     if(target===NAV.stack.length&&!NAV.forceRender)return;NAV.forceRender=false;
     if(target<NAV.stack.length&&!fromLeave&&!navMayLeave()){try{history.pushState(navState(),"")}catch(e){}return} // stay: restore the depth Back took away
     let popped=null;
-    while(NAV.stack.length>target){popped=NAV.stack.pop();closeSheet({pop:true})}
+    while(NAV.stack.length>target){popped=NAV.stack.pop();if(popped.reopen)NAV.forward.push(popped);closeSheet({pop:true})}
     if(!fromLeave)NAV.gen++; // phone/browser Back: anything still loading for the popped screens must not render
     if(!NAV.stack.length){sheetHide();return}
     const top=navTop();
@@ -1183,6 +1202,7 @@ window.addEventListener("popstate",e=>{
   if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}
   const st=e&&e.state||{};
   navSyncTo(typeof st.nav==="number"?st.nav:0,fromLeave);
+  if(st.tab&&st.tab!==S.tab&&!NAV.stack.length){S.tab=st.tab;render();window.scrollTo(0,0)}
 });
 /* closeSheet(mode): undefined → back one level (History drives the pop); true → leave this level now, the very next
    openSheet replaces it (older call sites that close-then-open); "all" → close every level; {pop:true} → internal,
@@ -1329,7 +1349,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="cmpX"){repConfirmClose();return}
   if(t.id==="cmpYes"){repConfirmYes();return}
   if(t.id==="cmpNo"){repConfirmNext();return}
-  if(t.dataset.tab){S.tab=t.dataset.tab;render();window.scrollTo(0,0);return}
+  if(t.dataset.tab){navTabSwitch(t.dataset.tab);render();window.scrollTo(0,0);return}
   if(t.dataset.close!==undefined){if(pt.on&&(pt.passed.size||pt.marks.length||pt.spots.length)){ptFinish();return}closeSheet();return}
   if(t.dataset.light){openLight(t.dataset.light);return}
   if(t.dataset.stat){S.stat=S.stat===t.dataset.stat?null:t.dataset.stat;S.limit=60;render();return}
