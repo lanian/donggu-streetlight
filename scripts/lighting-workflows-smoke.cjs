@@ -38,7 +38,7 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => DGIntegration.whenReady()), true); assert.equal(await page.evaluate(() => FIREBASE_CONFIG), null); assert.equal(await page.evaluate(() => S.me), 'local');
     await poll(page, () => DGLighting.state.loaded, null, 'lighting records ready');
     await page.evaluate(() => { window.__workflowDownloads = []; dl = { save: async options => window.__workflowDownloads.push(options) }; });
-    const close = async () => { if (await page.locator('#sheet.open').count()) { await page.keyboard.press('Escape'); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); } };
+    const close = async () => { if (await page.locator('#sheet.open').count()) { await page.evaluate(() => closeSheet('all')); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); } };
     const section = async key => { await close(); await page.locator('[data-tab="admin"]').click(); await page.locator('[data-asec="' + key + '"]').first().click(); };
     const minute = await page.evaluate(() => DGLightingModel.minuteOfKst(Date.now())), time = String(Math.floor(minute / 60)).padStart(2, '0') + ':' + String(minute % 60).padStart(2, '0');
     const review = async () => { await section('light'); await page.locator('[data-rvmode="pairs"]').click(); await page.locator('#rvTime').fill(time); await page.locator('#rvRun').click(); await poll(page, () => S.review?.historyState === 'synced', null, 'complete review archive'); };

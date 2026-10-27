@@ -28,25 +28,33 @@ const server = http.createServer((req, res) => {
       await run(page); results.push(name);
     } finally { await page.close(); }
   }
-  async function stableSheet(page, selector) {
+  // parent: the screen one phone-Back press must return to (navigation stack, 2026-10 NAV-02); omitted when the
+  // destination replaced its origin (scanner → inbox/register) and Back therefore closes the sheet.
+  async function stableSheet(page, selector, parent) {
     await page.locator(selector).waitFor({ state: 'attached' });
     // history.back is asynchronous: the destination must survive its event turn.
     await page.waitForTimeout(200);
     assert.equal(await page.locator('#sheet').evaluate(el => el.classList.contains('open')), true);
     assert.equal(await page.locator(selector).isVisible(), true);
+    if (parent) {
+      await page.goBack(); await page.locator(parent).waitFor({ state: 'visible' });
+      assert.equal(await page.locator(selector).count(), 0, 'the child screen must be gone after Back');
+    }
     await page.goBack(); await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
   }
   try {
     await scenario('map popup opens facility and phone Back closes the destination', async page => {
       await page.evaluate(() => { const light = S.lights.find(l => Number.isFinite(l.lat)); openMap('custom', { title: '전이 확인', pts: [light] }); gmapLayer.getLayers()[0].openPopup(); });
-      await page.locator('[data-map-open]').click(); await stableSheet(page, '#iMemo');
+      await page.locator('[data-map-open]').click(); await page.locator('#iMemo').waitFor({ state: 'attached' });
+      assert.equal(await page.evaluate(() => gmap === null && ME.watch === null), true, 'opening the facility releases the map it came from');
+      await stableSheet(page, '#iMemo', '#gmap');
       assert.equal(await page.evaluate(() => gmap === null && ME.watch === null), true);
     });
     await scenario('patrol dark point opens a populated registration form', async page => {
       const spot = await page.evaluate(() => { const l = S.lights.find(l => Number.isFinite(l.lat)); openPatrol('전체'); const spot = { lat: l.lat, lng: l.lng, acc: 8, at: Date.now(), near: l.code, nearD: 5 }; pt.spots = [spot]; ptFinish(); return spot; });
       await page.locator('[data-ptspotform]').click();
       assert.equal(Number(await page.locator('#nLat').inputValue()), spot.lat); assert.equal(Number(await page.locator('#nLng').inputValue()), spot.lng);
-      await stableSheet(page, '#nLat');
+      await stableSheet(page, '#nLat', '#ptSumm');
     });
     for (const action of ['inbox', 'register', 'quick']) await scenario('scanner result opens ' + action + ' with camera cleanup', async page => {
       await page.evaluate(async action => {

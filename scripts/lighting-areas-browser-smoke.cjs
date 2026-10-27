@@ -42,7 +42,7 @@ async function poll(page, predicate, argument, label) {
     const ready = async () => { await page.waitForFunction(() => typeof S !== 'undefined' && S.live && DGOffline.ready && typeof DGLightingAreas !== 'undefined'); assert.equal(await page.evaluate(() => DGIntegration.whenReady()), true); await poll(page, () => DGLightingAreas.state.loaded, null, 'review areas loaded'); };
     await page.goto(origin); await ready();
     assert.equal(await page.evaluate(() => FIREBASE_CONFIG), null); assert.equal(await page.evaluate(() => S.me), 'local');
-    const close = async () => { if (await page.locator('#sheet.open').count()) { await page.keyboard.press('Escape'); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); } };
+    const close = async () => { if (await page.locator('#sheet.open').count()) { await page.evaluate(() => closeSheet('all')); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); } }; // closes every stacked level
     const section = async () => { await close(); await page.locator('[data-tab="admin"]').click(); await page.locator('[data-asec="lightingareas"]').first().click(); await page.locator('#laList').waitFor(); };
     const save = async (id, revision = 1) => { await page.locator('#laSave').click(); await poll(page, ({ id, revision }) => DGLightingAreas.state.records.find(r => r.id === id)?.revision === revision, { id, revision }, 'area commit'); await page.locator('#laForm').waitFor({ state: 'hidden' }); };
     const currentId = () => page.evaluate(() => DGLightingAreas.state.draft.recordId);

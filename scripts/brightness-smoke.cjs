@@ -86,7 +86,7 @@ async function main() {
     const confirmed = kst(Date.now() - 3600000);
     const point = { lat: latitude, lng: longitude };
     const close = async () => {
-      if (await page.locator('#sheet.open').count()) { await page.keyboard.press('Escape'); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); }
+      if (await page.locator('#sheet.open').count()) { await page.evaluate(() => closeSheet('all')); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); } // every stacked level
     };
     const section = async key => {
       await close(); await page.locator('[data-tab="admin"]').click();
