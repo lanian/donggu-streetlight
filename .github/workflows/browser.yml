@@ -35,3 +35,4 @@ jobs:
           node scripts/lighting-review-navigation-smoke.cjs
           node scripts/review-fixes-smoke.cjs
           node scripts/sheet-transitions-browser-smoke.cjs
+          node scripts/navigation-browser-smoke.cjs

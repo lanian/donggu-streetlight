@@ -220,12 +220,15 @@ const server = http.createServer((req, res) => {
     record('a long bent road fits its full geometry on the mobile map without horizontal page overflow');
 
     await page.evaluate(() => { for (let i = 0; i < 20; i++) openReviewMap('0'); });
+    // The map is one level above the list: its back chevron returns to the list, a second one closes the sheet (NAV-02).
     await page.locator('#sheet .sheet-head [data-close]').click();
-    await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
+    await page.waitForFunction(() => !document.querySelector('#rvMapSummary') && document.querySelector('#rvQuery'));
     // Allow queued canvas redraw and size callbacks from all removed maps to run.
     await page.waitForTimeout(350);
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => gmap), null);
+    await page.locator('#sheet .sheet-head [data-close]').click();
+    await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
     await page.evaluate(() => openAdminSection('light'));
     await page.locator('.rv-candidate [data-rvmap]').click();
     record('twenty rapid map replacements followed by close leave no canvas redraw errors or live map');
@@ -234,9 +237,10 @@ const server = http.createServer((req, res) => {
       window.__staleMapButton = document.querySelector('#rvMapCandidate [data-rvmap]');
       invalidateLightingReview('검증용 자료 변경');
     });
-    await page.waitForFunction(() => !S.review && !document.querySelector('#sheet').classList.contains('open'));
+    // Invalidation leaves the map and lands on the review list one level below, which now asks for a fresh run (NAV-02/03).
+    await page.waitForFunction(() => !S.review && !document.querySelector('#rvMapSummary') && S.asec === 'light' && document.querySelector('#sheet').classList.contains('open'));
     await page.evaluate(() => { __staleMapButton.click(); openReviewMap('0'); });
-    assert.equal(await page.locator('#sheet.open').count(), 0);
+    assert.equal(await page.locator('#rvMapSummary').count(), 0);
     assert.match(await page.locator('#toast').textContent(), /검토를 다시 실행/);
     assert.equal(await page.evaluate(() => S.review), null);
     record('changed inputs invalidate the review and stale candidate navigation cannot reopen obsolete results');

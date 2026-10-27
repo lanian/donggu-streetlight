@@ -35,7 +35,8 @@ async function main() {
   const page=await context.newPage(), errors=[];
   page.on('pageerror',e=>errors.push(e.message)); page.on('dialog',dialog=>dialog.accept());
   const boot=async()=>{await page.goto(origin);await page.waitForFunction(()=>typeof S!=='undefined'&&S.live&&DGOffline.ready);assert.equal(await page.evaluate(()=>window.FIREBASE_CONFIG),null);assert.equal(await page.evaluate(()=>DGIntegration.whenReady()),true);await page.evaluate(()=>DGOperations.load());};
-  const close=async()=>{if(await page.locator('#sheet.open').count()){await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.querySelector('#sheet').classList.contains('open'));}};
+  // Escape/Back now leave one level at a time (navigation stack); the helper closes every level.
+  const close=async()=>{if(await page.locator('#sheet.open').count()){await page.evaluate(()=>closeSheet('all'));await page.waitForFunction(()=>!document.querySelector('#sheet').classList.contains('open'));}};
   const admin=async key=>{await close();await page.locator('[data-tab="admin"]').click();await page.locator('[data-asec="'+key+'"]').click();};
   try {
     await boot();

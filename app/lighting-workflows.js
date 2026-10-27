@@ -135,7 +135,7 @@
   }
   async function openTask(input = null, recordId = null, resume = false) {
     if (!supported()) return api.toast('재확인 업무에는 점검 권한과 저장소가 필요해요.');
-    const sequence = ++taskEditorSequence, scope = generation, current = () => sequence === taskEditorSequence && scope === generation;
+    const gen = api.navGen ? api.navGen() : null, sequence = ++taskEditorSequence, scope = generation, current = () => sequence === taskEditorSequence && scope === generation && (gen === null || api.navAlive(gen));
     await persistDraft(); if (!current()) return;
     if (recordId || !state.tasksLoaded) await loadTasks(); if (!current()) return;
     if (state.tasksError) C.fail('최신 재확인 업무를 읽은 뒤 다시 열어 주세요.');
@@ -172,7 +172,7 @@
       '<div id="lwDraftConflict"' + (draft.conflict ? '' : ' hidden') + '><button class="btn ghost" type="button" data-lw="task-reload-draft">최신 초안 다시 열기</button><button class="btn ghost" type="button" data-lw="task-copy-draft">현재 입력을 새 업무 초안으로 복사</button></div>' +
       (!locked ? '<div class="split"><button class="btn" type="submit">업무 저장</button>' + (old ? '<button class="btn ghost" type="button" data-lw="task-complete">현장 확인 완료</button><button class="btn ghost" type="button" data-lw="task-cancel">업무 취소</button>' : '') + '<button class="btn ghost" type="button" data-lw="task-discard">초안 버리기</button></div>' : '') +
       (old?.status === 'open' && !draft.pending ? '<button class="btn ghost block" type="button" data-lw="task-observe" data-id="' + E(old.id) + '">이 지점의 현장 밝기 기록</button>' : '') +
-      (old && old.status !== 'open' && api.can('admin') ? '<button class="btn ghost block" type="button" data-lw="task-reopen" data-id="' + E(old.id) + '">업무 다시 열기</button>' : '') + '</form>');
+      (old && old.status !== 'open' && api.can('admin') ? '<button class="btn ghost block" type="button" data-lw="task-reopen" data-id="' + E(old.id) + '">업무 다시 열기</button>' : '') + '</form>', { key: 'lwtask', reopen: () => renderTask() });
   }
   async function saveTask(status = 'open') {
     const draft = readTaskForm(); if (!draft || draft.readonly || draft.pending || draft.conflict) return;
@@ -245,7 +245,7 @@
   function openRun(id) {
     const r = state.runs.find(x => x.id === id); if (!r) C.fail('이력을 새로 읽어 주세요.');
     const candidates = JSON.parse(r.candidatesJson), e = JSON.parse(r.evaluationJson);
-    api.navigate(heading('보관한 밝기 검토') + '<div class="panel"><b>' + E(time(r.reviewedAt)) + '</b><p>' + E(r.modelVersion) + ' · ' + E(minuteText(r.minute)) + ' KST</p><p class="muted" style="overflow-wrap:anywhere">자료 지문 ' + E(r.inputDigest) + '</p>' + comparisonHTML(r) + '<button class="btn ghost" data-lw="run-export" data-id="' + E(id) + '">전체 결과·입력 버전 JSON</button><h4>후보 ' + candidates.length + '개</h4>' + candidates.slice(0, 100).map(c => '<p>' + E(c.title) + ' · ' + E(root.DGLighting.classification(c.classification)) + ' · ' + c.base.toFixed(2) + ' → ' + c.adjusted.toFixed(2) + '</p>').join('') + (candidates.length > 100 ? '<p class="muted">화면은 100개까지 표시해요. 위 JSON에는 전체 ' + candidates.length + '개가 포함돼요.</p>' : '') + '<h4>비교에서 제외한 관찰 ' + e.excluded.length + '건</h4>' + e.excluded.slice(0, 100).map(x => '<p>' + E(x.label) + ' · ' + E(x.reason === 'conflict' ? '현장 관찰 충돌' : x.reason === 'unknown_observation' ? '밝기 판단 보류' : root.DGLighting.reason(x.reason)) + '</p>').join('') + (e.excluded.length > 100 ? '<p>나머지 사유는 전체 JSON에서 확인해 주세요.</p>' : '') + '</div>');
+    api.navigate(heading('보관한 밝기 검토') + '<div class="panel"><b>' + E(time(r.reviewedAt)) + '</b><p>' + E(r.modelVersion) + ' · ' + E(minuteText(r.minute)) + ' KST</p><p class="muted" style="overflow-wrap:anywhere">자료 지문 ' + E(r.inputDigest) + '</p>' + comparisonHTML(r) + '<button class="btn ghost" data-lw="run-export" data-id="' + E(id) + '">전체 결과·입력 버전 JSON</button><h4>후보 ' + candidates.length + '개</h4>' + candidates.slice(0, 100).map(c => '<p>' + E(c.title) + ' · ' + E(root.DGLighting.classification(c.classification)) + ' · ' + c.base.toFixed(2) + ' → ' + c.adjusted.toFixed(2) + '</p>').join('') + (candidates.length > 100 ? '<p class="muted">화면은 100개까지 표시해요. 위 JSON에는 전체 ' + candidates.length + '개가 포함돼요.</p>' : '') + '<h4>비교에서 제외한 관찰 ' + e.excluded.length + '건</h4>' + e.excluded.slice(0, 100).map(x => '<p>' + E(x.label) + ' · ' + E(x.reason === 'conflict' ? '현장 관찰 충돌' : x.reason === 'unknown_observation' ? '밝기 판단 보류' : root.DGLighting.reason(x.reason)) + '</p>').join('') + (e.excluded.length > 100 ? '<p>나머지 사유는 전체 JSON에서 확인해 주세요.</p>' : '') + '</div>', { key: 'lwrun:' + id, reopen: () => openRun(id) });
   }
   async function exportJSON(filename, value) { return api.download({ filename: filename + '.json', data: JSON.stringify(value, null, 2) }); }
   async function exportCSV(filename, rows) {
@@ -301,9 +301,11 @@
       await root.DGLighting.load();
     } finally { s.busy = false; notify(); }
   }
+  function openSection(action) { api.navigate(heading(action === 'tasks' ? '재확인 업무' : action === 'history' ? '검토 이력' : '기관 자료 반입') + (action === 'tasks' ? tasksView() : action === 'history' ? historyView() : importView()), { key: 'lw:' + action, reopen: () => openSection(action) }); }
   async function handle(button) {
     const action = button.dataset.lw;
-    if (['tasks', 'history', 'import'].includes(action)) { await persistDraft(); api.navigate(heading(action === 'tasks' ? '재확인 업무' : action === 'history' ? '검토 이력' : '기관 자료 반입') + (action === 'tasks' ? tasksView() : action === 'history' ? historyView() : importView())); return; }
+    if (['tasks', 'history', 'import'].includes(action)) { await persistDraft(); openSection(action); return; }
+    // tasks / history / import are screens of their own; keep them reopenable for back navigation
     if (action === 'tasks-refresh') return loadTasks(); if (action === 'history-refresh') return loadHistory();
     if (action === 'tasks-more') { state.taskShow += 40; return notify(); } if (action === 'history-more') { state.runShow += 30; return notify(); }
     if (action === 'task-new') return openTask(); if (action === 'task-open') return openTask(null, button.dataset.id); if (action === 'task-resume') return openTask(null, button.dataset.id, true);

@@ -59,7 +59,9 @@ const photo = { name: 'proof.png', mimeType: 'image/png', buffer: Buffer.from('i
     await page.locator('[data-mgmt="inventory-create"]').click();
     await poll(page, async () => (await db.collection('inventory').get()).docs.length === 1, undefined, 'the new inventory item');
     const itemId = await page.evaluate(async () => (await db.collection('inventory').get()).docs[0].id);
-    await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
+    // saving returns one level, to the inventory list it was opened from (NAV-02); close the rest before the next flow
+    await page.waitForFunction(() => S.asec === 'inventory' && !document.querySelector('#dgItemName'));
+    await page.evaluate(() => closeSheet('all')); await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
     await page.evaluate(async id => { const l = byId(id); await db.doc('reports/smoke-report').set({ lightId: id, code: l.code, dong: l.dong, issue: '깜빡임', desc: '보수 연결 확인', contact: 'local-test-only', status: '접수', createdAt: Date.now(), reporterId: 'local' }); await DGOperations.load(true); }, lightId);
     await page.evaluate(id => DGOperations.newWork(id), lightId);
     await page.locator('#woTitle').fill('검증용 등기구 보수'); await page.locator('#woAssignee').selectOption('local');

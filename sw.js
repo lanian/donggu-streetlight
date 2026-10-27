@@ -2,7 +2,7 @@
    No API, report submission, auth response, POST, or user attachment is cached.
    OSM tiles use the browser HTTP cache (Cache-Control/Expires/ETag) unchanged; no prefetch. */
 importScripts('./app/map-config.js');
-const VERSION = 'v16';
+const VERSION = 'v18';
 const SHELL = 'dg-shell-' + VERSION, RUNTIME = 'dg-runtime-public-v2', META = 'dg-cache-metadata-v2', TILES = 'dg-provider-tiles-v2';
 const SHELL_FILES = ['./', './index.html', './manifest.webmanifest', './firebase-config.js', './security.js', './report/config.js', './report/', './report/index.html', './data/lights.json', './seed/manifest.json', './vendor/jsQR.js', './vendor/leaflet.js', './vendor/qrcode.js', './app/field.js', './app/field-ui.js', './app/pwa.js', './app/map-config.js', './app/data.js', './app/restore.js', './app/integration.js', './app/legacy-bridge.js', './app/management.js', './app/offline.js', './app/operations-core.js', './app/reporting.js', './app/operations.css', './app/operations.js', './app/workflows.js', './app/lighting-model.js', './app/lighting-commands.js', './app/lighting-workflow-core.js', './app/lighting-workflow-commands.js', './app/lighting-workflows.js', './app/lighting.js', './app/lighting-review.js', './app/lighting-area-core.js', './app/lighting-area-commands.js', './app/lighting-areas.js', './app/registry-commands.js', './app/work-commands.js', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png'];
 // All modules used by this release are installed atomically with its shell.

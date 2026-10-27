@@ -125,6 +125,8 @@ const server = http.createServer((req, res) => {
     await page.emulateMedia({ media: 'print' }); assert.equal(await page.locator('#sheet .rep').first().isVisible(), true); assert.equal(await page.locator('#sheet .sheet-head').isVisible(), false); await page.emulateMedia({ media: 'screen' });
     results.push('dossier appendix omits existing inspection/edit details without removing report or active-work history');
 
+    // isolate the stale-response check from the screens stacked above (facility → dossier): start from a closed sheet
+    await page.evaluate(() => closeSheet('all')); await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
     await page.evaluate(() => DGWorkflows.openReportWork('field-ui-report')); await delayLinkedWorkRead(first);
     await page.locator('#dgExistingWork').selectOption(first); await page.locator('[data-fw="link-existing-work"]').click();
     await poll(page, () => workLinkRace.entered, undefined, 'linked work read delayed before closing');

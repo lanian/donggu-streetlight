@@ -15,12 +15,14 @@ function initializeOperations() {
       if (dl) return dl.save(options);
       const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([options.data], { type: 'text/csv;charset=utf-8' })); a.download = options.filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     },
-    navigate: html => { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; S.asec = null; openSheet(html); },
+    // route = { key, reopen, back?, replace? }: how to rebuild this screen when the user comes back to it
+    navigate: (html, route) => { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; S.asec = null; if (route) navRoute(route.key, route.reopen, route); openSheet(html); },
+    navGen: () => navGen(), navAlive: g => navAlive(g), navDepth: () => navDepth(),
     closeSheet: () => closeSheet(), openLight: id => openLight(id), openMap: (...args) => { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; S.asec = null; openMap(...args); },
     removeDraft: async id => { delete DRAFTS[id]; if (draft && draft.lightId === id) { draft = null; closeSheet(); } await DGIntegration.flushDraftWrites().catch(() => {}); await DGOffline.remove('draft', id); },
     removePatrolDraft: sessionId => { if (pt.sessionId === sessionId) { ptReset(); if ($('#ptSumm')) closeSheet(); } },
     restorePatrol: () => DGIntegration.restorePatrol(),
-    print: html => { S.asec = null; openSheet('<div class="sheet-head noprint"><h3>업무 현황 인쇄</h3><button class="x" data-close aria-label="닫기">×</button></div><div class="rep">' + html + '</div>'); window.print(); },
+    print: html => { S.asec = null; navRoute('print', null, { replace: true }); openSheet('<div class="sheet-head noprint"><h3>업무 현황 인쇄</h3><button class="x" data-close aria-label="닫기">×</button></div><div class="rep">' + html + '</div>'); window.print(); },
     processPhoto: async file => {
       const result = await compressBlob(file, 1000, .72); let data = result.url;
       if (data.length > 700000) data = result.canvas.toDataURL('image/jpeg', .45);
