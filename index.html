@@ -3425,6 +3425,7 @@ async function openScanner(ctx){
     <div id="scanResult" aria-live="polite"></div>`);
   const session=scan,current=()=>scan===session&&session.active;
   if(!sampleNs&&window.claude&&window.claude.use){claude.use("sample").then(async s=>{if(!current())return;sampleNs=s;try{const lim=s&&await s.limits();if(!current())return;session.sampleImg=!!(lim&&lim.images)}catch(e){}if(!current())return;const n=$("#scanNote");if(n&&!session.sampleImg)n.textContent="이 화면에서는 사진 인식을 쓸 수 없어요. QR 스캔이나 직접 입력을 이용하세요."}).catch(()=>{})}
+  scan.active=true; // openSheet released the previous screen's camera (sheetLeave) — this screen owns it now
   scanLocate();startCam();
   if(LIVE_AUTO)setTimeout(()=>{if(!current()||!session.stream)return;getOcr(m=>{const h=$("#camHint");if(!current()||!h||!session.stream||ocrWorkers.eng||live.reading)return;if(m.status==="loading language traineddata"||m.status==="loading tesseract core")h.textContent=`표찰 인식 엔진 준비 중 ${Math.round((m.progress||0)*100)}% · QR은 지금도 읽어요`},"eng").then(()=>{if(!current())return;const h=$("#camHint");if(h&&session.stream&&!live.reading&&/엔진 준비/.test(h.textContent))h.textContent="QR이나 표찰을 비춰 주세요 · 표찰은 틀이 잡히면 자동으로 읽어요"}).catch(()=>{})},600);
 }

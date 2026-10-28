@@ -146,6 +146,15 @@ const PIXEL_NODE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAA
       assert.equal(await page.evaluate(() => gmap), null);
       assert.equal(await sheetOpen(page), true);
     });
+    await scenario('the scanner owns the camera after opening: the shared screen cleanup must not switch it off', async page => {
+      await page.evaluate(() => openScanner('inspect')); await page.locator('#camHint').waitFor();
+      await page.waitForFunction(() => scan.active === true && document.querySelector('#camHint').textContent !== '카메라 준비 중…');
+      assert.equal(await page.evaluate(() => scan.active), true);
+      await page.evaluate(id => openLight(id), await page.evaluate(() => S.lights[0].id)); await page.locator('#iMemo').waitFor();
+      assert.equal(await page.evaluate(() => scan.active === false && scan.stream == null), true, 'leaving the scanner releases the camera');
+      await page.goBack(); await page.locator('#camHint').waitFor();
+      await page.waitForFunction(() => scan.active === true && document.querySelector('#camHint').textContent !== '카메라 준비 중…');
+    });
     assert.deepEqual(errors, []); console.log(JSON.stringify({ results, browserErrors: errors }, null, 2));
   } finally { await context.close(); await browser.close(); server.close(); }
 })().catch(error => { console.error(error.stack); server.close(); process.exitCode = 1; });
