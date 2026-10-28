@@ -1043,11 +1043,11 @@ function fdId(key){return key.replace(/[^\w:.-]/g,"_")+"@"+DG_TAB}
 function fdSnapshot(key){const spec=FD_FORMS[fdKind(key)];const body=$(spec.sel);if(!body)return null;const form=DGIntegration.captureForm(body).map(f=>({key:f.key,value:f.value,checked:f.checked,pressed:f.pressed,data:f.data}));return{form,extra:spec.extra?spec.extra():null,at:Date.now()}}
 function fdFingerprint(snap){return snap?JSON.stringify(snap.form.map(f=>[f.key,f.value,f.checked,f.pressed]))+(snap.extra&&snap.extra.photo?"+photo":""):""}
 function fdArm(key){ // called right after the form rendered: baseline + restore a kept draft
-  const kind=fdKind(key);if(!kind)return;const st=FD.state[key]={key,kind,baseline:fdFingerprint(fdSnapshot(key)),persisted:false,error:""};
+  const kind=fdKind(key);if(!kind)return;const st=FD.state[key]={key,kind,baseline:fdFingerprint(fdSnapshot(key)),persisted:false,savedFingerprint:null,error:""};
   setTimeout(()=>{if(FD.state[key]===st&&fdDirty(key))fdPersist(key)},600); // fields filled by code (scan result, GPS) count as input too
   if(!DGOffline.ready||!DGOffline.durable)return;
   DGOffline.get("formDraft",fdId(key)).then(saved=>{if(!saved||FD.state[key]!==st)return;const spec=FD_FORMS[kind],body=$(spec.sel);if(!body||fdFingerprint(fdSnapshot(key))!==st.baseline)return; // the user already typed: keep theirs
-    DGIntegration.restoreForm(body,saved.form.map(f=>({...f,focused:false})));if(spec.apply&&saved.extra)spec.apply(saved.extra);st.persisted=true;
+    DGIntegration.restoreForm(body,saved.form.map(f=>({...f,focused:false})));if(spec.apply&&saved.extra)spec.apply(saved.extra);st.persisted=true;st.savedFingerprint=fdFingerprint(fdSnapshot(key));
     const note=document.createElement("div");note.className="notice slim";note.innerHTML=`<b>작성 중이던 ${esc(spec.label)}을 불러왔어요</b> <span class="muted">${fmtDT(saved.at)}</span><button class="btn ghost sm" data-fdclear="${esc(key)}" style="margin-left:auto">입력 비우기</button>`;
     body.prepend(note)}).catch(()=>{})
 }
@@ -1056,13 +1056,13 @@ function fdSchedule(key){clearTimeout(FD.timer);FD.timer=setTimeout(()=>fdPersis
 async function fdPersist(key){
   const st=FD.state[key];if(!st||!DGOffline.ready||!DGOffline.durable)return;
   const snap=fdSnapshot(key);if(!snap)return;const fp=fdFingerprint(snap);
-  try{if(fp===st.baseline){await DGOffline.remove("formDraft",fdId(key));st.persisted=false}else{await DGOffline.put("formDraft",fdId(key),snap);st.persisted=true}st.error=""}
-  catch(e){st.persisted=false;st.error=e&&e.message||"저장 실패"}
+  try{if(fp===st.baseline){await DGOffline.remove("formDraft",fdId(key));st.persisted=false;st.savedFingerprint=null}else{await DGOffline.put("formDraft",fdId(key),snap);st.persisted=true;st.savedFingerprint=fp}st.error=""}
+  catch(e){st.persisted=false;st.savedFingerprint=null;st.error=e&&e.message||"저장 실패"}
 }
-async function fdClear(key){const st=FD.state[key];try{if(DGOffline.ready)await DGOffline.remove("formDraft",fdId(key))}catch(e){}if(st){st.persisted=false;st.error=""}}
+async function fdClear(key){const st=FD.state[key];try{if(DGOffline.ready)await DGOffline.remove("formDraft",fdId(key))}catch(e){}if(st){st.persisted=false;st.savedFingerprint=null;st.error=""}}
 function fdGuard(key){ // may this form be left? kept on the device → yes; otherwise the person decides
   const st=FD.state[key];if(!st||!fdDirty(key))return true;
-  if(DGOffline.ready&&DGOffline.durable&&st.persisted&&!st.error)return true;
+  if(DGOffline.ready&&DGOffline.durable&&st.persisted&&!st.error&&st.savedFingerprint===fdFingerprint(fdSnapshot(key)))return true;
   const why=DGOffline.ready&&DGOffline.durable?`입력을 이 기기에 보관하지 못했어요${st.error?` (${st.error})`:""}.`:"이 기기에서는 입력을 보관하지 않아요.";
   return confirm(`${why}\n\n[확인] 입력을 버리고 이동 · [취소] 이 화면에 머무르기`);
 }
@@ -1075,14 +1075,14 @@ for(const type of ["input","change"])document.addEventListener(type,e=>{if(typeo
 const NAV={stack:[],forward:[],pending:null,restoring:null,replaceNext:false,seq:0,gen:0,syncing:false,leaving:0,absorb:0,forceRender:false};
 let sheetHist=false; // kept for older call sites: true while at least one level is open
 // A reload or direct entry starts with no screens: the current entry may still carry a stale depth from before.
-try{history.replaceState({nav:0,tab:(history.state&&history.state.tab)||null},"")}catch(e){}
+try{history.replaceState({nav:0,tab:S.tab},"")}catch(e){}
 // Top-level tab changes are navigation too: Back returns to the previous tab, and from the first entry leaves the app.
 function navTabSwitch(tab){if(S.tab===tab)return;S.tab=tab;if(!NAV.stack.length){NAV.forward.length=0;try{history.pushState({nav:0,tab},"")}catch(e){}}}
 // A permission change while a screen is open: screens the person may no longer see are closed.
 function navRevalidate(){
   const top=navTop();if(!top||typeof can!=="function")return;const m=/^asec:(.+)$/.exec(top.key);
   const denied=m?(()=>{const x=ADMIN_SECTIONS[m[1]];return !!x&&((x.admin&&!can("admin"))||(x.write&&!S.canWrite))})():(!can("inspect")&&!/^(screen|print)/.test(top.key));
-  if(denied){toast("권한이 바뀌어 이 화면을 닫았어요.");NAV.forward.length=0;closeSheet("all")}
+  if(denied){toast("권한이 바뀌어 이 화면을 닫았어요.");NAV.forward.length=0;const top=navTop();if(top)top.guard=null;closeSheet("all")}
 }
 function navRoute(key,reopen,opts){NAV.pending={key,reopen,back:opts&&opts.back||null,replace:!!(opts&&opts.replace),push:!!(opts&&opts.push),guard:opts&&opts.guard||null,capture:opts&&opts.capture||null}}
 const navFamily=k=>String(k||"").split(":")[0];
@@ -1202,7 +1202,7 @@ window.addEventListener("popstate",e=>{
   if(pt.on&&pt.hist){pt.hist=false;ptFinish();return}
   const st=e&&e.state||{};
   navSyncTo(typeof st.nav==="number"?st.nav:0,fromLeave);
-  if(st.tab&&st.tab!==S.tab&&!NAV.stack.length){S.tab=st.tab;render();window.scrollTo(0,0)}
+  if(!NAV.stack.length){const tab=st.tab||history.state?.tab;if(tab&&tab!==S.tab){S.tab=tab;render();window.scrollTo(0,0)}}
 });
 /* closeSheet(mode): undefined → back one level (History drives the pop); true → leave this level now, the very next
    openSheet replaces it (older call sites that close-then-open); "all" → close every level; {pop:true} → internal,
