@@ -17,7 +17,7 @@ test('initial history root preserves the currently selected tab',()=>{
 test('autosave acknowledges the actual fingerprint rather than an earlier draft',()=>{
   const persist=fn('fdPersist','async function fdClear');
   assert.match(persist,/st\.savedFingerprint=fp/);
-  const guard=fn('fdGuard','for\(const type of');
+  const guard=fn('fdGuard','for(const type of');
   assert.match(guard,/st\.savedFingerprint===fdFingerprint\(fdSnapshot\(key\)\)/);
 });
 test('restored draft gets matching fingerprint and clear invalidates it',()=>{
