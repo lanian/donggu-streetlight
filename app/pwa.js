@@ -54,10 +54,10 @@
     if (state.preparing) return;
     if (!navigator.serviceWorker?.controller) { await check(); return; }
     if (!navigator.onLine) { state.message = 'OCR 파일은 연결된 상태에서 준비하세요. QR과 직접 입력은 준비된 앱에서 사용할 수 있어요.'; render(); return; }
-    state.preparing = true; state.message = 'OCR 한국어·영어 엔진과 언어 파일을 준비하는 중…'; render();
+    state.preparing = true; state.message = 'OCR 한국어·영어 엔진과 언어 파일을 준비하는 중… (약 10MB, 연결 상태에 따라 1~3분)'; render();
     let timer;
     try {
-      await Promise.race([options.prepareOcr(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('준비가 오래 걸리고 있어요. 연결을 확인하고 다시 상태를 확인하세요.')), 45000); })]);
+      await Promise.race([options.prepareOcr(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('준비가 오래 걸리고 있어요(약 10MB). 내려받기는 계속되니 잠시 뒤 상태를 다시 확인하세요.')), 180000); })]);
       await check();
       if (!state.status?.ocr) state.message = 'OCR을 실행했지만 필수 캐시 파일을 모두 확인하지 못했어요. 오프라인 준비가 완료된 것으로 표시하지 않았어요.';
     } catch (e) { state.message = e.message || 'OCR 파일 준비에 실패했어요. 연결을 확인하고 다시 시도하세요.'; }

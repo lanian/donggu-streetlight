@@ -738,7 +738,7 @@ const PWA={prompt:null,canInstall:false,iosHint:false,waiting:null,standalone:ma
   const ios=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
   if(ios&&!PWA.standalone&&!recently&&!(window.claude&&window.claude.use))PWA.iosHint=true;
   if("serviceWorker" in navigator&&!(window.claude&&window.claude.use)&&(location.protocol==="https:"||location.hostname==="localhost")){
-    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareOcr:async()=>{await getOcr(null,"eng");await getOcr(null,"kor+eng")}});
+    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareOcr:async()=>{try{await fetch("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",{cache:"reload"})}catch(e){}await getOcr(null,"eng",{refresh:true});await getOcr(null,"kor+eng",{refresh:true})}});
   }
   // shortcuts from the home-screen icon
   const go=new URLSearchParams(location.search).get("go");if(go)window.addEventListener("load",()=>setTimeout(()=>{if(go==="scan")openScanner("inspect");else if(go==="patrol"&&can("inspect"))openPatrol()},900));
@@ -3133,12 +3133,17 @@ function arStop(reset=true){
 
 /* ---------- on-device OCR fallback (Tesseract.js) for plain hosting ---------- */
 let ocrWorker=null;const ocrWorkers={},ocrLoading={},ocrProgress={}; // Workers are reused; UI callbacks always belong to the current scan job.
-async function getOcr(onProgress,langs="kor+eng"){
+async function getOcr(onProgress,langs="kor+eng",opts){
   ocrProgress[langs]=onProgress;
+  if(opts&&opts.refresh){ // offline preparation: fetch engine and language files again so the service worker can keep them (Tesseract's own IndexedDB copy bypasses it)
+    if(ocrLoading[langs])try{await ocrLoading[langs]}catch(e){}
+    if(ocrWorkers[langs]){try{await ocrWorkers[langs].terminate()}catch(e){}delete ocrWorkers[langs];if(langs==="kor+eng")ocrWorker=null}
+    delete ocrLoading[langs];
+  }
   if(ocrWorkers[langs])return ocrWorkers[langs];
   if(!ocrLoading[langs])ocrLoading[langs]=(async()=>{
     if(!window.Tesseract){try{await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js")}catch(e){await loadScript("https://unpkg.com/tesseract.js@5/dist/tesseract.min.js")}}
-    const w=await Tesseract.createWorker(langs.split("+"),1,{logger:m=>ocrProgress[langs]&&ocrProgress[langs](m)});
+    const w=await Tesseract.createWorker(langs.split("+"),1,{logger:m=>ocrProgress[langs]&&ocrProgress[langs](m),cacheMethod:opts&&opts.refresh?"refresh":"write"});
     ocrWorkers[langs]=w;if(langs==="kor+eng")ocrWorker=w;return w;
   })().catch(e=>{delete ocrLoading[langs];throw e});
   return ocrLoading[langs];

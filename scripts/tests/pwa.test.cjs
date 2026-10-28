@@ -85,7 +85,8 @@ test('every required shell asset exists, and OCR readiness requires both languag
   const files = vm.runInContext('SHELL_FILES', context);
   for (const file of files) assert.ok(fs.existsSync(path.join(root, file.endsWith('/') ? file + 'index.html' : file)), file);
   const runtime = cache('dg-runtime-public-v2');
-  const assets = ['tesseract.min.js', 'worker.min.js', 'tesseract-core-simd-lstm.wasm.js', 'tesseract-core-simd-lstm.wasm', 'kor.traineddata.gz', 'eng.traineddata.gz'];
+  // what tesseract.js 5.x actually fetches: the core wasm is embedded in the .wasm.js file, no separate .wasm request
+  const assets = ['tesseract.min.js', 'worker.min.js', 'tesseract-core-simd-lstm.wasm.js', 'kor.traineddata.gz', 'eng.traineddata.gz'];
   for (const asset of assets.slice(0, -1)) await runtime.put('https://cdn.jsdelivr.net/' + asset, new Response('asset'));
   assert.equal((await context.offlineStatus()).ocr, false);
   await runtime.put('https://cdn.jsdelivr.net/' + assets.at(-1), new Response('asset'));
