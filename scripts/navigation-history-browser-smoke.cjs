@@ -110,6 +110,52 @@ const PIXEL_NODE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAA
       assert.deepEqual(await depth(page), ['asec:due']); assert.equal(await page.evaluate(() => history.state.nav), 1);
       assert.equal(await page.locator('#iMemo').count(), 0);
     });
+    await scenario('first tab entry is initialized: Back returns to inspect without manual history reset', async page => {
+      await page.reload(); await page.waitForFunction(() => S.live && DGOffline.ready && S.me === 'local');
+      assert.equal(await page.evaluate(() => S.tab), 'inspect');
+      assert.equal(await page.evaluate(() => history.state.tab), 'inspect');
+      await page.locator('nav.tabs [data-tab="admin"]').click();
+      await page.waitForFunction(() => S.tab === 'admin');
+      await page.goBack(); await page.waitForFunction(() => S.tab === 'inspect');
+      assert.equal(await page.locator('nav.tabs [aria-selected="true"]').getAttribute('data-tab'), 'inspect');
+    });
+    await scenario('latest edited form fingerprint must be stored before Back is allowed', async page => {
+      const dialogs = []; page.removeAllListeners('dialog');
+      page.on('dialog', dialog => { dialogs.push(dialog.message); return dialog.dismiss(); });
+      await page.evaluate(async () => {
+        await DGOffline.configure({ namespace: 'boundary-draft-e2e', durable: true, networkRequired: false, adapter: DGOffline.memoryStore() });
+        openAdminSection('reg');
+      });
+      await page.locator('#nNote').fill('이미 기기에 저장된 메모');
+      await page.waitForFunction(() => fdIsPersisted('asec:reg'));
+      await page.locator('#nNote').fill('저장 직후 수정한 마지막 문장');
+      assert.equal(await page.evaluate(() => fdIsPersisted('asec:reg')), false);
+      assert.equal(await page.evaluate(() => FD.state['asec:reg'].persisted), false);
+      await page.evaluate(() => history.back());
+      await page.waitForFunction(() => history.state.nav === 1 && document.querySelector('#sheet').classList.contains('open'));
+      assert.equal(await page.locator('#nNote').inputValue(), '저장 직후 수정한 마지막 문장');
+      assert.ok(dialogs.some(message => message.includes('보관하지 못했어요')));
+      await page.waitForFunction(() => fdIsPersisted('asec:reg'));
+      assert.equal(await page.evaluate(async () => {
+        const saved = await DGOffline.get('formDraft', fdId('asec:reg'));
+        return !!saved && fdFingerprint(saved) === fdFingerprint(fdSnapshot('asec:reg'));
+      }), true);
+    });
+    await scenario('permission revocation closes even a dirty form without asking to discard', async page => {
+      const dialogs = []; page.removeAllListeners('dialog');
+      page.on('dialog', dialog => { dialogs.push(dialog.message); return dialog.dismiss(); });
+      await page.evaluate(async () => {
+        await DGOffline.configure({ namespace: 'boundary-permission-e2e', durable: true, networkRequired: false, adapter: DGOffline.memoryStore() });
+        openAdminSection('reg');
+      });
+      await page.locator('#nNote').fill('권한 변경 직전 미저장 내용');
+      assert.equal(await page.evaluate(() => fdIsPersisted('asec:reg')), false);
+      await page.evaluate(() => { S.canWrite = false; render(); });
+      await page.waitForFunction(() => NAV.stack.length === 0 && !document.querySelector('#sheet').classList.contains('open'));
+      assert.equal(await page.locator('#nNote').count(), 0);
+      assert.equal(dialogs.length, 0, 'revoked access cannot be vetoed by the discard confirmation');
+      assert.equal(await page.evaluate(() => history.state.nav), 0);
+    });
     assert.deepEqual(errors, []); console.log(JSON.stringify({ results, browserErrors: errors }, null, 2));
   } finally { await context.close(); await browser.close(); server.close(); }
 })().catch(error => { console.error(error.stack); server.close(); process.exitCode = 1; });

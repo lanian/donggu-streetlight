@@ -743,7 +743,7 @@ const PWA={prompt:null,canInstall:false,iosHint:false,waiting:null,standalone:ma
   // shortcuts from the home-screen icon
   const go=new URLSearchParams(location.search).get("go");if(go)window.addEventListener("load",()=>setTimeout(()=>{if(go==="scan")openScanner("inspect");else if(go==="patrol"&&can("inspect"))openPatrol()},900));
 })();
-function hasUnsavedFieldData(){const fdOpen=Object.keys(FD.state).some(k=>navTop()&&navTop().key===k&&fdDirty(k)&&!(DGOffline.ready&&DGOffline.durable&&FD.state[k].persisted));return !!(fdOpen||draftDirty(draft)||Object.values(DRAFTS).some(draftDirty)||pt.on||pt.marks.length||pt.spots.length||pt.track.length||photoEditor||scan.busy||window.DG_HAS_UNSAVED_WORK_SYNC?.()||["#rNum","#rDesc","#ibNum","#ibDesc"].some(s=>$(s)?.value?.trim()))}
+function hasUnsavedFieldData(){const fdOpen=Object.keys(FD.state).some(k=>navTop()&&navTop().key===k&&fdDirty(k)&&!(DGOffline.ready&&DGOffline.durable&&fdIsPersisted(k)));return !!(fdOpen||draftDirty(draft)||Object.values(DRAFTS).some(draftDirty)||pt.on||pt.marks.length||pt.spots.length||pt.track.length||photoEditor||scan.busy||window.DG_HAS_UNSAVED_WORK_SYNC?.()||["#rNum","#rDesc","#ibNum","#ibDesc"].some(s=>$(s)?.value?.trim()))}
 async function hasPendingFieldWork(){if(hasUnsavedFieldData()||DongguUI.hasModal())return true;const external=await window.DG_HAS_UNSAVED_WORK?.();return !!external||hasUnsavedFieldData()||DongguUI.hasModal()}
 window.addEventListener("beforeunload",e=>{if(hasUnsavedFieldData()){e.preventDefault();e.returnValue=""}});
 /* theme: auto → dark → light; night crews want dark whatever the phone says */
@@ -1033,7 +1033,7 @@ function vReport(){
    Covered screens restore from memory (navCapture). Leaving the form itself keeps a draft on the device when storage is
    durable (DGOffline), keyed by account namespace and by this browser tab, and restores it on the next open and after a
    reload. On a shared device (not durable) nothing is written and leaving unsaved input asks first. */
-const FD={timer:null,state:{}};
+const FD={timer:null,state:{},writes:Promise.resolve()};
 const DG_TAB=(()=>{try{let t=sessionStorage.getItem("dg-tab");if(!t){t=Math.random().toString(36).slice(2,10);sessionStorage.setItem("dg-tab",t)}return t}catch(e){return "tab"}})();
 const FD_FORMS={"asec:reg":{sel:"#asecBody",extra:()=>({photo:window.__nPhoto||null,acc:window.__nAcc||null}),apply:x=>{window.__nPhoto=x.photo||null;window.__nAcc=x.acc||null;const p=$("#nPrev");if(p&&x.photo){p.src=x.photo;p.hidden=false}},label:"등록 내용"},
   "asec:inbox":{sel:"#asecBody",label:"신고 접수 내용"},
@@ -1043,26 +1043,48 @@ function fdId(key){return key.replace(/[^\w:.-]/g,"_")+"@"+DG_TAB}
 function fdSnapshot(key){const spec=FD_FORMS[fdKind(key)];const body=$(spec.sel);if(!body)return null;const form=DGIntegration.captureForm(body).map(f=>({key:f.key,value:f.value,checked:f.checked,pressed:f.pressed,data:f.data}));return{form,extra:spec.extra?spec.extra():null,at:Date.now()}}
 function fdFingerprint(snap){return snap?JSON.stringify(snap.form.map(f=>[f.key,f.value,f.checked,f.pressed]))+(snap.extra&&snap.extra.photo?"+photo":""):""}
 function fdArm(key){ // called right after the form rendered: baseline + restore a kept draft
-  const kind=fdKind(key);if(!kind)return;const st=FD.state[key]={key,kind,baseline:fdFingerprint(fdSnapshot(key)),persisted:false,error:""};
+  const kind=fdKind(key);if(!kind)return;const st=FD.state[key]={key,kind,baseline:fdFingerprint(fdSnapshot(key)),persisted:false,savedFingerprint:null,error:""};
   setTimeout(()=>{if(FD.state[key]===st&&fdDirty(key))fdPersist(key)},600); // fields filled by code (scan result, GPS) count as input too
   if(!DGOffline.ready||!DGOffline.durable)return;
   DGOffline.get("formDraft",fdId(key)).then(saved=>{if(!saved||FD.state[key]!==st)return;const spec=FD_FORMS[kind],body=$(spec.sel);if(!body||fdFingerprint(fdSnapshot(key))!==st.baseline)return; // the user already typed: keep theirs
-    DGIntegration.restoreForm(body,saved.form.map(f=>({...f,focused:false})));if(spec.apply&&saved.extra)spec.apply(saved.extra);st.persisted=true;
+    DGIntegration.restoreForm(body,saved.form.map(f=>({...f,focused:false})));if(spec.apply&&saved.extra)spec.apply(saved.extra);st.savedFingerprint=fdFingerprint(saved);st.persisted=true;
     const note=document.createElement("div");note.className="notice slim";note.innerHTML=`<b>작성 중이던 ${esc(spec.label)}을 불러왔어요</b> <span class="muted">${fmtDT(saved.at)}</span><button class="btn ghost sm" data-fdclear="${esc(key)}" style="margin-left:auto">입력 비우기</button>`;
     body.prepend(note)}).catch(()=>{})
 }
 function fdDirty(key){const st=FD.state[key];if(!st)return false;return fdFingerprint(fdSnapshot(key))!==st.baseline}
-function fdSchedule(key){clearTimeout(FD.timer);FD.timer=setTimeout(()=>fdPersist(key),400)}
+function fdIsPersisted(key){
+  const st=FD.state[key];
+  return !!(st&&st.persisted&&!st.error&&st.savedFingerprint===fdFingerprint(fdSnapshot(key)));
+}
+function fdSchedule(key){
+  const st=FD.state[key];if(st&&!fdIsPersisted(key))st.persisted=false;
+  clearTimeout(FD.timer);FD.timer=setTimeout(()=>fdPersist(key),400);
+}
 async function fdPersist(key){
   const st=FD.state[key];if(!st||!DGOffline.ready||!DGOffline.durable)return;
   const snap=fdSnapshot(key);if(!snap)return;const fp=fdFingerprint(snap);
-  try{if(fp===st.baseline){await DGOffline.remove("formDraft",fdId(key));st.persisted=false}else{await DGOffline.put("formDraft",fdId(key),snap);st.persisted=true}st.error=""}
-  catch(e){st.persisted=false;st.error=e&&e.message||"저장 실패"}
+  // Serialize writes so a slower earlier save cannot overwrite a newer draft.
+  FD.writes=FD.writes.catch(()=>{}).then(async()=>{
+    if(FD.state[key]!==st)return;
+    if(fp===st.baseline){
+      await DGOffline.remove("formDraft",fdId(key));
+      st.savedFingerprint=null;st.persisted=false;
+    }else{
+      await DGOffline.put("formDraft",fdId(key),snap);
+      st.savedFingerprint=fp;st.persisted=fp===fdFingerprint(fdSnapshot(key));
+    }
+    st.error="";
+  }).catch(e=>{if(FD.state[key]===st){st.persisted=false;st.error=e&&e.message||"저장 실패"}});
+  return FD.writes;
 }
-async function fdClear(key){const st=FD.state[key];try{if(DGOffline.ready)await DGOffline.remove("formDraft",fdId(key))}catch(e){}if(st){st.persisted=false;st.error=""}}
-function fdGuard(key){ // may this form be left? kept on the device → yes; otherwise the person decides
+async function fdClear(key){
+  const st=FD.state[key];clearTimeout(FD.timer);
+  FD.writes=FD.writes.catch(()=>{}).then(async()=>{if(DGOffline.ready)await DGOffline.remove("formDraft",fdId(key))});
+  try{await FD.writes}catch(e){}if(st&&FD.state[key]===st){st.persisted=false;st.savedFingerprint=null;st.error=""}
+}
+function fdGuard(key){ // only an exact persisted copy (not the previous draft) permits departure
   const st=FD.state[key];if(!st||!fdDirty(key))return true;
-  if(DGOffline.ready&&DGOffline.durable&&st.persisted&&!st.error)return true;
+  if(DGOffline.ready&&DGOffline.durable&&fdIsPersisted(key))return true;
   const why=DGOffline.ready&&DGOffline.durable?`입력을 이 기기에 보관하지 못했어요${st.error?` (${st.error})`:""}.`:"이 기기에서는 입력을 보관하지 않아요.";
   return confirm(`${why}\n\n[확인] 입력을 버리고 이동 · [취소] 이 화면에 머무르기`);
 }
@@ -1075,14 +1097,31 @@ for(const type of ["input","change"])document.addEventListener(type,e=>{if(typeo
 const NAV={stack:[],forward:[],pending:null,restoring:null,replaceNext:false,seq:0,gen:0,syncing:false,leaving:0,absorb:0,forceRender:false};
 let sheetHist=false; // kept for older call sites: true while at least one level is open
 // A reload or direct entry starts with no screens: the current entry may still carry a stale depth from before.
-try{history.replaceState({nav:0,tab:(history.state&&history.state.tab)||null},"")}catch(e){}
+try{
+  const last=history.state&&history.state.tab;
+  if(["inspect","admin","report"].includes(last))S.tab=last;
+  history.replaceState({nav:0,tab:S.tab},"");
+}catch(e){}
 // Top-level tab changes are navigation too: Back returns to the previous tab, and from the first entry leaves the app.
-function navTabSwitch(tab){if(S.tab===tab)return;S.tab=tab;if(!NAV.stack.length){NAV.forward.length=0;try{history.pushState({nav:0,tab},"")}catch(e){}}}
+function navTabSwitch(tab){
+  if(S.tab===tab)return;
+  if(!NAV.stack.length){
+    // Older sessions can have an initial entry with no tab. Fix it before pushing the next tab.
+    if(!history.state?.tab)try{history.replaceState({nav:0,tab:S.tab},"")}catch(e){}
+    NAV.forward.length=0;
+  }
+  S.tab=tab;
+  if(!NAV.stack.length)try{history.pushState({nav:0,tab},"")}catch(e){}
+}
 // A permission change while a screen is open: screens the person may no longer see are closed.
 function navRevalidate(){
   const top=navTop();if(!top||typeof can!=="function")return;const m=/^asec:(.+)$/.exec(top.key);
   const denied=m?(()=>{const x=ADMIN_SECTIONS[m[1]];return !!x&&((x.admin&&!can("admin"))||(x.write&&!S.canWrite))})():(!can("inspect")&&!/^(screen|print)/.test(top.key));
-  if(denied){toast("권한이 바뀌어 이 화면을 닫았어요.");NAV.forward.length=0;closeSheet("all")}
+  if(denied){
+    NAV.forward.length=0;NAV.pending=null;
+    closeSheet("permission"); // Access revocation must not be vetoed by an unsaved-form dialog.
+    toast("권한이 바뀌어 이 화면을 닫았어요.");
+  }
 }
 function navRoute(key,reopen,opts){NAV.pending={key,reopen,back:opts&&opts.back||null,replace:!!(opts&&opts.replace),push:!!(opts&&opts.push),guard:opts&&opts.guard||null,capture:opts&&opts.capture||null}}
 const navFamily=k=>String(k||"").split(":")[0];
@@ -1208,10 +1247,17 @@ window.addEventListener("popstate",e=>{
    openSheet replaces it (older call sites that close-then-open); "all" → close every level; {pop:true} → internal,
    cleanup only while navSyncTo pops. */
 let closeSheet=function(mode){
-  if((mode===undefined||mode==="all")&&!navMayLeave())return false; // the screen keeps its unsaved input
+  if((mode===undefined||mode==="all")&&!navMayLeave())return false; // ordinary navigation respects unsaved input
   if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();if(stashDraft())setTimeout(render,0);draft=null;
   if(mode&&typeof mode==="object"&&mode.pop)return;
   NAV.gen++;
+  if(mode==="permission"){
+    const depth=NAV.stack.length;
+    NAV.forward.length=0;NAV.pending=null;NAV.absorb=0;
+    sheetHide(); // Hide the revoked screen immediately, before the async History popstate.
+    if(depth)try{history.go(-depth)}catch(e){}
+    return true;
+  }
   if(mode===true){ // leave now; the level stays on the stack and the next openSheet takes its place
     if(!NAV.stack.length){sheetHide();return}
     NAV.replaceNext=true;const sheet=$("#sheet");sheet.classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close(sheet);document.body.style.overflow="";return}
@@ -1474,7 +1520,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.ptspot){ptSpot();return}
   if(t.dataset.ptspotdel){pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
   if(t.dataset.ptspotobserve!==undefined){const i=+t.dataset.ptspotobserve,sp=pt.spots[i];if(!sp||!need("inspect"))return;if(!pt.sessionId)pt.sessionId=DGData.newId("patrol-session");DGLighting.openObservation({lat:sp.lat,lng:sp.lng,observedAt:sp.at,level:"dark",label:"순찰 중 어두운 지점",note:"순찰 기록 · GPS ±"+sp.acc+"m"+(sp.near?" · "+sp.near+" 근처":""),originKind:"patrol",originId:pt.sessionId,originPointId:String(i),positionAccuracy:sp.acc}).catch(error=>toast(error.message));return}
-  if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;S.tab="admin";render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
+  if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;navTabSwitch("admin");render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
   if(t.id==="ptListen"){ptListen(!pt.listen);return}
   if(t.dataset.ptview){ptView(t.dataset.ptview);return}
   if(t.id==="ptMapFollow"){pt.mapFollow=true;t.setAttribute("aria-pressed","true");if(pt.map&&pt.pos)pt.map.setView([pt.pos.lat,pt.pos.lng],Math.max(pt.map.getZoom(),17));return}
@@ -3552,12 +3598,12 @@ function applyScan(what){
   if(what==="quick"){if(!scan.pos){toast("위치를 아직 못 잡았어요.");return}const id=newIdFor(p);if(byId(id)){toast("이미 저장된 번호예요.");return}
     const rec={code:txt,dong:p.dong||(DONGS.includes(p.road)?p.road:""),kind:p.kind,num:p.num||null,road:p.road||null,main:p.main||null,sub:p.sub||null,poleNo:r.pole||null,address:"",lampType:"",status:"정상",lastInspected:null,reg:"미등록",lat:scan.pos.lat,lng:scan.pos.lng,acc:Math.round(scan.pos.acc||0),photo:r.plate||null,foundAt:Date.now(),foundBy:S.me||null,updatedAt:Date.now(),note:"표찰 스캔에서 바로 저장"};
     if(!rec.dong){const near=S.lights.filter(x=>typeof x.lat==="number").map(x=>({x,d:distM(scan.pos,x)})).sort((a,b)=>a.d-b.d)[0];if(near)rec.dong=near.x.dong}
-    write(()=>db.doc("lights/"+id).set(rec),`${txt}을(를) 미등록으로 저장했어요. 관리 현황에서 확인하세요.`).then(ok=>{if(ok){closeSheet(true);S.tab="admin";render();openAdminSection("pend")}});return}
+    write(()=>db.doc("lights/"+id).set(rec),`${txt}을(를) 미등록으로 저장했어요. 관리 현황에서 확인하세요.`).then(ok=>{if(ok){closeSheet(true);navTabSwitch("admin");render();openAdminSection("pend")}});return}
   // Sheet replacements keep the current history entry; a late history.back must not close the new form.
   stopCam(false);closeSheet(what==="inbox"||scan.ctx==="inbox"||what==="register");
-  if(what==="inbox"||scan.ctx==="inbox"){S.tab="admin";render();openAdminSection("inbox");const x=$("#ibNum");if(x){x.value=txt;x.dataset.lightId=p.lightId||(l&&l.id)||"";x.dataset.lightCode=txt.trim()}toast(`${txt} 번호를 넣었어요.`);return}
-  if(what==="report"){S.tab="report";render();$("#rNum").value=p.kind==="가로등"?txt:p.num;if(p.dong)$("#rDong").value=p.dong;else if(l)$("#rDong").value=l.dong;$("#rLoc").focus();toast(`${txt} 번호를 넣었어요.`);return}
-  if(what==="register"){S.tab="admin";render();openAdminSection("reg");const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
+  if(what==="inbox"||scan.ctx==="inbox"){navTabSwitch("admin");render();openAdminSection("inbox");const x=$("#ibNum");if(x){x.value=txt;x.dataset.lightId=p.lightId||(l&&l.id)||"";x.dataset.lightCode=txt.trim()}toast(`${txt} 번호를 넣었어요.`);return}
+  if(what==="report"){navTabSwitch("report");render();$("#rNum").value=p.kind==="가로등"?txt:p.num;if(p.dong)$("#rDong").value=p.dong;else if(l)$("#rDong").value=l.dong;$("#rLoc").focus();toast(`${txt} 번호를 넣었어요.`);return}
+  if(what==="register"){navTabSwitch("admin");render();openAdminSection("reg");const d=$("#nDong");if(!d){toast("등록 권한이 없어요.");return}
     $("#nNoPlate").checked=false;["nNum","nRoad"].forEach(x=>{const el=$("#"+x);if(el)el.disabled=false});
     $("#nKind").value=p.kind;$("#nNum").value=p.kind==="가로등"?`${p.main}-${p.sub}`:p.num;$("#nNum").placeholder=p.kind==="가로등"?"65-5":"642";$("#nRoadBox").hidden=p.kind!=="가로등";if(p.road)$("#nRoad").value=p.road;if(p.dong)d.value=p.dong;if(r.pole)$("#nPole").value=r.pole;
     $("#nAddr").scrollIntoView({behavior:"smooth",block:"center"});$("#nAddr").focus();toast(`${txt} 번호를 넣었어요. ${p.kind==="가로등"?"행정동과 ":""}위치를 적고 등록하세요.`)}
