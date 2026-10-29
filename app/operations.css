@@ -30,11 +30,12 @@
 /* Night patrol: never crowd the forward list with completed records. */
 .ptfull .ptqueuebar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:1px 12px 0;min-height:44px;color:#DFE7F5}
 .ptfull .ptqueuebar b{font-size:13px;white-space:nowrap}
-.ptfull .ptqueuebar button{flex:none;min-height:36px;min-width:102px;border:1px solid #455672;background:#16243A;color:#E5ECFA;border-radius:10px;padding:6px 10px;font-size:12px;font-weight:700}
+.ptfull .ptqueuebar button{flex:none;min-height:44px;min-width:102px;border:1px solid #455672;background:#16243A;color:#E5ECFA;border-radius:10px;padding:6px 10px;font-size:12px;font-weight:700}
 .ptfull .ptqueuebar button[aria-pressed="true"]{background:#453515;border-color:#E89A0C;color:#FFCF70}
 .ptfull .ptqueuebar button:focus-visible,.ptfull .pthistory button:focus-visible,.ptfull .pthistory>summary:focus-visible{outline:3px solid #FFCE67;outline-offset:2px}
 .ptfull .pthistory{margin:3px 12px 5px;flex:none;min-height:0;max-height:min(46vh,380px);border:1px solid #34445F;background:#121E32;border-radius:12px;overflow:hidden;color:#DFE7F4;display:flex;flex-direction:column}
 .ptfull .pthistory:not([open]){max-height:64px}
+.ptfull .pthistory:not([open]) > :not(summary){display:none!important}
 .ptfull .pthistory>summary{cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) 22px;grid-template-rows:auto auto;align-items:center;column-gap:8px;padding:8px 12px;min-height:61px;list-style:none}
 .ptfull .pthistory>summary::-webkit-details-marker{display:none}
 .ptfull .pthistory #ptHistoryTitle{grid-column:1;grid-row:1;font-size:13px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
