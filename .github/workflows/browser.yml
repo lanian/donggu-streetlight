@@ -40,3 +40,4 @@ jobs:
           node scripts/navigation-history-browser-smoke.cjs
           node scripts/bottom-nav-browser-smoke.cjs
           node scripts/desktop-ui-browser-smoke.cjs
+          node scripts/pc-location-browser-smoke.cjs
