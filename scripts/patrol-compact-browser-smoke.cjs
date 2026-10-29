@@ -26,6 +26,9 @@ const server=http.createServer((req,res)=>{
    await page.waitForFunction(()=>S.live&&DGOffline.ready&&S.me==='local'&&DGIntegration.initialized&&!!window.DGPatrolHistory);
    const ids=await page.evaluate(()=>{
      S.demoRole='admin';S.tab='inspect';render();openPatrol('전체');
+     // Freeze GPS only in this deterministic fixture: live patrol keeps its normal watcher.
+     if(pt.watch!=null){navigator.geolocation.clearWatch(pt.watch);pt.watch=null}
+     pt.watchRun=(pt.watchRun||0)+1;
      const lights=S.lights.filter(l=>Number.isFinite(l.lat)&&Number.isFinite(l.lng)).slice(0,40);
      window.__testPatrolLights=lights;
      pt.ahead=lights.slice(0,4).map((l,i)=>({l,d:15+i*8,fwd:15+i*8,side:'정면',b:0}));
