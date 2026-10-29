@@ -1,0 +1,117 @@
+/* Wide-screen workspace: preserve the compact bottom tabs on phones and tablets. */
+@media screen and (min-width:1024px){
+  :root{--dg-desktop-rail:216px}
+  .wrap{
+    width:min(1460px,calc(100% - var(--dg-desktop-rail) - 56px));
+    max-width:none;
+    margin-left:max(calc(var(--dg-desktop-rail) + 28px),calc((100vw - 1460px + var(--dg-desktop-rail))/2));
+    margin-right:0;
+    padding:0 0 52px;
+  }
+  header.top{
+    margin:0 0 20px;
+    padding:20px 0 15px;
+    border-bottom:1px solid var(--line);
+    background:var(--bg);
+  }
+  header.top .lamp{width:32px;height:40px}
+  nav.tabs:not([hidden]){
+    top:0;
+    bottom:0;
+    left:0;
+    right:auto;
+    width:var(--dg-desktop-rail);
+    display:flex;
+    flex-direction:column;
+    padding:22px 12px 16px;
+    padding-top:max(22px,env(safe-area-inset-top,0px));
+    padding-bottom:16px;
+    border-top:0;
+    border-right:1px solid var(--line);
+    box-shadow:4px 0 20px rgba(20,35,60,.045);
+    overflow-y:auto;
+    overflow-x:hidden;
+  }
+  nav.tabs:not([hidden])::before{
+    content:"주요 메뉴";
+    display:block;
+    padding:2px 12px 15px;
+    margin:0 2px 14px;
+    border-bottom:1px solid var(--line);
+    font-size:15px;
+    font-weight:800;
+    color:var(--ink);
+    letter-spacing:-.01em;
+  }
+  nav.tabs:not([hidden])::after{
+    content:"동구 가로등 현장 업무";
+    display:block;
+    margin-top:auto;
+    padding:16px 12px 0;
+    font-size:11px;
+    color:var(--ink-2);
+  }
+  nav.tabs .in{
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    width:100%;
+    max-width:none;
+    padding:0;
+    gap:8px;
+  }
+  nav.tabs button{
+    flex:none;
+    width:100%;
+    min-height:54px;
+    padding:12px 14px;
+    flex-direction:row;
+    justify-content:flex-start;
+    align-items:center;
+    gap:12px;
+    border-radius:12px;
+    text-align:left;
+    font-size:14px;
+  }
+  nav.tabs button svg{width:23px;height:23px}
+  nav.tabs button .tab-label{max-width:none}
+  nav.tabs button[aria-selected="true"]::before{
+    left:3px;
+    top:50%;
+    transform:translateY(-50%);
+    width:4px;
+    height:32px;
+  }
+  nav.tabs button:focus-visible{outline-offset:2px}
+  #view .tally{gap:12px}
+  #view .tally button{min-height:80px;padding:14px 16px 12px}
+  #view .actions{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  #view .actions button{min-height:80px;padding:14px 16px}
+  #view .menu{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  #view .menu button{min-width:0;min-height:86px;padding:15px 16px;gap:7px}
+  #view .menu .md{font-size:13px;line-height:1.5}
+  #view .list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:stretch}
+  #view .list>.row{min-width:0;height:100%;padding:13px 15px}
+  #view .list>:is(.empty,#moreList,.block){grid-column:1/-1}
+  #view .tools{gap:10px}
+  #view .tools input[type="search"]{min-height:46px}
+  #view .filterbox{padding:16px 18px}
+  .sheet{width:min(860px,calc(100vw - var(--dg-desktop-rail) - 24px));box-shadow:-12px 0 38px rgba(10,16,30,.18)}
+  .sheet-in{max-width:none;padding-left:22px;padding-right:22px}
+  .sheet-head{margin-left:-22px;margin-right:-22px;padding-left:18px;padding-right:18px}
+  .sheet-foot{margin-left:-22px;margin-right:-22px;padding-left:22px;padding-right:22px}
+  .gmap{height:min(72vh,760px);min-height:460px}
+  .toast{bottom:28px;left:calc(50% + var(--dg-desktop-rail)/2);max-width:min(720px,calc(100vw - var(--dg-desktop-rail) - 40px))}
+  body:has(nav.tabs[hidden]) .wrap{width:min(1100px,calc(100% - 56px));margin-left:auto;margin-right:auto}
+  @media (hover:hover){
+    #view .menu button:hover,#view .list>.row:hover{border-color:var(--ink-2);box-shadow:0 3px 10px rgba(15,28,49,.06)}
+  }
+  #view .menu button:focus-visible,#view .list>.row:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+}
+@media screen and (min-width:1024px) and (max-width:1239px){
+  #view .menu{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #view .actions{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media screen and (min-width:1700px){
+  #view .menu{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
