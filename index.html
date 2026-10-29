@@ -866,7 +866,15 @@ function filtered(){
 function nearToggle(){
   S.near=!S.near;S.limit=60;try{localStorage.setItem("dg-near",S.near?"1":"")}catch(e){}
   if(S.near){if(!navigator.geolocation){toast("이 기기에서는 위치를 쓸 수 없어요.");S.near=false;render();return}
-    if(S.posWatch==null)S.posWatch=navigator.geolocation.watchPosition(p=>{const np={lat:p.coords.latitude,lng:p.coords.longitude};if(!S.pos||distM(S.pos,np)>8){S.pos=np;if(S.tab==="inspect"&&S.near)render()}},()=>{toast("위치 권한이 없어요. 설정에서 허용해 주세요.");S.near=false;render()},{enableHighAccuracy:true,maximumAge:5000,timeout:15000});}
+    S.pos=null; // never sort by a last-session or stale browser-estimated location
+    if(S.posWatch==null)S.posWatch=navigator.geolocation.watchPosition(p=>{
+      if(!S.near)return;
+      const quality=positionQuality(p,POSITION_MAP_FOLLOW_MAX_M);
+      if(!quality.ok){S.near=false;S.pos=null;try{localStorage.setItem("dg-near","")}catch(e){}
+        if(S.posWatch!=null){navigator.geolocation.clearWatch(S.posWatch);S.posWatch=null}
+        toast(`위치 오차 ${quality.label}로 가까운 순 정렬을 사용할 수 없어요. 주소·시설 번호 검색이나 지도를 사용해 주세요.`);render();return}
+      const np={lat:p.coords.latitude,lng:p.coords.longitude};if(!S.pos||distM(S.pos,np)>8){S.pos=np;if(S.tab==="inspect"&&S.near)render()}
+    },()=>{toast("위치 권한을 확인하거나 지도로 시설을 찾아 주세요.");S.near=false;S.pos=null;try{localStorage.setItem("dg-near","")}catch(e){}render()},{enableHighAccuracy:true,maximumAge:5000,timeout:15000});}
   else if(S.posWatch!=null){navigator.geolocation.clearWatch(S.posWatch);S.posWatch=null}
   render();
 }
@@ -976,7 +984,9 @@ const ADMIN_SECTIONS={
     <label class="f">현장 사진 (선택)</label>
     <div class="photo-in"><button type="button" class="btn ghost sm" data-pick="nPhoto">사진 찍기</button><button type="button" class="btn ghost sm" data-pick="nPhotoLib">앨범에서 선택</button><input type="file" id="nPhoto" accept="image/*" capture="environment" hidden><input type="file" id="nPhotoLib" accept="image/*" hidden><img id="nPrev" alt="" hidden></div>
     <label class="f" for="nNote">메모 (선택)</label><input class="f-in" id="nNote" placeholder="예: 표찰 탈락, 신설 등, 전주 이설">
-    <div class="split"><button class="btn ghost" data-scan="admin" type="button">표찰 스캔으로 채우기</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button></div>
+    <div class="split"><button class="btn ghost" data-scan="admin" type="button">표찰 스캔으로 채우기</button><button class="btn ghost" id="gps" type="button">현재 위치 넣기</button><button class="btn ghost" id="regMapPickBtn" type="button" aria-expanded="false" aria-controls="regMapPick">지도에서 위치 선택</button></div>
+    <p class="muted" id="regLocHelp" role="status" style="margin:8px 0 0">PC 위치는 Wi-Fi·네트워크 추정치일 수 있어요. 정확도가 낮으면 지도를 눌러 실제 설치 지점을 선택하세요.</p>
+    <div id="regMapPick" class="gmap reg-map-pick" hidden aria-label="미등록 가로등 위치 선택 지도"></div>
   </div>
   <div class="sheet-foot"><button class="btn sodium block" id="addLight">미등록으로 저장</button></div>`},
   pend:{t:"미등록 관리",d:"대장 반영·반려·연결",n:()=>pendingList().filter(l=>l.reg==="미등록").length||null,write:true,body:()=>pendingSection()},
@@ -1141,6 +1151,7 @@ function navTop(){return NAV.stack[NAV.stack.length-1]||null}
 function navState(){return{nav:NAV.stack.length,tab:S.tab}}
 // The screen being covered or replaced releases its camera, sensors, maps and panels first (its DOM is about to go).
 function sheetLeave(){
+  if(typeof regPickStop==="function")regPickStop();
   if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();cancelScanPhoto();
   if(typeof repConfirmClose==="function")repConfirmClose();if(typeof posCheckStop==="function")posCheckStop();
   if(typeof scan==="object"&&scan)scan.active=false;if(typeof stopCam==="function")stopCam(false);if(typeof stopTilt==="function")stopTilt();if(typeof arStop==="function")arStop();
@@ -1176,6 +1187,7 @@ function openSheet(html){
   setTimeout(()=>{const h=$("#sheet .sheet-head"),n=$("#sheet .subnav")||$("#sheet .rv-map-nav");if(h&&n)n.style.top=h.offsetHeight+"px"},30);
 }
 function sheetHide(){
+  if(typeof regPickStop==="function")regPickStop();
   const sheet=$("#sheet");sheet.classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close(sheet);document.body.style.overflow="";
   NAV.stack.length=0;NAV.restoring=null;NAV.replaceNext=false;NAV.leaving=0;sheetHist=false;NAV.gen++;
 }
@@ -1469,14 +1481,42 @@ document.addEventListener("click",async e=>{
   if(t.id==="repShare"){navigator.share({title:"가로등 점검 요약",text:repSummaryText()}).catch(()=>{});return}
   if(t.dataset.dossier){openLightDossier(t.dataset.dossier);return}
   if(t.dataset.ledit){if(need("admin"))openLightEdit(t.dataset.ledit);return}
-  if(t.id==="leGps"){t.disabled=true;t.textContent="측정 중…";navigator.geolocation.getCurrentPosition(p=>{$("#leLat").value=p.coords.latitude.toFixed(6);$("#leLng").value=p.coords.longitude.toFixed(6);$("#leAcc").textContent=`현재 위치로 바꿈 (±${Math.round(p.coords.accuracy)}m)`;leMoveMarker();t.disabled=false;t.textContent="현재 위치로"},()=>{toast("위치를 못 잡았어요. 위치 권한을 확인하세요.");t.disabled=false;t.textContent="현재 위치로"},{enableHighAccuracy:true,timeout:15000,maximumAge:0});return}
+  if(t.id==="leGps"){
+    if(!navigator.geolocation){toast("위치를 사용할 수 없어요. 지도에서 핀을 끌거나 좌표를 직접 입력해 주세요.");return}
+    t.disabled=true;t.textContent="위치 확인 중…";
+    const finish=()=>{if(t.isConnected){t.disabled=false;t.textContent="현재 위치로"}};
+    navigator.geolocation.getCurrentPosition(p=>{
+      if(!t.isConnected){finish();return}
+      const quality=positionQuality(p);
+      if(!quality.ok){const msg=`PC·네트워크 위치는 오차 ${quality.label}로 부정확할 수 있어요. 기존 좌표를 유지했어요. 지도에서 핀을 옮겨 주세요.`;const hint=$("#leAcc");if(hint)hint.textContent=msg;toast("위치 정확도가 낮아 좌표를 바꾸지 않았어요.");finish();return}
+      $("#leLat").value=p.coords.latitude.toFixed(6);$("#leLng").value=p.coords.longitude.toFixed(6);
+      const hint=$("#leAcc");if(hint)hint.textContent=`브라우저 위치 ${quality.label}로 입력했어요. 실제 설치 지점인지 지도를 확인해 주세요.`;
+      for(const id of ["leLat","leLng"])$("#"+id).dispatchEvent(new Event("input",{bubbles:true}));
+      leMoveMarker();finish();
+    },err=>{if(t.isConnected){const hint=$("#leAcc");if(hint)hint.textContent=positionErrorText(err);toast(positionErrorText(err))}finish()}, {enableHighAccuracy:true,timeout:15000,maximumAge:0});return
+  }
   if(t.id==="leReset"){const l=byId(t.dataset.id);if(!l)return;$("#leLat").value=typeof l.lat==="number"?l.lat.toFixed(6):"";$("#leLng").value=typeof l.lng==="number"?l.lng.toFixed(6):"";$("#leAcc").textContent="원래 좌표로 되돌림";leMoveMarker();return}
   if(t.id==="leSave"){if(need("admin"))saveLightEdit(t.dataset.id,t);return}
   if(t.id==="leUndo"){if(need("admin"))undoLightEdit(t.dataset.id);return}
   if(t.id==="csv5"){exportEditsCSV();return}
   if(t.dataset.mapone){const l=byId(t.dataset.mapone);if(l)openMap("one",l);return}
   if(t.id==="csv3"){exportPendingCSV();return}
-  if(t.id==="gps"){if(!navigator.geolocation){toast("이 기기에서는 위치를 가져올 수 없어요.");return}navigator.geolocation.getCurrentPosition(p=>{$("#nLat").value=p.coords.latitude.toFixed(5);$("#nLng").value=p.coords.longitude.toFixed(5);window.__nAcc=Math.round(p.coords.accuracy);toast(`현재 위치를 넣었어요 (±${Math.round(p.coords.accuracy)}m)`)},()=>toast("위치 권한이 없어 좌표를 직접 입력해 주세요."));return}
+  if(t.id==="regMapPickBtn"){regPickToggle();return}
+  if(t.id==="gps"){
+    if(!navigator.geolocation){const msg="브라우저 위치 기능을 사용할 수 없어요. 지도에서 위치를 선택해 주세요.";const hint=$("#regLocHelp");if(hint)hint.textContent=msg;toast(msg);return}
+    t.disabled=true;t.textContent="위치 확인 중…";
+    const finish=()=>{if(t.isConnected){t.disabled=false;t.textContent="현재 위치 넣기"}};
+    navigator.geolocation.getCurrentPosition(p=>{
+      if(!t.isConnected){finish();return}
+      const q=positionQuality(p), hint=$("#regLocHelp");
+      if(!q.ok){const msg=`브라우저 추정 위치 오차 ${q.label}: 좌표를 입력하지 않았어요. 지도에서 설치 지점을 선택해 주세요.`;if(hint)hint.textContent=msg;toast("정확도가 낮아 위치 입력을 중단했어요.");finish();return}
+      $("#nLat").value=p.coords.latitude.toFixed(6);$("#nLng").value=p.coords.longitude.toFixed(6);window.__nAcc=q.acc;
+      for(const id of ["nLat","nLng"])$("#"+id).dispatchEvent(new Event("input",{bubbles:true}));
+      if(regPickMap){regPickMark(p.coords.latitude,p.coords.longitude);regPickMap.panTo([p.coords.latitude,p.coords.longitude])}
+      if(hint)hint.textContent=`현재 위치 추정값 ${q.label}을 입력했어요. 저장 전 실제 설치 지점과 맞는지 확인하세요.`;
+      finish();
+    },err=>{if(t.isConnected){const msg=positionErrorText(err);const hint=$("#regLocHelp");if(hint)hint.textContent=msg;toast(msg)}finish()},{enableHighAccuracy:true,timeout:15000,maximumAge:0});return
+  }
   if(t.id==="csv"||t.id==="csv2"){exportCSV(t.id==="csv")}
   if(t.dataset.pick){const inp=document.getElementById(t.dataset.pick);if(inp){inp.value="";inp.click()}return}
   if(t.dataset.scan){openScanner(t.dataset.scan);return}
@@ -2334,6 +2374,52 @@ function editedSection(){
   <p class="muted" style="margin:8px 0 0">여기 바뀐 값은 이 앱에만 저장돼요. CSV로 내려받아 도로조명 관리시스템 대장에도 반영해 주세요.</p>
   ${dl?`<div class="split"><button class="btn ghost sm" id="csv5">수정 내역 CSV 내려받기</button></div>`:""}`;
 }
+/* A desktop may have no GNSS: never copy coarse IP/Wi-Fi location into the lighting registry. */
+const POSITION_INPUT_MAX_M=50,POSITION_MAP_FOLLOW_MAX_M=150;
+function positionQuality(p,limit=POSITION_INPUT_MAX_M){
+  const c=p&&p.coords||{},acc=Number(c.accuracy);
+  const valid=Number.isFinite(c.latitude)&&Math.abs(c.latitude)<=90&&Number.isFinite(c.longitude)&&Math.abs(c.longitude)<=180;
+  return {ok:valid&&Number.isFinite(acc)&&acc>=0&&acc<=limit,acc:Number.isFinite(acc)&&acc>=0?Math.round(acc):null,label:Number.isFinite(acc)&&acc>=0?"±"+Math.round(acc)+"m":"확인 불가"};
+}
+function positionErrorText(err){
+  return err&&err.code===1?"위치 권한이 차단됐어요. Windows 위치 서비스와 브라우저 사이트 권한을 확인하거나 지도를 사용하세요.":err&&err.code===3?"위치 확인 시간이 초과됐어요. 지도에서 설치 지점을 선택해 주세요.":"현재 위치를 확인하지 못했어요. 좌표 또는 지도에서 선택해 주세요.";
+}
+let regPickMap=null,regPickMarker=null;
+function regPickStop(){
+  if(regPickMap){try{regPickMap.remove()}catch(e){}regPickMap=null;regPickMarker=null}
+  const btn=$("#regMapPickBtn");if(btn){btn.setAttribute("aria-expanded","false");btn.textContent="지도에서 위치 선택"}
+}
+function regPickMark(lat,lng){
+  if(!regPickMap)return;
+  if(!regPickMarker){
+    regPickMarker=L.marker([lat,lng],{draggable:true,icon:L.divIcon({className:"lepin",html:'<div class="lepin-dot"></div>',iconSize:[30,30],iconAnchor:[15,15]})}).addTo(regPickMap);
+    regPickMarker.on("dragend",()=>{const pos=regPickMarker.getLatLng();regPickApply(pos.lat,pos.lng)});
+  }else regPickMarker.setLatLng([lat,lng]);
+}
+function regPickApply(lat,lng){
+  if(!Number.isFinite(lat)||Math.abs(lat)>90||!Number.isFinite(lng)||Math.abs(lng)>180)return;
+  const a=$("#nLat"),b=$("#nLng");if(!a||!b)return;
+  a.value=lat.toFixed(6);b.value=lng.toFixed(6);window.__nAcc=null;
+  for(const el of [a,b])el.dispatchEvent(new Event("input",{bubbles:true}));
+  regPickMark(lat,lng);
+  const hint=$("#regLocHelp");if(hint)hint.textContent=`지도에서 ${lat.toFixed(6)}, ${lng.toFixed(6)} 선택했어요. 실제 설치 위치를 확인한 뒤 저장하세요.`;
+}
+function regPickToggle(){
+  const box=$("#regMapPick"),btn=$("#regMapPickBtn");if(!box)return;
+  if(regPickMap&&regPickMap.getContainer()!==box)regPickStop();
+  if(regPickMap){regPickStop();box.hidden=true;return}
+  if(!window.L){toast("지도 기능을 불러오지 못했어요. 위도·경도를 직접 입력해 주세요.");return}
+  box.hidden=false;
+  const la=parseFloat($("#nLat").value),ln=parseFloat($("#nLng").value),valid=Number.isFinite(la)&&Math.abs(la)<=90&&Number.isFinite(ln)&&Math.abs(ln)<=180;
+  const origin=valid?[la,ln]:[35.146,126.923];
+  regPickMap=L.map(box,{zoomControl:true,attributionControl:true,tap:true}).setView(origin,valid?18:15);
+  DongguPWA.tileLayer(L).addTo(regPickMap);
+  if(valid)regPickMark(la,ln);
+  regPickMap.on("click",e=>regPickApply(e.latlng.lat,e.latlng.lng));
+  if(btn){btn.setAttribute("aria-expanded","true");btn.textContent="지도 닫기"}
+  const hint=$("#regLocHelp");if(hint)hint.textContent="지도에서 설치 위치를 클릭하세요. 표시된 핀을 끌어 세밀하게 조정할 수 있어요.";
+  setTimeout(()=>{if(regPickMap&&regPickMap.getContainer()===box)regPickMap.invalidateSize()},100);
+}
 let leMap=null,leMarker=null;
 function leMoveMarker(){const la=+$("#leLat").value,ln=+$("#leLng").value;if(!leMap||!leMarker||!la||!ln)return;leMarker.setLatLng([la,ln]);leMap.panTo([la,ln])}
 function openLightEdit(id){
@@ -2636,10 +2722,18 @@ function meDraw(){
 function meStart(center){
   if(!gmap||!navigator.geolocation){toast("위치를 가져올 수 없어요.");return}
   ME.follow=center!==false;const b=$("#mapLoc");if(b){b.setAttribute("aria-pressed",String(ME.follow));b.textContent=ME.follow?"따라가는 중":"내 위치"}
-  if(ME.follow&&ME.pos){gmap.setView([ME.pos.lat,ME.pos.lng],Math.max(gmap.getZoom(),17));meDraw()}
-  if(ME.watch==null){ME.watch=navigator.geolocation.watchPosition(p=>{const np={lat:p.coords.latitude,lng:p.coords.longitude,acc:Math.round(p.coords.accuracy)};const first=!ME.pos;
+  if(ME.follow&&ME.pos){
+    if(Number.isFinite(ME.pos.acc)&&ME.pos.acc<=POSITION_MAP_FOLLOW_MAX_M){gmap.setView([ME.pos.lat,ME.pos.lng],Math.max(gmap.getZoom(),17));meDraw()}
+    else{ME.follow=false;const btn=$("#mapLoc");if(btn){btn.setAttribute("aria-pressed","false");btn.textContent="내 위치"}toast("위치 추정 오차가 커서 지도를 이동하지 않았어요.")}
+  }
+  if(ME.watch==null){ME.watch=navigator.geolocation.watchPosition(p=>{const quality=positionQuality(p,POSITION_MAP_FOLLOW_MAX_M);const np={lat:p.coords.latitude,lng:p.coords.longitude,acc:quality.acc};const first=!ME.pos;
       if(typeof p.coords.heading==="number"&&!isNaN(p.coords.heading)&&p.coords.speed>1.2&&!ME.hOn)ME.heading=p.coords.heading;
-      ME.pos=np;ME.last=Date.now();if(first&&ME.follow)gmap.setView([np.lat,np.lng],Math.max(gmap.getZoom(),17));meDraw();const acc=$("#mapNote");if(acc&&np.acc>30)acc.textContent=`GPS 오차 ±${np.acc}m`},
+      ME.pos=np;ME.last=Date.now();
+      const coarse=!Number.isFinite(np.acc)||np.acc>POSITION_MAP_FOLLOW_MAX_M;
+      if(coarse&&ME.follow){ME.follow=false;const btn=$("#mapLoc");if(btn){btn.setAttribute("aria-pressed","false");btn.textContent="내 위치"}}
+      if(first&&ME.follow)gmap.setView([np.lat,np.lng],Math.max(gmap.getZoom(),17));
+      meDraw();const hint=$("#mapNote");if(hint){if(coarse)hint.textContent=`현재 위치는 추정치(${quality.label})여서 지도 이동을 중단했어요. 시설 마커나 지도를 직접 확인해 주세요.`;else if(np.acc>30)hint.textContent=`위치 추정 오차 ±${np.acc}m · 실제 시설 위치와 비교하세요.`}
+    },
     err=>{if(!ME.pos){toast(err&&err.code===1?"위치 권한이 없어요.":"위치를 아직 못 잡았어요.");if(err&&err.code===1)meStop()}else{ME.last=0;meDraw()}},{enableHighAccuracy:true,maximumAge:2000,timeout:15000})}
   if(!ME.hOn&&window.DeviceOrientationEvent){const on=()=>{ME.hOn=true;if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",meHeading);window.addEventListener("deviceorientation",meHeading)};
     if(typeof DeviceOrientationEvent.requestPermission==="function")DeviceOrientationEvent.requestPermission().then(r=>{if(r==="granted")on()}).catch(()=>{});else on()}

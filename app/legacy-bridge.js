@@ -78,7 +78,16 @@ function initializeOperations() {
     // A live refresh can arrive while the native file chooser is open. Keep its target alive.
     const fileInputs = [...body.querySelectorAll('input[type="file"][id]')];
     const previews = [...body.querySelectorAll('img[id]')].map(el => ({ id: el.id, src: el.getAttribute('src'), hidden: el.hidden }));
+    // Keep a visible location picker and its marker handlers when realtime data redraws the section.
+    const regMapHost = key === 'reg' ? body.querySelector('#regMapPick:not([hidden])') : null;
+    const regLocationHelp = key === 'reg' ? body.querySelector('#regLocHelp')?.textContent : null;
     body.innerHTML = section.body(); DGIntegration.restoreForm(body, fields);
+    if (regLocationHelp) { const help = body.querySelector('#regLocHelp'); if (help) help.textContent = regLocationHelp; }
+    if (regMapHost) {
+      const fresh = body.querySelector('#regMapPick');
+      if (fresh) { fresh.replaceWith(regMapHost); const pick = body.querySelector('#regMapPickBtn'); if (pick) { pick.textContent = '지도 닫기'; pick.setAttribute('aria-expanded', 'true'); } }
+      setTimeout(() => { if (typeof regPickMap !== 'undefined' && regPickMap?.getContainer() === regMapHost && regMapHost.isConnected) regPickMap.invalidateSize(); }, 50);
+    }
     if (restoredDraftNotice && typeof FD !== 'undefined' && FD.state['asec:' + key]?.persisted) body.prepend(restoredDraftNotice);
     for (const input of fileInputs) { const replacement = document.getElementById(input.id); if (replacement && body.contains(replacement)) replacement.replaceWith(input); }
     for (const item of previews) { const el = document.getElementById(item.id); if (el && item.src) { el.src = item.src; el.hidden = item.hidden; } }
