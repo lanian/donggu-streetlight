@@ -41,3 +41,4 @@ jobs:
           node scripts/bottom-nav-browser-smoke.cjs
           node scripts/desktop-ui-browser-smoke.cjs
           node scripts/pc-location-browser-smoke.cjs
+          node scripts/patrol-compact-browser-smoke.cjs
