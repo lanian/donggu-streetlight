@@ -1525,7 +1525,10 @@ document.addEventListener("click",async e=>{
   if(t.id==="ptBtn"){if(need("inspect"))openPatrol();return}
   if(t.dataset.ptmark){ptMark(t.dataset.ptmark);return}
   if(t.dataset.ptsel){pt.sel=pt.sel===t.dataset.ptsel?null:t.dataset.ptsel;ptDraw(true);return}
-  if(t.dataset.ptdrop){pt.marks=pt.marks.filter(m=>m.id!==t.dataset.ptdrop);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
+  if(t.dataset.ptshowchecked!==undefined){pt.showChecked=!pt.showChecked;ptDraw(true);return}
+  if(t.dataset.ptlogfilter){pt.historyFilter=t.dataset.ptlogfilter;pt.historyLimit=10;ptDraw(true);return}
+  if(t.id==="ptHistoryMore"){pt.historyLimit=Math.min(500,pt.historyLimit+10);ptDraw(true);return}
+  if(t.dataset.ptdrop){if(pt.on&&$("#ptHistory")?.open&&!confirm("이 순찰 기록을 빼고 다시 확인할까요?"))return;pt.marks=pt.marks.filter(m=>m.id!==t.dataset.ptdrop);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
   if(t.id==="ptUndo"){const m=pt.marks.pop();if(m)toast(`${m.code} ${m.result} 표시를 취소했어요.`);ptDraw(true);return}
   if(t.id==="ptVoice"){pt.voice=!pt.voice;t.setAttribute("aria-pressed",pt.voice);if(pt.voice)ptSay("음성 안내를 켰어요.");return}
   if(t.id==="ptPause"){pt.paused=!pt.paused;t.textContent=pt.paused?"순찰 재개":"일시정지";t.setAttribute("aria-pressed",pt.paused);return}
@@ -1534,7 +1537,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="ptDiscard"){if((pt.marks.length||pt.spots.length)&&!confirm("표시한 내용을 저장하지 않고 끝낼까요?"))return;ptReset();closeSheet();return}
   if(t.dataset.ptmap){openPatrolMap(t.dataset.ptmap);return}
   if(t.dataset.ptspot){ptSpot();return}
-  if(t.dataset.ptspotdel){pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
+  if(t.dataset.ptspotdel){if(pt.on&&$("#ptHistory")?.open&&!confirm("이 어두운 지점 기록을 뺄까요?"))return;pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
   if(t.dataset.ptspotobserve!==undefined){const i=+t.dataset.ptspotobserve,sp=pt.spots[i];if(!sp||!need("inspect"))return;if(!pt.sessionId)pt.sessionId=DGData.newId("patrol-session");DGLighting.openObservation({lat:sp.lat,lng:sp.lng,observedAt:sp.at,level:"dark",label:"순찰 중 어두운 지점",note:"순찰 기록 · GPS ±"+sp.acc+"m"+(sp.near?" · "+sp.near+" 근처":""),originKind:"patrol",originId:pt.sessionId,originPointId:String(i),positionAccuracy:sp.acc}).catch(error=>toast(error.message));return}
   if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;S.tab="admin";render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
   if(t.id==="ptListen"){ptListen(!pt.listen);return}
@@ -2860,14 +2863,17 @@ function ptDraw(force){
   $("#ptSpd").textContent=Math.round(pt.speed*3.6);$("#ptN").textContent=pt.passed.size;$("#ptM").textContent=pt.marks.length+pt.spots.length;
   if(pt.total){const inD=pt.dong==="전체"?pt.passed.size:[...pt.passed.keys()].filter(id=>{const l=byId(id);return l&&inDong(l,pt.dong)}).length;const pct=Math.min(100,Math.round(inD/pt.total*100));$("#ptBar").style.width=pct+"%";$("#ptPct").textContent=`${pct}% (${inD}/${pt.total})`}
   if(pt.camOn)ptCamDraw();if(pt.mapOn)ptMapDraw();
-  const okb=$("#ptOkBtn");if(okb){const f=pt.sel?byId(pt.sel):(pt.ahead[0]&&pt.ahead[0].l);okb.disabled=!f}
+  const okb=$("#ptOkBtn");if(okb){const f=pt.sel?byId(pt.sel):DGPatrolHistory.unmarkedTarget(pt.ahead,pt.marks);okb.disabled=!f}
   if(ROADS&&pt.pos&&(!pt.roadAt||Date.now()-pt.roadAt>4000)){pt.roadAt=Date.now();$("#ptRoad").textContent=nearestRoadName(pt.pos)||""}
-  const key=pt.ahead.map(a=>a.l.id+":"+a.d+":"+a.side).join("|")+"#"+pt.sel+"#"+pt.marks.length+"#"+pt.spots.length;
+  const key=pt.ahead.map(a=>a.l.id+":"+a.d+":"+a.side).join("|")+"#"+pt.sel+"#"+pt.marks.length+"#"+pt.spots.length+"#"+pt.showChecked+"#"+pt.historyFilter+"#"+pt.historyLimit;
   if(!force&&key===pt.key)return;pt.key=key;
   const marked=new Map(pt.marks.map(m=>[m.id,m.result]));
-  $("#ptAhead").innerHTML=pt.ahead.length?pt.ahead.map((a,i)=>`<button class="ptcard st-${esc(a.l.status)} ${(pt.sel?pt.sel===a.l.id:i===0)?"first":""}" data-ptsel="${esc(a.l.id)}"><span class="ptnum ${(pt.sel?pt.sel===a.l.id:i===0)?"sel":""}">${i+1}</span><span class="ptarrow" style="transform:rotate(${pt.heading==null?0:Math.round(angDiff(pt.heading,a.b))}deg)" aria-hidden="true">⬆</span>${repThumb(a.l)?`<img class="rthumb" src="${esc(repThumb(a.l))}" alt="대표 사진" data-repconf="${esc(a.l.id)}" data-ctx="patrol">`:""}${kindBadge(a.l.kind)}<span><b>${esc(a.l.code)}</b><br><span class="side">${a.side}${inDong(a.l,pt.dong)?"":" · 기준 동 밖"}${a.l.status!=="정상"?` · ${esc(a.l.status)}`:""}${marked.has(a.l.id)?` · <b style="color:#FFB347">${esc(marked.get(a.l.id))} 표시됨</b>`:""}</span></span><span class="d">${a.fwd<0?"지남":a.d+"m"}</span></button>`).join(""):`<div class="muted" style="color:#A9B6CC">${pt.pos?"앞쪽 140m 안에 등록된 등이 없어요.":"GPS를 기다리는 중…"}</div>`;
-  const items=[...pt.marks.map(m=>({at:m.at,html:`<b>${esc(m.code)}</b> ${esc(m.result)} <span style="color:#8A98B3">${fmtT(m.at)}</span><button data-ptdrop="${esc(m.id)}">삭제</button>`})),...pt.spots.map((sp,i)=>({at:sp.at,html:`<b>어두운 지점</b> ${sp.near?esc(sp.near)+" 근처":""} <span style="color:#8A98B3">${fmtT(sp.at)}</span><button data-ptspotdel="${i}">삭제</button>`}))].sort((a,b)=>b.at-a.at).slice(0,5);
-  $("#ptLog").innerHTML=items.map(i=>`<div>${i.html}</div>`).join("");
+  const visibleAhead=DGPatrolHistory.candidates(pt.ahead,pt.marks,pt.showChecked);
+  const pendingCount=DGPatrolHistory.candidates(pt.ahead,pt.marks,false).length;
+  const queueLabel=$("#ptQueueLabel");if(queueLabel)queueLabel.textContent="앞쪽 미점검 "+pendingCount+"개";
+  const showCheckedBtn=$("#ptShowChecked");if(showCheckedBtn){showCheckedBtn.textContent=pt.showChecked?"표시한 등 숨기기":"표시한 등 보기";showCheckedBtn.setAttribute("aria-pressed",String(pt.showChecked))}
+  $("#ptAhead").innerHTML=visibleAhead.length?visibleAhead.map((a,i)=>`<button class="ptcard st-${esc(a.l.status)} ${(pt.sel?pt.sel===a.l.id:i===0)?"first":""}" data-ptsel="${esc(a.l.id)}"><span class="ptnum ${(pt.sel?pt.sel===a.l.id:i===0)?"sel":""}">${i+1}</span><span class="ptarrow" style="transform:rotate(${pt.heading==null?0:Math.round(angDiff(pt.heading,a.b))}deg)" aria-hidden="true">⬆</span>${repThumb(a.l)?`<img class="rthumb" src="${esc(repThumb(a.l))}" alt="대표 사진" data-repconf="${esc(a.l.id)}" data-ctx="patrol">`:""}${kindBadge(a.l.kind)}<span><b>${esc(a.l.code)}</b><br><span class="side">${a.side}${inDong(a.l,pt.dong)?"":" · 기준 동 밖"}${a.l.status!=="정상"?` · ${esc(a.l.status)}`:""}${marked.has(a.l.id)?` · <b style="color:#FFB347">${esc(marked.get(a.l.id))} 표시됨</b>`:""}</span></span><span class="d">${a.fwd<0?"지남":a.d+"m"}</span></button>`).join(""):`<div class="muted" style="color:#A9B6CC">${pt.pos?(pt.ahead.length&&!pt.showChecked?"앞쪽의 등은 모두 표시했어요. 필요하면 ‘표시한 등 보기’를 눌러 확인하세요.":"앞쪽 140m 안에 등록된 등이 없어요."):"GPS를 기다리는 중…"}</div>`;
+  DGPatrolHistory.updatePanel(pt,esc,fmtT);
 }
 function nearestRoadName(pos){
   const G=lightGrid();const me=G.toXY(pos);let best=35,name="";
@@ -2877,8 +2883,8 @@ function nearestRoadName(pos){
 }
 function ptMark(result){
   if(!pt.on)return;
-  let tgt=pt.sel?byId(pt.sel):(pt.ahead[0]&&pt.ahead[0].l);
-  if(!tgt){let b=null,bd=60;for(const [id,v] of pt.passed)if(Date.now()-v.at<8000&&v.d<bd){bd=v.d;b=id}tgt=b&&byId(b)}
+  let tgt=pt.sel?byId(pt.sel):(pt.ahead.find(a=>!pt.marks.some(m=>m.id===a.l.id))?.l||null);
+  if(!tgt){let b=null,bd=60;for(const [id,v] of pt.passed)if(Date.now()-v.at<8000&&v.d<bd&&!pt.marks.some(m=>m.id===id)){bd=v.d;b=id}tgt=b&&byId(b)}
   if(!tgt){toast("표시할 등이 없어요. 등이 앞에 뜰 때 눌러 주세요.");return}
   pt.marks=pt.marks.filter(m=>m.id!==tgt.id);pt.marks.push({id:tgt.id,code:tgt.code,result,at:Date.now(),pos:pt.pos?[pt.pos.lat,pt.pos.lng]:null});
   pt.sel=null;if(navigator.vibrate)navigator.vibrate(result==="고장"?[60,40,60]:60);const scope=inDong(tgt,pt.dong)?"":" · 기준 동 밖";ptSay(`${tgt.code} ${result}${scope}`);toast(`${tgt.code} → 직접 확인 ${result}${scope}`);ptDraw(true);
@@ -2987,6 +2993,7 @@ function ptSummary(){
     ${pt.track.length>1&&window.L?`<div class="split"><button class="btn ghost sm" data-ptmap="live">경로 지도</button></div>`:""}
     <div class="split"><button class="btn ghost sm" id="ptDiscard">저장하지 않고 닫기</button>${navigator.share?`<button class="btn ghost sm" id="ptShare">일지 공유</button>`:""}</div>
     <div class="sheet-foot"><button class="btn sodium block" id="ptSave" ${S.canWrite&&(pt.passed.size||pt.marks.length||pt.spots.length)?"":"disabled"}>순찰 결과 저장</button></div>`;
+  DGPatrolHistory.compactSummary(box,pt);
 }
 function ptReportText(p){
   const marks=p.marks||[],spots=p.spots||[];const mins=Math.max(1,Math.round(((p.end||Date.now())-p.start)/60000));
