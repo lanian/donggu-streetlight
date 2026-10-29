@@ -115,3 +115,8 @@
 @media screen and (min-width:1700px){
   #view .menu{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
+
+/* Location selection works on desktops and phones when geolocation is too coarse. */
+#regMapPick{height:320px;min-height:320px;margin:10px 0 14px}
+#regMapPick[hidden]{display:none!important}
+#regLocHelp{line-height:1.5}
