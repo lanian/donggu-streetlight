@@ -73,10 +73,13 @@ function initializeOperations() {
     const section = ADMIN_SECTIONS[key]; if (!section || globalThis.rvQueryComposing && document.activeElement?.id === "rvQuery") return;
     // Snapshot form fields and selection, even when a real-time event arrives while focus is elsewhere.
     const fields = DGIntegration.captureForm(body), scroll = $('#sheet').scrollTop;
+    // Restored-draft guidance is outside the captured form fields; keep it across live redraws.
+    const restoredDraftNotice = body.querySelector('[data-fdclear]')?.closest('.notice') || null;
     // A live refresh can arrive while the native file chooser is open. Keep its target alive.
     const fileInputs = [...body.querySelectorAll('input[type="file"][id]')];
     const previews = [...body.querySelectorAll('img[id]')].map(el => ({ id: el.id, src: el.getAttribute('src'), hidden: el.hidden }));
     body.innerHTML = section.body(); DGIntegration.restoreForm(body, fields);
+    if (restoredDraftNotice && typeof FD !== 'undefined' && FD.state['asec:' + key]?.persisted) body.prepend(restoredDraftNotice);
     for (const input of fileInputs) { const replacement = document.getElementById(input.id); if (replacement && body.contains(replacement)) replacement.replaceWith(input); }
     for (const item of previews) { const el = document.getElementById(item.id); if (el && item.src) { el.src = item.src; el.hidden = item.hidden; } }
     $('#sheet').scrollTop = scroll;
