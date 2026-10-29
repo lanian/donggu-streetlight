@@ -38,6 +38,7 @@ const server=http.createServer((req,res)=>{
    assert.ok(ids.length>=30,'real local registry is available');
    assert.equal(await page.locator('#ptHistory').getAttribute('open'),null);
    assert.equal(await page.locator('#ptLog').locator('.ptlogrow').count(),0);
+   assert.equal(await page.locator('#ptHistory .ptlogfilters').isVisible(),false,'collapsed history must hide filters');
    assert.equal(await page.locator('#ptAhead .ptcard').count(),4);
    checks.push('default patrol screen shows pending lamps only; history starts collapsed');
 
@@ -76,6 +77,8 @@ const server=http.createServer((req,res)=>{
 
    await page.locator('#ptHistory summary').click();
    await page.waitForFunction(()=>document.querySelector('#ptHistory')?.open===true);
+   // toggle is queued: await the rendered rows, not only the native open attribute.
+   await page.waitForFunction(()=>document.querySelectorAll('#ptLog .ptlogrow').length===10);
    assert.equal(await page.locator('#ptLog .ptlogrow').count(),10);
    await page.locator('#ptHistoryMore').click();
    assert.equal(await page.locator('#ptLog .ptlogrow').count(),20);
@@ -106,6 +109,7 @@ const server=http.createServer((req,res)=>{
    await page.setViewportSize({width:390,height:844});
    await page.locator('#ptHistory summary').click();
    await page.waitForFunction(()=>!document.querySelector('#ptHistory')?.open);
+   await page.waitForFunction(()=>document.querySelectorAll('#ptLog .ptlogrow').length===0);
    assert.equal(await page.locator('#ptLog .ptlogrow').count(),0);
    await page.locator('#ptEnd').click();
    await page.locator('#ptSumm').waitFor();
