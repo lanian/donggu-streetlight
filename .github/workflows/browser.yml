@@ -38,3 +38,4 @@ jobs:
           node scripts/navigation-browser-smoke.cjs
           node scripts/navigation-state-browser-smoke.cjs
           node scripts/navigation-history-browser-smoke.cjs
+          node scripts/bottom-nav-browser-smoke.cjs
