@@ -96,7 +96,7 @@ input:not([type=checkbox]):not([type=radio]),select{min-height:44px}
 :focus-visible{scroll-margin:80px}
 [inert]{pointer-events:none}
 :focus-visible{outline:3px solid var(--sodium);outline-offset:2px}
-.wrap{max-width:760px;margin:0 auto;padding:0 16px 110px}
+.wrap{max-width:760px;margin:0 auto;padding:0 16px calc(110px + env(safe-area-inset-bottom,0px))}
 
 /* app bar: one line, the lamp mark is the only decoration in the app */
 header.top{position:sticky;top:0;z-index:15;display:flex;align-items:center;gap:10px;margin:0 -16px 10px;padding:8px 16px;padding-top:max(8px,env(safe-area-inset-top));background:var(--bg)}
@@ -362,16 +362,23 @@ textarea.f-in{min-height:84px;resize:vertical}
 .rolechip b{font-weight:600;overflow:hidden;text-overflow:ellipsis}
 .rolechip b{color:var(--ink)}
 .roles .row{display:flex;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap}.roles .row:first-child{border-top:0}.roles select{font:inherit;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--card);color:var(--ink)}
-nav.tabs button[hidden]{display:none}
-
-nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
-nav.tabs .in{max-width:760px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr)}
-nav.tabs button{border:0;background:transparent;padding:10px 4px 12px;font-size:13px;font-weight:600;color:var(--ink-2);display:flex;flex-direction:column;align-items:center;gap:3px}
-nav.tabs button svg{width:22px;height:22px}
-nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:800}
+/* Mobile tab navigation: distribute only visible tabs and respect gesture/safe areas. */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -5px 18px rgba(20,35,60,.07);padding-bottom:env(safe-area-inset-bottom,0px);-webkit-tap-highlight-color:transparent}
+nav.tabs[hidden],nav.tabs button[hidden]{display:none!important}
+nav.tabs .in{max-width:600px;margin:0 auto;display:flex;align-items:stretch;gap:8px;padding:8px 12px}
+nav.tabs button{position:relative;flex:1 1 0;min-width:0;min-height:62px;border:1px solid transparent;border-radius:14px;background:transparent;padding:7px 4px;color:var(--ink-2);display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;font-size:13px;font-weight:650;line-height:1.2;white-space:nowrap;touch-action:manipulation;cursor:pointer}
+nav.tabs button svg{width:24px;height:24px;flex-shrink:0}
+nav.tabs button .tab-label{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:800;background:var(--sodium-soft);border-color:var(--line)}
 nav.tabs button[aria-selected="true"] svg{color:var(--sodium)}
+nav.tabs button[aria-selected="true"]::before{content:"";position:absolute;top:3px;left:50%;transform:translateX(-50%);width:22px;height:3px;border-radius:99px;background:var(--sodium)}
+@media(hover:hover){nav.tabs button:hover:not([aria-selected="true"]){background:var(--bg)}}
+nav.tabs button:focus-visible{outline:3px solid var(--fix);outline-offset:-3px}
+@media(max-width:360px){nav.tabs .in{padding:7px 7px;gap:5px}nav.tabs button{min-height:60px;padding:6px 2px;font-size:12px}}
+@media(forced-colors:active){nav.tabs button[aria-selected="true"]{border:2px solid Highlight;background:Canvas;color:CanvasText}nav.tabs button[aria-selected="true"] svg{color:Highlight}}
+@supports selector(body:has(nav.tabs[hidden])){body:has(nav.tabs[hidden]) .wrap{padding-bottom:32px}}
 
-.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50;display:none;max-width:90%}
+.toast{position:fixed;left:50%;bottom:calc(88px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50;display:none;max-width:90%}
 .toast.show{display:block}
 .ov{position:absolute;left:10px;right:10px;top:10px;background:rgba(16,24,40,.82);color:#fff;border-radius:12px;padding:10px 12px;backdrop-filter:blur(4px);border-left:5px solid var(--c);display:none}
 .ov.show{display:block}.ov{max-height:70%;overflow:auto}
@@ -457,13 +464,13 @@ button,.btn.sm,.btn.xs,.x,.themebtn,.ovl .bar .x,.ovl .cap button{min-height:44p
   <main id="view"></main>
 </div>
 
-<nav class="tabs" role="tablist" aria-label="화면 선택"><div class="in">
-  <button role="tab" data-tab="inspect" aria-selected="true">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6v3H9zM7 5H5v16h14V5h-2"/><path d="m9 14 2 2 4-4"/></svg>현장 점검</button>
-  <button role="tab" data-tab="admin" aria-selected="false">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>관리 현황</button>
-  <button role="tab" data-tab="report" aria-selected="false">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0-6 6c0 4.5 6 12 6 12s6-7.5 6-12a6 6 0 0 0-6-6z"/><path d="M12 7v3M12 13h.01"/></svg>주민 신고</button>
+<nav class="tabs" role="tablist" aria-label="하단 메뉴"><div class="in">
+  <button role="tab" data-tab="inspect" aria-selected="true" aria-controls="view" tabindex="0">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6v3H9zM7 5H5v16h14V5h-2"/><path d="m9 14 2 2 4-4"/></svg><span class="tab-label">현장 점검</span></button>
+  <button role="tab" data-tab="admin" aria-selected="false" aria-controls="view" tabindex="-1">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="tab-label">관리 현황</span></button>
+  <button role="tab" data-tab="report" aria-selected="false" aria-controls="view" tabindex="-1">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0-6 6c0 4.5 6 12 6 12s6-7.5 6-12a6 6 0 0 0-6-6z"/><path d="M12 7v3M12 13h.01"/></svg><span class="tab-label">주민 신고</span></button>
 </div></nav>
 
 <div class="sheet-bg" id="sheetBg"></div>
@@ -822,7 +829,7 @@ function render(){
   if(typeof navRevalidate==="function")navRevalidate();
   const allowed={inspect:can("inspect"),admin:can("inspect"),report:FEATURES.reports};
   if(!allowed[S.tab])S.tab=allowed.inspect?"inspect":allowed.report?"report":"none";
-  document.querySelectorAll("nav.tabs button").forEach(b=>{b.hidden=!allowed[b.dataset.tab];b.setAttribute("aria-selected",b.dataset.tab===S.tab)});
+  document.querySelectorAll("nav.tabs button").forEach(b=>{const active=b.dataset.tab===S.tab;b.hidden=!allowed[b.dataset.tab];b.setAttribute("aria-selected",String(active));b.tabIndex=active?0:-1});
   document.querySelector("nav.tabs").hidden=Object.values(allowed).filter(Boolean).length<2;
   const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<select id="demoRole" aria-label="체험 역할" title="체험 역할 바꾸기">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v.replace(/\(.*\)/,"")}</option>`).join("")}</select>`:S.me?`<b title="${rolesReady()?"내 역할":"관리자를 아직 지정하지 않았어요"}">${rolesReady()?ROLE_LABEL[myRole()].replace(/\(.*\)/,""):"권한 설정 전"}</b>`:"";
   const v=$("#view");
@@ -1078,6 +1085,19 @@ let sheetHist=false; // kept for older call sites: true while at least one level
 try{history.replaceState({nav:0,tab:S.tab},"")}catch(e){}
 // Top-level tab changes are navigation too: Back returns to the previous tab, and from the first entry leaves the app.
 function navTabSwitch(tab){if(S.tab===tab)return;S.tab=tab;if(!NAV.stack.length){NAV.forward.length=0;try{history.pushState({nav:0,tab},"")}catch(e){}}}
+// Standard tablist keyboard navigation, using the same click/History handler as touch.
+document.querySelector("nav.tabs").addEventListener("keydown",event=>{
+  const current=event.target.closest("button[data-tab]");if(!current||current.hidden)return;
+  const buttons=[...document.querySelectorAll("nav.tabs button[data-tab]:not([hidden])")];
+  const i=buttons.indexOf(current);if(i<0)return;
+  let next;
+  if(event.key==="ArrowRight")next=(i+1)%buttons.length;
+  else if(event.key==="ArrowLeft")next=(i+buttons.length-1)%buttons.length;
+  else if(event.key==="Home")next=0;
+  else if(event.key==="End")next=buttons.length-1;
+  else return;
+  event.preventDefault();buttons[next].focus();buttons[next].click();
+});
 // A permission change while a screen is open: screens the person may no longer see are closed.
 function navRevalidate(){
   const top=navTop();if(!top||typeof can!=="function")return;const m=/^asec:(.+)$/.exec(top.key);
