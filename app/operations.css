@@ -26,3 +26,37 @@
 @media(max-width:480px){.rv-toolbar .grid2{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:480px){.dg-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.dg-metrics strong{font-size:19px}.dg-table th,.dg-table td{padding:8px 5px}}
 @media print{.dg-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.dg-table{overflow:visible}.dg-table tr{break-inside:avoid}}
+
+/* Night patrol: never crowd the forward list with completed records. */
+.ptfull .ptqueuebar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:1px 12px 0;min-height:44px;color:#DFE7F5}
+.ptfull .ptqueuebar b{font-size:13px;white-space:nowrap}
+.ptfull .ptqueuebar button{flex:none;min-height:36px;min-width:102px;border:1px solid #455672;background:#16243A;color:#E5ECFA;border-radius:10px;padding:6px 10px;font-size:12px;font-weight:700}
+.ptfull .ptqueuebar button[aria-pressed="true"]{background:#453515;border-color:#E89A0C;color:#FFCF70}
+.ptfull .ptqueuebar button:focus-visible,.ptfull .pthistory button:focus-visible,.ptfull .pthistory>summary:focus-visible{outline:3px solid #FFCE67;outline-offset:2px}
+.ptfull .pthistory{margin:3px 12px 5px;flex:none;min-height:0;max-height:min(46vh,380px);border:1px solid #34445F;background:#121E32;border-radius:12px;overflow:hidden;color:#DFE7F4;display:flex;flex-direction:column}
+.ptfull .pthistory:not([open]){max-height:64px}
+.ptfull .pthistory>summary{cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) 22px;grid-template-rows:auto auto;align-items:center;column-gap:8px;padding:8px 12px;min-height:61px;list-style:none}
+.ptfull .pthistory>summary::-webkit-details-marker{display:none}
+.ptfull .pthistory #ptHistoryTitle{grid-column:1;grid-row:1;font-size:13px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptfull .pthistory #ptHistoryLatest{grid-column:1;grid-row:2;font-size:11px;line-height:1.4;color:#AAB8CC;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptfull .pthistory .ptchevron{grid-column:2;grid-row:1/3;align-self:center;justify-self:end;font-size:21px;color:#FFCE67;transition:transform .15s}
+.ptfull .pthistory[open] .ptchevron{transform:rotate(180deg)}
+.ptfull .ptlogfilters{display:flex;gap:5px;padding:7px 9px 6px;border-top:1px solid #34445F}
+.ptfull .ptlogfilters button{flex:1;min-width:0;min-height:38px;padding:5px 2px;border:1px solid #455672;border-radius:8px;background:#182842;color:#DDE5F3;font-size:12px}
+.ptfull .ptlogfilters button[aria-pressed="true"]{color:#1B1300;border-color:#E89A0C;background:#E89A0C;font-weight:750}
+.ptfull .ptlog{margin:0 9px 8px;max-height:min(28vh,240px);overflow-y:auto;overscroll-behavior:contain;font-size:12px;scrollbar-width:thin}
+.ptfull .ptlog .ptlogrow{display:flex;align-items:center;gap:7px;padding:5px 2px;min-height:49px;border-top:1px solid #2F3E58}
+.ptfull .ptlog .ptlogrow.issue{border-left:3px solid #FFA758;padding-left:7px}
+.ptfull .ptlog .ptlogname{display:block;min-width:0;flex:1;line-height:1.4;overflow-wrap:anywhere}
+.ptfull .ptlog .ptlogname small{display:block;color:#95A6C0;font-size:11px}
+.ptfull .ptlog .ptlogrow button{flex:none;min-height:42px;min-width:48px;padding:6px 9px;margin-left:0;border:1px solid #51627D;border-radius:9px;background:#23334D;color:#E4ECF8;font-weight:650}
+.ptfull .ptlog .ptlogempty{padding:12px 4px;color:#B5C2D7;font-size:12px}
+.ptfull .ptlog .ptlogmore{width:100%;min-height:44px;margin:6px 0 0;padding:8px;border-radius:9px;background:#293C58;border-color:#4E6384;color:#E9F0FB;font-size:12px;font-weight:700}
+@media(orientation:landscape) and (min-width:600px){.ptfull .ptlog{display:block;max-height:min(24vh,170px)}.ptfull .pthistory{max-height:min(42vh,330px)}}
+#ptSumm .ptsummary-issue-title{font-weight:750;margin:14px 0 8px;color:var(--bad);font-size:14px}
+#ptSumm .ptsummary-normal{margin:12px 0;border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
+#ptSumm .ptsummary-normal>summary{min-height:50px;padding:12px 15px;cursor:pointer;font-weight:700;color:var(--ink);list-style:none}
+#ptSumm .ptsummary-normal>summary::-webkit-details-marker{display:none}
+#ptSumm .ptsummary-normal>summary::before{content:"▸";display:inline-block;width:21px;color:var(--ok)}
+#ptSumm .ptsummary-normal[open]>summary::before{content:"▾"}
+#ptSumm .ptsummary-normal .list{padding:0 10px 10px}
