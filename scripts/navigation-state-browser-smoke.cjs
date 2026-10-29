@@ -59,6 +59,10 @@ const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
       await page.waitForFunction(() => document.querySelector('#nAddr')?.value === '새로고침 전 입력');
       assert.equal(await page.locator('#nNote').inputValue(), '기기 보관');
       assert.match(await page.locator('#asecBody .notice').textContent(), /작성 중이던 등록 내용을 불러왔어요/);
+      // A live management redraw must retain the recovery notice as well as the restored values.
+      await page.evaluate(() => refreshAdminSection());
+      assert.match(await page.locator('#asecBody .notice').textContent(), /작성 중이던 등록 내용을 불러왔어요/);
+      assert.equal(await page.locator('#nAddr').inputValue(), '새로고침 전 입력');
       await page.locator('[data-fdclear="asec:reg"]').click();
       await page.waitForFunction(() => document.querySelector('#nAddr')?.value === '' && !document.querySelector('[data-fdclear]'));
       assert.equal(await page.evaluate(async () => !(await DGOffline.get('formDraft', 'asec:reg@' + DG_TAB))), true, 'emptying removes the device draft');
