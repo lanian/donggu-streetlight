@@ -1187,6 +1187,7 @@ function openSheet(html){
   setTimeout(()=>{const h=$("#sheet .sheet-head"),n=$("#sheet .subnav")||$("#sheet .rv-map-nav");if(h&&n)n.style.top=h.offsetHeight+"px"},30);
 }
 function sheetHide(){
+  if(typeof regPickStop==="function")regPickStop();
   const sheet=$("#sheet");sheet.classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close(sheet);document.body.style.overflow="";
   NAV.stack.length=0;NAV.restoring=null;NAV.replaceNext=false;NAV.leaving=0;sheetHist=false;NAV.gen++;
 }
