@@ -45,3 +45,4 @@ jobs:
           node scripts/patrol-map-browser-smoke.cjs
           node scripts/dialog-browser-smoke.cjs
           node scripts/map-view-browser-smoke.cjs
+          node scripts/visit-plan-browser-smoke.cjs

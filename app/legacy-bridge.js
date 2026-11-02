@@ -5,6 +5,7 @@ function initializeOperations() {
     byId, inDong, dongValues: () => ADONGS.map(d => 'a:' + d), dongOptions,
     render: () => render(), toast, readAll: (...args) => listAllRecords(...args), readPage: (collection, options) => DGData.readPage(db, collection, { requireServer: !!FB, ...options }), getPhoto,
     openSection: key => openAdminSection(key),
+    route: id => mapRoute(id),
     lightingReview: () => rvFresh(), lightingCandidates: rv => rvList(rv), lightingGrid: () => lightGrid(),
     lightingModel: () => ({ model: LIGHT_MODEL, calibration: CALIB }), lightingRoads: () => ROADS,
     returnLightingReview: () => returnLightingReview(),

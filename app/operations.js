@@ -8,7 +8,7 @@
   const draftVersions = new WeakMap(), editorTokens = new WeakMap();
   let subscriptions = null, watchedWorkKey = '', watchedReportId = '';
   const clone = value => JSON.parse(JSON.stringify(value));
-  const state = { orders: [], inventory: [], reports: [], settings: { inspectionDays: 90, privacyDays: 90 }, loaded: false, error: '', at: 0, filter: 'open', mine: false, deadline: 'all', urgent: false, workDong: '전체', show: 40, cursor: null, hasMore: false, workQueryKey: '', queryAt: Date.now(), workMeta: null, draft: null, completion: null, currentOrder: null, reportVersions: {}, lightVersion: null, plan: null, dueFilter: 'needed', dueDong: '전체', dueShow: 60, jobs: [], drafts: [] };
+  const state = { orders: [], inventory: [], reports: [], settings: { inspectionDays: 90, privacyDays: 90 }, loaded: false, error: '', at: 0, filter: 'open', mine: false, deadline: 'all', urgent: false, workDong: '전체', show: 40, cursor: null, hasMore: false, workQueryKey: '', queryAt: Date.now(), workMeta: null, draft: null, completion: null, currentOrder: null, reportVersions: {}, lightVersion: null, plan: null, dueFilter: 'needed', dueDong: '전체', dueShow: 60, dueSort: 'priority', pos: null, planPick: new Set(), jobs: [], drafts: [] };
   const uuid = prefix => prefix + '-' + (root.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
   const E = value => api.esc(value), Q = selector => document.querySelector(selector);
   const time = value => value ? api.fmtDT(value) : '미지정';
@@ -348,14 +348,43 @@
   }
   function dueLights() {
     const now = Date.now(), days = Number(state.settings.inspectionDays) || 90;
-    return api.state().lights.filter(l => !l.removed && api.inDong(l, state.dueDong)).map(l => ({ light: l, inspection: C.inspectionState(l, days, now) })).filter(x => state.dueFilter === 'all' || state.dueFilter === 'needed' ? state.dueFilter === 'all' || x.inspection.key !== 'current' : x.inspection.key === state.dueFilter).sort((a, b) => a.inspection.priority - b.inspection.priority || (b.inspection.overdueDays || 0) - (a.inspection.overdueDays || 0));
+    const rows = api.state().lights.filter(l => !l.removed && api.inDong(l, state.dueDong)).map(l => ({ light: l, inspection: C.inspectionState(l, days, now) })).filter(x => state.dueFilter === 'all' || state.dueFilter === 'needed' ? state.dueFilter === 'all' || x.inspection.key !== 'current' : x.inspection.key === state.dueFilter);
+    if (state.dueSort === 'near' && state.pos) return rows.map(x => ({ ...x, d: Number.isFinite(x.light.lat) ? C.distance(state.pos, x.light) : Infinity })).sort((a, b) => a.d - b.d);
+    return rows.sort((a, b) => a.inspection.priority - b.inspection.priority || (b.inspection.overdueDays || 0) - (a.inspection.overdueDays || 0));
   }
+  const fmtM = m => !Number.isFinite(m) ? '' : m < 1000 ? Math.round(m) + 'm' : (m / 1000).toFixed(1) + 'km';
+  /* One position fix for sorting and "가까운 N곳"; the list is not re-sorted while the person is picking. */
+  function locate() {
+    return new Promise(resolve => {
+      if (!root.navigator?.geolocation) { api.toast('이 기기에서는 위치를 쓸 수 없어요.'); return resolve(null); }
+      root.navigator.geolocation.getCurrentPosition(p => { state.pos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: Date.now() }; resolve(state.pos); },
+        () => { api.toast('내 위치를 가져오지 못했어요. 위치 권한을 확인해 주세요.'); resolve(null); }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+    });
+  }
+  // a stop counts as done when it was ticked, or when the light was inspected after the plan was made
+  const stopDone = (plan, s) => !!s.visited || (Number(api.byId(s.id)?.lastInspected) || 0) >= (plan.createdAt || 0);
+  function relegs(plan) { plan.stops.forEach((s, i) => { s.distanceFromPrevious = i ? Math.round(C.distance(plan.stops[i - 1], s)) : 0; }); plan.distance = plan.stops.reduce((sum, s) => sum + (s.distanceFromPrevious || 0), 0); return plan; }
   function dueView() {
-    ensure(); const rows = dueLights(), plan = state.plan;
-    return '<div class="panel"><p>점검 주기 ' + (Number(state.settings.inspectionDays) || 90) + '일 · 단순 순찰 통과는 항목별 점검과 구분해요.</p><div class="grid2"><select class="f-in" id="dgDueDong" aria-label="대상 행정동">' + api.dongOptions(state.dueDong) + '</select><select class="f-in" id="dgDueFilter" aria-label="점검 상태">' + Object.entries({ needed: '확인이 필요한 전체', never: '점검 기록 없음', overdue: '기한 초과', redo: '재점검 요청', all: '철거 제외 전체' }).map(([v, t]) => '<option value="' + v + '"' + (state.dueFilter === v ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div><div class="split"><button class="btn ghost" data-dg="due-map">대상 지도</button><button class="btn sodium" data-dg="make-plan">선택한 시설 방문 계획</button></div><p class="muted">대상 ' + rows.length + '개 · 지도와 목록은 같은 조건을 사용해요.</p></div><div class="list">' + rows.slice(0, state.dueShow).map(({ light: l, inspection: ins }) => '<div class="dg-due-row"><input type="checkbox" data-plan-light="' + E(l.id) + '" aria-label="' + E(l.code + ' 방문 계획에 선택') + '"><button class="light-row" data-light="' + E(l.id) + '"><b>' + E(l.code) + '</b><span class="chip">' + E(l.status) + '</span><small>' + E(ins.label) + ' · ' + E(l.dong) + '</small></button></div>').join('') + '</div>' + (rows.length > state.dueShow ? '<button class="btn ghost block" data-dg="more-due">더 보기</button>' : '') + (plan ? planView(plan) : '');
+    ensure(); const rows = dueLights(), plan = state.plan, shown = rows.slice(0, state.dueShow);
+    state.planPick = new Set([...state.planPick].filter(id => api.byId(id) && !api.byId(id).removed));
+    const picked = state.planPick.size, near = state.dueSort === 'near' && !!state.pos;
+    return (plan ? planView(plan) : '') +
+      '<h2 id="dgDueTargets">점검 대상 고르기</h2><div class="panel"><p>점검 주기 ' + (Number(state.settings.inspectionDays) || 90) + '일 · 단순 순찰 통과는 항목별 점검과 구분해요.</p><div class="grid2"><select class="f-in" id="dgDueDong" aria-label="대상 행정동">' + api.dongOptions(state.dueDong) + '</select><select class="f-in" id="dgDueFilter" aria-label="점검 상태">' + Object.entries({ needed: '확인이 필요한 전체', never: '점검 기록 없음', overdue: '기한 초과', redo: '재점검 요청', all: '철거 제외 전체' }).map(([v, t]) => '<option value="' + v + '"' + (state.dueFilter === v ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>' +
+      '<div class="split dg-quick"><button class="btn ghost sm" data-dg="due-sort" aria-pressed="' + near + '">' + (near ? '가까운 순 ✓' : '가까운 순으로') + '</button><button class="btn ghost sm" data-dg="pick-near">' + (near ? '가까운 10곳 선택' : '위 10곳 선택') + '</button><button class="btn ghost sm" data-dg="pick-all">보이는 ' + Math.min(shown.length, 200) + '곳 선택</button>' + (picked ? '<button class="btn ghost sm" data-dg="pick-none">선택 해제</button>' : '') + '</div>' +
+      '<div class="split"><button class="btn ghost" data-dg="due-map">대상 지도</button><button class="btn sodium" data-dg="make-plan"' + (picked ? '' : ' disabled') + '>' + (picked ? '선택한 ' + picked + '곳 방문 계획' : '시설을 골라 방문 계획') + '</button></div><p class="muted">대상 ' + rows.length + '개 · 지도와 목록은 같은 조건을 사용해요.' + (near ? ' 내 위치(±' + Math.round(state.pos.acc || 0) + 'm) 기준 가까운 순이에요.' : '') + (picked > 200 ? ' 한 계획은 200곳까지라 앞의 200곳만 들어가요.' : '') + '</p></div>' +
+      '<div class="list">' + shown.map(({ light: l, inspection: ins, d }) => '<div class="dg-due-row' + (state.planPick.has(l.id) ? ' picked' : '') + '"><input type="checkbox" data-plan-light="' + E(l.id) + '"' + (state.planPick.has(l.id) ? ' checked' : '') + ' aria-label="' + E(l.code + ' 방문 계획에 선택') + '"><button class="light-row" data-light="' + E(l.id) + '"><b>' + E(l.code) + '</b><span class="chip">' + E(l.status) + '</span><small>' + E(ins.label) + ' · ' + E(l.dong) + '</small>' + (near && Number.isFinite(d) ? '<span class="dg-dist">' + fmtM(d) + '</span>' : '') + '</button></div>').join('') + '</div>' + (rows.length > state.dueShow ? '<button class="btn ghost block" data-dg="more-due">더 보기</button>' : '');
   }
   function planView(plan) {
-    return '<h2>내 방문 계획</h2><div class="panel"><p>직선 연결 약 ' + (plan.distance / 1000).toFixed(1) + 'km · ' + plan.stops.filter(s => s.visited).length + '/' + plan.stops.length + '곳 방문</p><p class="muted">직선 거리로 제안한 방문 순서예요. 차량 통행·일방통행·도로 진입 경로는 현장에서 확인해 주세요. 방문 표시로 점검 결과가 바뀌지는 않아요.</p><div class="split"><button class="btn ghost sm" data-dg="plan-map">계획 지도</button><button class="btn ghost sm" data-dg="plan-csv">계획 CSV</button><button class="btn ghost sm" data-dg="clear-plan">계획 지우기</button></div>' + plan.stops.map((s, i) => '<div class="dg-plan-stop"><label><input type="checkbox" data-plan-visited="' + i + '"' + (s.visited ? ' checked' : '') + '> ' + (i + 1) + '. ' + E(s.code) + '</label><button class="btn ghost sm" data-light="' + E(s.id) + '">점검</button>' + (s.workIds || []).map((id, n) => '<button class="btn ghost sm" data-dg="open-work" data-id="' + E(id) + '">보수 작업 ' + (n + 1) + '</button>').join('') + '<button class="btn ghost sm" data-dg="plan-up" data-index="' + i + '"' + (!i ? ' disabled' : '') + '>위로</button></div>').join('') + '</div>';
+    const done = plan.stops.map(s => stopDone(plan, s)), doneCount = done.filter(Boolean).length, nextIndex = done.indexOf(false), next = nextIndex >= 0 ? plan.stops[nextIndex] : null;
+    const nextLight = next && api.byId(next.id), fromMe = next && state.pos ? C.distance(state.pos, next) : null;
+    const pct = plan.stops.length ? Math.round(doneCount / plan.stops.length * 100) : 0;
+    return '<h2>내 방문 계획 <span class="muted">' + doneCount + '/' + plan.stops.length + '곳</span></h2><div class="panel dg-plan">' +
+      '<div class="dg-progress" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100" aria-label="방문 진행"><i style="width:' + pct + '%"></i></div>' +
+      '<p>직선 연결 약 ' + (plan.distance / 1000).toFixed(1) + 'km · ' + (plan.createdAt ? time(plan.createdAt) + ' 작성' : '') + (plan.filters ? ' · 보수 작업 조건에서 만든 계획' : '') + '</p>' +
+      (next ? '<div class="dg-plan-next"><small>다음 방문지 ' + (nextIndex + 1) + '/' + plan.stops.length + (fromMe != null ? ' · 내 위치에서 ' + fmtM(fromMe) : '') + '</small><b>' + E(next.code) + '</b> <span class="muted">' + E(next.dong) + (nextLight ? ' · ' + E(C.inspectionState(nextLight, Number(state.settings.inspectionDays) || 90, Date.now()).label) : '') + '</span><div class="split"><button class="btn sodium sm" data-light="' + E(next.id) + '">점검하기</button><button class="btn ghost sm" data-dg="plan-route" data-id="' + E(next.id) + '">길찾기</button><button class="btn ghost sm" data-dg="plan-visit" data-index="' + nextIndex + '">방문 완료</button></div></div>' : '<div class="dg-plan-next done"><b>모든 방문지를 마쳤어요.</b> <span class="muted">계획을 지우거나 새 계획을 만들 수 있어요.</span></div>') +
+      '<p class="muted">직선 거리로 제안한 방문 순서예요. 차량 통행·일방통행·도로 진입 경로는 현장에서 확인해 주세요. 방문 표시로 점검 결과가 바뀌지는 않아요. 계획을 만든 뒤 점검을 저장한 시설은 자동으로 완료로 표시돼요.</p>' +
+      '<div class="split"><button class="btn ghost sm" data-dg="plan-map">계획 지도</button><button class="btn ghost sm" data-dg="plan-reorder">내 위치에서 다시 정렬</button><button class="btn ghost sm" data-dg="plan-csv">계획 CSV</button><button class="btn ghost sm" data-dg="clear-plan">계획 지우기</button></div>' +
+      plan.stops.map((s, i) => '<div class="dg-plan-stop' + (done[i] ? ' done' : '') + (i === nextIndex ? ' next' : '') + '"><label><input type="checkbox" data-plan-visited="' + i + '"' + (s.visited ? ' checked' : '') + (done[i] && !s.visited ? ' disabled title="점검을 저장해 완료됐어요"' : '') + '> <span class="n">' + (i + 1) + '</span> <b>' + E(s.code) + '</b><small>' + E(s.dong) + (i ? ' · +' + fmtM(s.distanceFromPrevious) : ' · 출발') + (done[i] && !s.visited ? ' · <span class="dg-auto">점검 완료</span>' : '') + '</small></label><span class="dg-plan-acts"><button class="btn ghost sm" data-light="' + E(s.id) + '">점검</button>' + (s.workIds || []).map((id, n) => '<button class="btn ghost sm" data-dg="open-work" data-id="' + E(id) + '">보수 ' + (n + 1) + '</button>').join('') + '<button class="btn ghost sm" data-dg="plan-up" data-index="' + i + '"' + (!i ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 위로">위로</button><button class="btn ghost sm" data-dg="plan-down" data-index="' + i + '"' + (i === plan.stops.length - 1 ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 아래로">아래로</button></span></div>').join('') + '</div>';
   }
   async function refreshQueue() {
     if (!root.DGOffline.ready) return;
@@ -387,9 +416,25 @@
     if (action === 'remove-lux') { state.completion.measurements.splice(+button.dataset.index, 1); Q('#woMeasurements').innerHTML = measureRows(state.completion.measurements); return persistCompletion(); }
     if (action === 'due-map') return api.openMap('custom', { title: '미점검·기한 초과', pts: dueLights().map(x => x.light) });
     if (action === 'more-due') { state.dueShow += 100; return notify(); }
-    if (action === 'make-plan') { const chosen = [...document.querySelectorAll('[data-plan-light]:checked')].map(x => api.byId(x.dataset.planLight)).filter(Boolean); if (!chosen.length) throw new Error('방문할 시설을 선택해 주세요.'); state.plan = C.planVisits(chosen, api.state().pos); await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
-    if (action === 'plan-map') return api.openMap('custom', { title: '방문 계획 · 직선 순서', pts: state.plan.stops.map(s => api.byId(s.id)).filter(Boolean) });
-    if (action === 'plan-up') { const i = +button.dataset.index; if (i > 0) [state.plan.stops[i - 1], state.plan.stops[i]] = [state.plan.stops[i], state.plan.stops[i - 1]]; state.plan.distance = Math.round(state.plan.stops.slice(1).reduce((sum, p, n) => sum + C.distance(state.plan.stops[n], p), 0)); await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
+    if (action === 'due-sort') { if (state.dueSort === 'near' && state.pos) { state.dueSort = 'priority'; return notify(); } if (!await locate()) return notify(); state.dueSort = 'near'; return notify(); }
+    if (action === 'pick-near' || action === 'pick-all') {
+      // "가까운 10곳" uses the position only when 가까운 순 is on; otherwise the first ten of the current order are taken
+      const rows = dueLights(), take = (action === 'pick-near' ? rows.slice(0, 10) : rows.slice(0, Math.min(state.dueShow, 200))).map(x => x.light.id);
+      take.forEach(id => state.planPick.add(id)); return notify();
+    }
+    if (action === 'pick-none') { state.planPick.clear(); return notify(); }
+    if (action === 'make-plan') { const chosen = [...state.planPick].map(id => api.byId(id)).filter(Boolean).slice(0, 200); if (!chosen.length) throw new Error('방문할 시설을 선택해 주세요.'); state.plan = C.planVisits(chosen, state.pos || api.state().pos); state.planPick.clear(); await root.DGOffline.put('plan', 'current', state.plan); api.toast(state.plan.stops.length + '곳 방문 계획을 만들었어요.'); return notify(); }
+    if (action === 'plan-map') return api.openMap('custom', { title: '방문 계획 · 직선 순서', pts: state.plan.stops.map(s => api.byId(s.id)).filter(Boolean), ordered: true, done: state.plan.stops.filter(s => stopDone(state.plan, s)).map(s => s.id) });
+    if (action === 'plan-route') return api.route ? api.route(button.dataset.id) : api.toast('길찾기를 쓸 수 없어요.');
+    if (action === 'plan-visit') { const s = state.plan.stops[+button.dataset.index]; if (!s) return; s.visited = true; await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
+    if (action === 'plan-reorder') {
+      if (!state.pos && !await locate()) return;
+      const done = state.plan.stops.filter(s => stopDone(state.plan, s)), left = state.plan.stops.filter(s => !stopDone(state.plan, s));
+      if (left.length < 2) { api.toast('다시 정렬할 남은 방문지가 없어요.'); return; }
+      const re = C.planVisits(left, state.pos); state.plan.stops = [...done, ...re.stops.map(s => ({ ...s, visited: false }))]; relegs(state.plan); state.plan.reorderedAt = Date.now();
+      await root.DGOffline.put('plan', 'current', state.plan); api.toast('내 위치에서 가까운 순으로 남은 방문지를 다시 정렬했어요.'); return notify();
+    }
+    if (action === 'plan-up' || action === 'plan-down') { const i = +button.dataset.index, j = action === 'plan-up' ? i - 1 : i + 1; if (j < 0 || j >= state.plan.stops.length) return; [state.plan.stops[i], state.plan.stops[j]] = [state.plan.stops[j], state.plan.stops[i]]; relegs(state.plan); await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
     if (action === 'clear-plan') { if (!await ask('현재 방문 계획을 지워요. 점검 기록은 유지돼요.', { title: '방문 계획을 지울까요?', ok: '지우기', danger: true })) return; state.plan = null; await root.DGOffline.remove('plan', 'current'); return notify(); }
     if (action === 'plan-csv') return download('동구_방문계획', [['순서', '시설', '시설ID', '법정동', '위도', '경도', '방문', '연결 작업ID'], ...state.plan.stops.map((p, i) => [i + 1, p.code, p.id, p.dong, p.lat, p.lng, p.visited ? '방문' : '미방문', (p.workIds || []).join(' · ')])]);
     if (['work-csv', 'work-map', 'work-plan'].includes(action)) {
@@ -454,6 +499,7 @@
         if (e.target.id === 'woStockPart') { const item = state.inventory.find(x => x.id === e.target.value); if (item) { Q('#woPartName').value = item.name; Q('#woPartCost').value = item.unitCost; } }
         if (e.target.id === 'dgDueDong') { state.dueDong = e.target.value; state.dueShow = 60; notify(); }
         if (e.target.id === 'dgDueFilter') { state.dueFilter = e.target.value; state.dueShow = 60; notify(); }
+        if (e.target.dataset.planLight) { if (e.target.checked) state.planPick.add(e.target.dataset.planLight); else state.planPick.delete(e.target.dataset.planLight); const btn = Q('[data-dg="make-plan"]'); if (btn) { btn.disabled = !state.planPick.size; btn.textContent = state.planPick.size ? '선택한 ' + state.planPick.size + '곳 방문 계획' : '시설을 골라 방문 계획'; } e.target.closest('.dg-due-row')?.classList.toggle('picked', e.target.checked); }
         if (e.target.dataset.planVisited !== undefined && state.plan) { state.plan.stops[+e.target.dataset.planVisited].visited = e.target.checked; await root.DGOffline.put('plan', 'current', state.plan); notify(); }
       })().catch(error => api.toast(error.message));
     });

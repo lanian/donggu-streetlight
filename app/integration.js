@@ -132,7 +132,8 @@
     const values = [], focus = document.activeElement;
     for (const el of container.querySelectorAll('input,textarea,select,[aria-pressed]')) {
       if (el.type === 'file') continue;
-      const key = el.id ? '#' + CSS.escape(el.id) : el.hasAttribute('data-plan-light') ? '[data-plan-light="' + CSS.escape(el.dataset.planLight) + '"]' : el.hasAttribute('data-ibissue') ? '[data-ibissue="' + CSS.escape(el.dataset.ibissue) + '"]' : null;
+      // visit-plan picks ([data-plan-light]) are state-driven (DGOperations.state.planPick) and are redrawn from it, not restored here
+      const key = el.id ? '#' + CSS.escape(el.id) : el.hasAttribute('data-ibissue') ? '[data-ibissue="' + CSS.escape(el.dataset.ibissue) + '"]' : null;
       if (!key) continue;
       values.push({ key, value: el.value, checked: el.checked, pressed: el.getAttribute('aria-pressed'), data: { ...el.dataset }, focused: el === focus, start: el.selectionStart, end: el.selectionEnd });
     }
