@@ -22,7 +22,7 @@ const server=http.createServer((req,res)=>{
  // tiles and any other outside request answer empty: the map still lays out and draws markers
  await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.fulfill({status:200,body:'',contentType:route.request().url().includes('.js')?'text/javascript':'text/plain'}));
  const page=await context.newPage(),errors=[],checks=[];
- page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+ page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept()); await page.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
  const numbers=()=>page.evaluate(()=>[...document.querySelectorAll('#ptMapBox .ptmapnum div')].map(d=>d.textContent).sort((a,b)=>a-b));
  // rotation angle of the number badges, read from the computed matrix once the transition has settled
  const badgeAngles=()=>page.evaluate(()=>[...new Set([...document.querySelectorAll('#ptMapBox .ptmapnum div')].map(d=>{const m=new DOMMatrixReadOnly(getComputedStyle(d).transform);return Math.round(Math.atan2(m.b,m.a)*180/Math.PI)}))]);

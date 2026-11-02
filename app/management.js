@@ -1,5 +1,7 @@
 (function (root) {
   'use strict';
+  /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
+  const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   const C = root.DGOperationsCore;
   let api, attached = false, loading = null, registryLoad = 0;
   const today = new Date(), localDate = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -85,7 +87,7 @@
       entries.push({ id: row.id, before: { removed: current.removed || null, registryJobId: current.registryJobId || null }, patch: { removed: true, removedAt: Date.now() } });
     }
     if (!entries.length) return api.toast('보존 정책을 적용하면 변경할 항목이 없어요.');
-    if (!confirm(entries.length + '개 시설의 대장 정보를 적용할까요?' + (removeMissing ? ' 새 대장에 빠진 시설에 철거 표시가 추가돼요.' : ''))) return;
+    if (!await ask(entries.length + '개 시설의 대장 정보를 적용해요.' + (removeMissing ? ' 새 대장에 빠진 시설에 철거 표시가 추가돼요.' : ''), { title: '대장을 적용할까요?', ok: '적용', danger: removeMissing })) return;
     const job = { id: root.DGOperations.uuid('registry'), actor: api.state().me, at: Date.now(), source: state.source, preserveOverrides: keep, markMissingRemoved: removeMissing, entries, counts: { added: diff.added.length, changed: diff.changed.length, missing: diff.missing.length } };
     button.disabled = true;
     try {
@@ -129,7 +131,7 @@
     const rows = await api.readAll('reports', { requireServer: !!api.firebase() });
     const values = rows.filter(r => r.contact && r.createdAt < cut);
     if (!values.length) return api.toast('보관 기간이 지난 연락처가 없어요.');
-    if (!confirm('보관 기간 ' + days + '일이 지난 연락처 ' + values.length + '건을 파기할까요? 신고 내용과 처리 이력은 유지돼요.')) return;
+    if (!await ask('보관 기간 ' + days + '일이 지난 연락처 ' + values.length + '건을 파기해요. 신고 내용과 처리 이력은 유지돼요.', { title: '연락처를 파기할까요?', ok: '파기', danger: true })) return;
     const job = { id: root.DGOperations.uuid('privacy'), actor: api.state().me, at: Date.now(), ids: values.map(r => r.id), cut };
     const result = await root.DGOffline.submit('privacy', job, { id: job.id, summary: '연락처 보관 기간 만료 · ' + values.length + '건' });
     api.toast(result.state === 'synced' ? '기한이 지난 연락처를 파기했어요.' : result.error || '저장 대기함에서 처리를 이어가요.');

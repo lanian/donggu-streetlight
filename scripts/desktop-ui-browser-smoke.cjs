@@ -21,7 +21,7 @@ const cssColumns=value=>value.split(' ').filter(Boolean).length;
  const context=await browser.newContext({viewport:{width:1440,height:900},serviceWorkers:'block'});
  await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.fulfill({status:200,body:'',contentType:route.request().url().endsWith('.js')?'text/javascript':'text/plain'}));
  const page=await context.newPage(),errors=[],results=[];
- page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+ page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept()); await page.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
  const layout=()=>page.evaluate(()=>{
    const rect=s=>document.querySelector(s).getBoundingClientRect();
    const nav=rect('nav.tabs'),wrap=rect('.wrap');

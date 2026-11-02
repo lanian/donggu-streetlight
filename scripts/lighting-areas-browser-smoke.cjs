@@ -38,7 +38,7 @@ async function poll(page, predicate, argument, label) {
       if (url.pathname === '/data/lights.json') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(registry) });
       return route.continue();
     });
-    const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); page.on('dialog', dialog => dialog.accept());
+    const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); page.on('dialog', dialog => dialog.accept()); await page.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
     const ready = async () => { await page.waitForFunction(() => typeof S !== 'undefined' && S.live && DGOffline.ready && typeof DGLightingAreas !== 'undefined'); assert.equal(await page.evaluate(() => DGIntegration.whenReady()), true); await poll(page, () => DGLightingAreas.state.loaded, null, 'review areas loaded'); };
     await page.goto(origin); await ready();
     assert.equal(await page.evaluate(() => FIREBASE_CONFIG), null); assert.equal(await page.evaluate(() => S.me), 'local');

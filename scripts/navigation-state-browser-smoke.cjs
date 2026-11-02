@@ -29,6 +29,21 @@ const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
     const page = await context.newPage();
     const dialogs = []; page.dialogs = dialogs; page.answer = true;
     page.on('pageerror', e => errors.push(name + ': ' + e.message)); page.on('dialog', dialog => { dialogs.push(dialog.message()); page.answer ? dialog.accept() : dialog.dismiss(); });
+    // The form guard asks through the in-app dialog (app/dialog.js), not window.confirm: record its text and answer it
+    // the way page.answer says, like the native handler above.
+    await page.exposeFunction('__dgDialogShown', (text, answer) => { dialogs.push(text); });
+    await page.addInitScript(() => {
+      const seen = new WeakSet();
+      new MutationObserver(() => {
+        const host = document.querySelector('#dgDialog:not([hidden])'); if (!host) return;
+        const box = host.querySelector('.dgdlg'); if (!box || seen.has(box)) return; seen.add(box);
+        const text = [host.querySelector('.dgdlg-title')?.textContent, host.querySelector('.dgdlg-msg')?.textContent].filter(Boolean).join(' · ');
+        window.__dgDialogShown(text);
+        setTimeout(() => host.querySelector(window.__dgAnswer === false ? '[data-dgdlg="cancel"]' : '[data-dgdlg="ok"]')?.click(), 30);
+      }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
+    });
+    const setAnswer = async v => { page.answer = v; await page.evaluate(v => { window.__dgAnswer = v; }, v); };
+    page.setAnswer = setAnswer;
     try {
       await page.goto(origin); await ready(page);
       await page.evaluate(() => { S.demoRole = 'admin'; S.tab = 'admin'; render(); });
@@ -72,13 +87,14 @@ const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
       assert.equal(await page.evaluate(() => DGOffline.durable), false);
       await page.evaluate(() => openAdminSection('inbox')); await page.locator('#ibNum').waitFor();
       await page.locator('#ibDesc').fill('공유 기기 입력'); await page.waitForTimeout(700);
-      page.answer = false; await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+      await page.setAnswer(false); await page.keyboard.press('Escape'); await page.waitForTimeout(300);
       assert.equal(page.dialogs.length, 1); assert.match(page.dialogs[0], /보관하지 않아요/);
       assert.equal(await sheetOpen(page), true, 'cancel keeps the form'); assert.equal(await page.locator('#ibDesc').inputValue(), '공유 기기 입력');
-      await page.goBack(); await page.waitForTimeout(300);
+      assert.equal(await page.evaluate(() => !!document.querySelector('#dgDialog:not([hidden])')), false, 'the dialog is gone after 머무르기');
+      await page.goBack(); await page.waitForTimeout(400);
       assert.equal(page.dialogs.length, 2); assert.equal(await sheetOpen(page), true, 'phone Back refused by the guard restores the level');
       assert.equal(await page.evaluate(() => history.state && history.state.nav), 1);
-      page.answer = true; await page.locator('#sheet .sheet-head .x[data-close]').click();
+      await page.setAnswer(true); await page.locator('#sheet .sheet-head .x[data-close]').click();
       await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
       assert.equal(page.dialogs.length, 3);
     });
@@ -87,9 +103,9 @@ const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
       await page.evaluate(() => openAdminSection('reg')); await page.locator('#nAddr').waitFor();
       await page.locator('#nAddr').fill('용량 부족 입력'); await page.waitForTimeout(700);
       assert.equal(await page.evaluate(() => FD.state['asec:reg'].persisted), false); assert.match(await page.evaluate(() => FD.state['asec:reg'].error), /Quota/);
-      page.answer = false; await page.locator('#sheet .sheet-head .x[data-close]').click(); await page.waitForTimeout(200);
+      await page.setAnswer(false); await page.locator('#sheet .sheet-head .x[data-close]').click(); await page.waitForTimeout(300);
       assert.match(page.dialogs.at(-1), /보관하지 못했어요/); assert.equal(await sheetOpen(page), true);
-      page.answer = true; await page.locator('#sheet .sheet-head .x[data-close]').click();
+      await page.setAnswer(true); await page.locator('#sheet .sheet-head .x[data-close]').click();
       await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
       await page.evaluate(() => { DGOffline.put = window.__realPut; });
     });

@@ -53,7 +53,7 @@ async function openFixture(browser, origin) {
   });
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
-  page.on('dialog', dialog => dialog.accept());
+  page.on('dialog', dialog => dialog.accept()); await page.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
   await page.goto(origin);
   await page.waitForFunction(() => typeof S !== 'undefined' && S.live && DGOffline.ready);
   assert.equal(await page.evaluate(() => FIREBASE_CONFIG), null, 'the smoke never configures a production Firebase project');
@@ -282,7 +282,7 @@ async function main() {
 
       const secondPage = await fixture.context.newPage();
       secondPage.on('pageerror', error => errors.push(error.message));
-      secondPage.on('dialog', dialog => dialog.accept());
+      secondPage.on('dialog', dialog => dialog.accept()); await secondPage.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
       await secondPage.goto(origin); await secondPage.waitForFunction(() => S.live && DGOffline.ready);
       assert.equal(await secondPage.evaluate(() => DGIntegration.whenReady()), true);
       await page.evaluate(point => DGLighting.openEditor('observation', point), point);

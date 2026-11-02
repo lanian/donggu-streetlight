@@ -29,7 +29,7 @@ const PIXEL_NODE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAA
   const poll = async (page, fn, label) => { for (let i = 0; i < 100; i++) { if (await page.evaluate(fn)) return; await page.waitForTimeout(100); } throw new Error('timed out waiting for ' + label); };
   async function scenario(name, run) {
     const page = await context.newPage();
-    page.on('pageerror', e => errors.push(name + ': ' + e.message)); page.on('dialog', dialog => dialog.accept());
+    page.on('pageerror', e => errors.push(name + ': ' + e.message)); page.on('dialog', dialog => dialog.accept()); await page.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
     try {
       await page.goto(origin); await page.waitForFunction(() => S.live && DGOffline.ready && S.me === 'local' && DGIntegration.initialized);
       await page.evaluate(() => { S.demoRole = 'admin'; S.tab = 'admin'; render(); });

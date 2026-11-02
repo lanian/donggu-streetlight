@@ -43,3 +43,4 @@ jobs:
           node scripts/pc-location-browser-smoke.cjs
           node scripts/patrol-compact-browser-smoke.cjs
           node scripts/patrol-map-browser-smoke.cjs
+          node scripts/dialog-browser-smoke.cjs

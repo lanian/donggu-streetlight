@@ -5,7 +5,7 @@ const {webcrypto}=require('node:crypto');
 const html=fs.readFileSync(path.resolve(__dirname,'../../index.html'),'utf8');
 const dataJS=fs.readFileSync(path.resolve(__dirname,'../../app/data.js'),'utf8');
 const clone=x=>JSON.parse(JSON.stringify(x));
-function context(extra={}){const security=require('../../security.js'),c=vm.createContext({console,Date,Math,Blob,crypto:webcrypto,window:{},FB:null,S:{me:'staff'},render(){},toast(){},confirm:()=>true,resolveNames(){},...security,DGSecurity:security,...extra});vm.runInContext(dataJS,c);c.listAllRecords=(name,opts)=>c.DGData.readAll(c.db,name,opts);return c}
+function context(extra={}){const security=require('../../security.js'),c=vm.createContext({console,Date,Math,Blob,crypto:webcrypto,window:{},FB:null,S:{me:'staff'},render(){},toast(){},confirm:()=>true,dgConfirm:async()=>true,resolveNames(){},...security,DGSecurity:security,...extra});vm.runInContext(dataJS,c);c.listAllRecords=(name,opts)=>c.DGData.readAll(c.db,name,opts);return c}
 function load(c,start,end){const a=html.indexOf(start),b=html.indexOf(end,a);assert(a>=0&&b>a,start);vm.runInContext(html.slice(a,b),c)}
 function backing(initial={}){let data=JSON.stringify(initial);return{fail:false,getItem:()=>data,setItem(key,value){if(this.fail)throw Object.assign(new Error('quota'),{name:'QuotaExceededError'});data=value},dump:()=>JSON.parse(data)}}
 function local(initial={}){const storage=backing(initial),c=context();return{storage,db:c.DGData.createLocalDB({storage}),api:c.DGData}}

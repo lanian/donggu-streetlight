@@ -1,6 +1,8 @@
 /* Supplemental light sources and field evidence remain separate from the managed registry. */
 (function (root) {
   'use strict';
+  /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
+  const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   let api, attached = false, loading = null, reloadRequested = false, signature = '', unsubscribe, draftWrites = Promise.resolve(), editorMap;
   const state = { records: [], loaded: false, error: '', revision: 0, draft: null, filter: 'all', show: 40 };
   const Q = selector => document.querySelector(selector), E = value => api.esc(value == null ? '' : value);
@@ -94,7 +96,7 @@
       const record = id && state.records.find(r => r.id === id);
       if (id && !record) return api.toast('기록을 찾을 수 없어요. 새로고침해 주세요.');
       const saved = id && root.DGOffline.ready ? await root.DGOffline.get('lightingDraft', id) : null;
-      if (saved && confirm('이 기록의 작성 중인 초안을 이어 쓸까요?')) { state.draft = saved; renderEditor(); return; }
+      if (saved && await ask('이 기록의 작성 중인 초안을 이어 쓸까요?', { ok: '이어 쓰기', cancel: '새로 시작' })) { state.draft = saved; renderEditor(); return; }
       state.draft = { recordId: record ? record.id : uuid('lighting'), expectedRevision: record ? record.revision : 0, data: record ? root.DGLightingCommands.normalize(record) : prefill || defaults(kind, point), readonly: record ? !canEdit(record) : !canWrite(), pending: null, timeWindowManual: !!record };
       if (!state.draft.readonly) await persistDraft(false);
     }
@@ -163,7 +165,7 @@
   async function save(button, remove) {
     const d = readForm(); if (!d || d.readonly || d.pending || !canWrite()) return;
     const timeWarning = observationTimeWarning(d.data);
-    if (timeWarning && !confirm(timeWarning + '\n입력한 적용 시간대를 유지하고 저장할까요?')) return;
+    if (timeWarning && !await ask(timeWarning, { title: '입력한 적용 시간대를 유지하고 저장할까요?', ok: '유지하고 저장', cancel: '고치기' })) return;
     if (remove !== undefined) d.data.removed = remove;
     if (d.data.lat === '' || d.data.lng === '') throw new Error('실제 확인 지점의 위도와 경도를 입력해 주세요.');
     const data = root.DGLightingCommands.normalize(d.data), job = { id: uuid('lighting-op'), recordId: d.recordId, actor: api.state().me, at: Date.now(), expectedRevision: d.expectedRevision, data };
@@ -193,8 +195,8 @@
     if (action === 'resume') return openEditor(null, null, null, true);
     if (action === 'reload') return load();
     if (action === 'more') { state.show += 40; return notify(); }
-    if (action === 'discard') { if (!confirm('작성 중인 보완 기록을 버릴까요?')) return; api.closeSheet(); await clearDraft(); notify(); return; } // leave first so an editor opened right after takes this level's place
-    if (action === 'remove') { if (confirm(state.draft.data.removed ? '이 기록을 다시 검토에 사용할까요?' : '이 기록을 검토에서 제외할까요? 기록은 남아 있어요.')) return save(button, !state.draft.data.removed); return; }
+    if (action === 'discard') { if (!await ask('작성 중인 보완 기록을 버릴까요?', { ok: '버리기', danger: true })) return; api.closeSheet(); await clearDraft(); notify(); return; } // leave first so an editor opened right after takes this level's place
+    if (action === 'remove') { if (await ask(state.draft.data.removed ? '이 기록을 다시 검토에 사용할까요?' : '이 기록을 검토에서 제외해요. 기록은 남아 있어요.', state.draft.data.removed ? { ok: '다시 사용' } : { title: '검토에서 제외할까요?', ok: '제외' })) return save(button, !state.draft.data.removed); return; }
     if (action === 'pick-map') return pickMap();
     if (action === 'gps') {
       if (!root.navigator.geolocation) return api.toast('현재 위치를 사용할 수 없어요. 좌표나 지도를 이용해 주세요.');

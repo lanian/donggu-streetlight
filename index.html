@@ -30,6 +30,7 @@
 <script src="app/restore.js"></script>
 <script src="app/field.js"></script>
 <script src="app/field-ui.js"></script>
+<script src="app/dialog.js"></script>
 <script src="app/patrol-history.js"></script>
 <script src="app/map-config.js"></script>
 <script src="app/pwa.js"></script>
@@ -384,6 +385,19 @@ nav.tabs button:focus-visible{outline:3px solid var(--fix);outline-offset:-3px}
 @supports selector(body:has(nav.tabs[hidden])){body:has(nav.tabs[hidden]) .wrap{padding-bottom:32px}}
 
 .toast{position:fixed;left:50%;bottom:calc(88px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:14px;z-index:50;display:none;max-width:90%}
+/* in-app dialog (app/dialog.js) replacing alert/confirm/prompt: above every screen, themed, big touch targets */
+.dgdlg-bg{position:fixed;inset:0;z-index:90;background:rgba(6,10,20,.55);display:flex;align-items:center;justify-content:center;padding:16px;padding-bottom:max(16px,env(safe-area-inset-bottom,0px))}.dgdlg-bg[hidden]{display:none}
+.dgdlg{width:min(440px,100%);background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 48px rgba(0,0,0,.35);padding:18px 18px 14px;animation:dgdlgIn .16s ease-out}
+@keyframes dgdlgIn{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
+.dgdlg-title{margin:0 0 8px;font-size:17px;font-weight:800}
+.dgdlg-msg{font-size:15px;line-height:1.55;overflow-wrap:anywhere;max-height:50vh;overflow:auto}
+.dgdlg-field{display:block;width:100%;box-sizing:border-box;margin-top:12px;font:inherit;font-size:16px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink);min-height:48px}textarea.dgdlg-field{resize:vertical}
+.dgdlg-choices{display:flex;flex-direction:column;gap:6px;margin-top:12px;max-height:46vh;overflow:auto}.dgdlg-choices button{font:inherit;font-size:15px;font-weight:600;text-align:left;min-height:48px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}.dgdlg-choices button small{display:block;font-weight:400;color:var(--ink-2);font-size:12px}.dgdlg-choices button.current{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.dgdlg-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+.dgdlg-btns button{font:inherit;font-size:15px;font-weight:700;min-height:48px;padding:10px 18px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--ink);flex:1 1 0;max-width:60%}
+.dgdlg-btns .dgdlg-ok{background:var(--ink);color:var(--bg);border-color:var(--ink)}.dgdlg-btns .dgdlg-ok.danger{background:var(--bad);border-color:var(--bad);color:#fff}
+.dgdlg-btns button:focus-visible{outline:3px solid #FFCE67;outline-offset:2px}
+@media(max-width:420px){.dgdlg-btns{flex-direction:column-reverse}.dgdlg-btns button{max-width:none}}
 .toast.show{display:block}
 .ov{position:absolute;left:10px;right:10px;top:10px;background:rgba(16,24,40,.82);color:#fff;border-radius:12px;padding:10px 12px;backdrop-filter:blur(4px);border-left:5px solid var(--c);display:none}
 .ov.show{display:block}.ov{max-height:70%;overflow:auto}
@@ -607,6 +621,10 @@ const fmtDist=d=>d<1000?`${Math.round(d)}m`:`${(d/1000).toFixed(1)}km`;
 const inspectionDays=()=>((typeof DGOperations!=="undefined"&&Number(DGOperations.state.settings.inspectionDays))||DUE_DAYS);
 const isDue=l=>!!l.lastInspected&&(Date.now()-l.lastInspected)>inspectionDays()*864e5;
 const byId=id=>{if(!LIDX){LIDX=new Map();S.lights.forEach(l=>LIDX.set(l.id,l))}return LIDX.get(id)};
+/* In-app dialogs (app/dialog.js). The fallbacks keep extracted functions testable in a bare sandbox. */
+function dgConfirm(m,o){return window.DGDialog?DGDialog.confirm(m,o):Promise.resolve(confirm(m))}
+function dgPrompt(m,o){return window.DGDialog?DGDialog.prompt(m,o):Promise.resolve(prompt(m,o&&o.value||""))}
+function dgAlert(m,o){return window.DGDialog?DGDialog.alert(m,o):Promise.resolve(alert(m))}
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("show"),2600)}
 
 /* ---------- data ---------- */
@@ -695,10 +713,10 @@ async function fbBoot(cfg){
 }
 async function fbSignIn(){const prov=new firebase.auth.GoogleAuthProvider();try{await FB.auth.signInWithPopup(prov);location.reload()}catch(e){if(e&&/popup/.test(e.code||"")){await FB.auth.signInWithRedirect(prov)}else toast("로그인하지 못했어요: "+(e&&e.code||""))}}
 async function fbSignOut(){
-  let pending=false;try{pending=await DGSecurity.hasPendingWork()}catch(e){if(!confirm("초안과 전송 대기를 확인하지 못했어요. 저장하지 않은 내용이 사라질 수 있습니다. 그래도 로그아웃할까요?"))return}
-  if(pending&&!confirm(`미전송 작업 또는 작성 중인 초안이 있어요. ${window.DG_DEVICE_TRUSTED?"같은 계정으로 다시 로그인해 복구할 수 있습니다.":"공유 기기의 임시 내용은 로그아웃하면 사라질 수 있어요."} 로그아웃할까요?`))return;
+  let pending=false;try{pending=await DGSecurity.hasPendingWork()}catch(e){if(!await dgConfirm("초안과 전송 대기를 확인하지 못했어요. 저장하지 않은 내용이 사라질 수 있습니다.",{title:"그래도 로그아웃할까요?",ok:"로그아웃",cancel:"머무르기",danger:true}))return}
+  if(pending&&!await dgConfirm(`미전송 작업 또는 작성 중인 초안이 있어요. ${window.DG_DEVICE_TRUSTED?"같은 계정으로 다시 로그인해 복구할 수 있습니다.":"공유 기기의 임시 내용은 로그아웃하면 사라질 수 있어요."}`,{title:"로그아웃할까요?",ok:"로그아웃",cancel:"머무르기",danger:!window.DG_DEVICE_TRUSTED}))return;
   try{await FB.auth.signOut()}catch(e){toast("로그아웃하지 못했어요. 다시 시도해 주세요.");return}
-  if(!window.DG_DEVICE_TRUSTED){try{await FB.fs.terminate();await FB.fs.clearPersistence()}catch(e){alert("임시 자료 정리에 실패했어요. 다른 앱 탭을 닫고 브라우저 사이트 데이터를 지워 주세요.")}}
+  if(!window.DG_DEVICE_TRUSTED){try{await FB.fs.terminate();await FB.fs.clearPersistence()}catch(e){await dgAlert("임시 자료 정리에 실패했어요. 다른 앱 탭을 닫고 브라우저 사이트 데이터를 지워 주세요.",{title:"정리 실패"})}}
   location.reload();
 }
 function vSignIn(){return `<div class="panel" style="margin-top:12px"><h3>직원 로그인</h3><p class="muted">구청 Google 계정으로 로그인하면 점검·순찰 기록이 공유 저장소에 저장돼요. 역할(관리자·점검자)은 관리자가 지정해요.</p><button class="btn sodium block" id="fbSignIn">Google로 로그인</button></div>${DGSecurity.devicePanel()}`}
@@ -1083,11 +1101,11 @@ async function fdPersist(key){
   catch(e){st.persisted=false;st.savedFingerprint=null;st.error=e&&e.message||"저장 실패"}
 }
 async function fdClear(key){const st=FD.state[key];try{if(DGOffline.ready)await DGOffline.remove("formDraft",fdId(key))}catch(e){}if(st){st.persisted=false;st.savedFingerprint=null;st.error=""}}
-function fdGuard(key){ // may this form be left? kept on the device → yes; otherwise the person decides
+function fdGuard(key){ // may this form be left? kept on the device → yes; otherwise the person decides (a Promise: navMayLeave waits)
   const st=FD.state[key];if(!st||!fdDirty(key))return true;
   if(DGOffline.ready&&DGOffline.durable&&st.persisted&&!st.error&&st.savedFingerprint===fdFingerprint(fdSnapshot(key)))return true;
   const why=DGOffline.ready&&DGOffline.durable?`입력을 이 기기에 보관하지 못했어요${st.error?` (${st.error})`:""}.`:"이 기기에서는 입력을 보관하지 않아요.";
-  return confirm(`${why}\n\n[확인] 입력을 버리고 이동 · [취소] 이 화면에 머무르기`);
+  return dgConfirm(why,{title:"입력을 버리고 이동할까요?",ok:"버리고 이동",cancel:"이 화면에 머무르기",danger:true});
 }
 for(const type of ["input","change"])document.addEventListener(type,e=>{if(typeof navTop!=="function")return;const top=navTop();if(!top||!fdKind(top.key))return;const spec=FD_FORMS[fdKind(top.key)];if(e.target.closest(spec.sel))fdSchedule(top.key)});
 /* ---------- sheets ---------- */
@@ -1215,7 +1233,7 @@ function navSyncTo(target,fromLeave){
       }
       try{history.go(NAV.stack.length-target)}catch(e){}return} // a level we cannot rebuild: realign
     if(target===NAV.stack.length&&!NAV.forceRender)return;NAV.forceRender=false;
-    if(target<NAV.stack.length&&!fromLeave&&!navMayLeave()){try{history.pushState(navState(),"")}catch(e){}return} // stay: restore the depth Back took away
+    if(target<NAV.stack.length&&!fromLeave&&!navMayLeave(()=>{try{history.go(target-NAV.stack.length)}catch(e){}})){try{history.pushState(navState(),"")}catch(e){}return} // stay: restore the depth Back took away
     let popped=null;
     while(NAV.stack.length>target){popped=NAV.stack.pop();if(popped.reopen)NAV.forward.push(popped);closeSheet({pop:true})}
     if(!fromLeave)NAV.gen++; // phone/browser Back: anything still loading for the popped screens must not render
@@ -1232,6 +1250,7 @@ function navSyncTo(target,fromLeave){
 }
 // Back: top overlay first, then the patrol screen, then one sheet level.
 window.addEventListener("popstate",e=>{
+  if(window.DGDialog&&DGDialog.isOpen()){DGDialog.cancel();try{history.pushState(pt.hist?{pt:1}:navState(),"")}catch(err){}return} // Back answers "no" to an open dialog and stays
   if(NAV.absorb){NAV.absorb--;try{history.pushState(navState(),"")}catch(err){}return} // a back whose level was replaced before it landed
   const fromLeave=NAV.leaving>0;NAV.leaving=0;
   const overlay=["#ovl","#cmpSheet"].map($).find(el=>el&&!el.hidden);
@@ -1246,7 +1265,7 @@ window.addEventListener("popstate",e=>{
    openSheet replaces it (older call sites that close-then-open); "all" → close every level; {pop:true} → internal,
    cleanup only while navSyncTo pops. */
 let closeSheet=function(mode){
-  if((mode===undefined||mode==="all")&&!navMayLeave())return false; // the screen keeps its unsaved input
+  if((mode===undefined||mode==="all")&&!navMayLeave(()=>closeSheet(mode)))return false; // the screen keeps its unsaved input
   if(document.getElementById("rvMapSummary"))cleanupLightingReviewMap();cancelPhotoEditor();if(stashDraft())setTimeout(render,0);draft=null;
   if(mode&&typeof mode==="object"&&mode.pop)return;
   NAV.gen++;
@@ -1257,7 +1276,15 @@ let closeSheet=function(mode){
   if(NAV.stack.length){NAV.leaving=NAV.stack.length;try{history.back()}catch(e){NAV.leaving=0;sheetHide()}}else sheetHide();
 };
 // Ask the top level whether it may be left (guard returns true to allow). Used by ×/Escape and by Back.
-function navMayLeave(){const top=navTop();if(!top||!top.guard)return true;try{return top.guard()!==false}catch(e){return true}}
+function navMayLeave(retry){
+  const top=navTop();if(!top||!top.guard)return true;
+  if(NAV.guardPass===top){NAV.guardPass=null;return true} // the person already agreed in the dialog below
+  let r;try{r=top.guard()}catch(e){return true}
+  if(r&&typeof r.then==="function"){ // the guard is asking: stay for now, repeat the leave if the answer is yes
+    if(NAV.guardAsking===top)return false;NAV.guardAsking=top;
+    r.then(ok=>{NAV.guardAsking=null;if(ok&&navTop()===top){NAV.guardPass=top;if(retry)retry()}},()=>{NAV.guardAsking=null});
+    return false}
+  return r!==false}
 let draft=null;const DRAFTS={};
 function draftDirty(d){return d&&(Object.keys(d.checks||{}).length||d.result||(d.photos&&d.photos.length)||d.memo||typeof d.tilt==="number")}
 function stashDraft(){if(!draft||!draft.lightId)return false;const m=$("#iMemo");if(m)draft.memo=m.value;const had=!!DRAFTS[draft.lightId];if(draftDirty(draft))DRAFTS[draft.lightId]=draft;else delete DRAFTS[draft.lightId];return had!==!!DRAFTS[draft.lightId]}
@@ -1356,7 +1383,7 @@ async function saveInspection(){
   if(INSPECTION_BUSY.has(l.id)){toast("이 등의 점검 결과를 저장 중이에요.");return}
   let job=INSPECTION_JOBS.get(source);
   if(!job){const done=Object.keys(source.checks).length;
-    if(done<CHECKS.length){const left=CHECKS.length-done;if(!confirm(`점검표 ${left}개 항목이 비어 있어요. 나머지를 '양호'로 기록하고 저장할까요?`))return;CHECKS.forEach(([k])=>{if(!source.checks[k])source.checks[k]="ok"});if(!source.result)suggestResult()}
+    if(done<CHECKS.length){const left=CHECKS.length-done;if(!await dgConfirm(`점검표 ${left}개 항목이 비어 있어요. 나머지를 '양호'로 기록하고 저장할까요?`,{ok:"양호로 기록하고 저장",cancel:"돌아가기"}))return;CHECKS.forEach(([k])=>{if(!source.checks[k])source.checks[k]="ok"});if(!source.result)suggestResult()}
     if(!source.result){toast("점검 결과를 선택해 주세요.");return}
     source.memo=($("#iMemo")||{}).value??source.memo??"";
     job=newInspectionJob(l,source);INSPECTION_JOBS.set(source,job);
@@ -1429,7 +1456,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.roledong){S.roleDongEdit=S.roleDongEdit===t.dataset.roledong?null:t.dataset.roledong;render();return}
   if(t.dataset.rdtoggle){if(!need("admin"))return;const r=S.roles.find(x=>x.id===t.dataset.rdtoggle);if(!r)return;const cur=Array.isArray(r.dongs)?r.dongs.slice():[];let next;if(t.dataset.v==="*")next=[];else next=cur.includes(t.dataset.v)?cur.filter(x=>x!==t.dataset.v):[...cur,t.dataset.v];r.dongs=next;setRoleDongs(r.id,next);render();return}
   if(t.id==="mineBtn"){S.mine=!S.mine;try{localStorage.setItem("dg-mine",S.mine?"1":"0")}catch(e){}S.limit=60;render();return}
-  if(t.dataset.roledel){if(!need("admin"))return;const r=S.roles.find(x=>x.id===t.dataset.roledel);if(r&&r.role==="admin"&&S.roles.filter(x=>x.role==="admin").length<=1){toast("마지막 관리자는 뺄 수 없어요.");return}if(!confirm("이 사용자의 역할을 빼면 주민으로 취급돼요. 계속할까요?"))return;write(()=>db.doc("roles/"+t.dataset.roledel).delete(),"역할을 뺐어요.");return}
+  if(t.dataset.roledel){if(!need("admin"))return;const r=S.roles.find(x=>x.id===t.dataset.roledel);if(r&&r.role==="admin"&&S.roles.filter(x=>x.role==="admin").length<=1){toast("마지막 관리자는 뺄 수 없어요.");return}if(!await dgConfirm("이 사용자의 역할을 빼면 주민으로 취급돼요.",{title:"역할을 뺄까요?",ok:"역할 빼기",danger:true}))return;write(()=>db.doc("roles/"+t.dataset.roledel).delete(),"역할을 뺐어요.");return}
   if(t.id==="roleAdd"){if(!need("admin"))return;const id=$("#roleAddId").value.trim();if(!id){toast("사용자 ID를 넣어 주세요.");return}setRole(id,$("#roleAddRole").value);return}
   if(t.id==="tiltBtn"){startTilt();return}
   if(t.id==="tiltKeep"){keepTilt();return}
@@ -1443,7 +1470,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="addLight"){if(need("inspect"))addLight();return}
   if(t.dataset.regset){if(!need("admin"))return;const to=t.dataset.to;write(()=>patchLight(t.dataset.regset,{reg:to,regAt:Date.now(),updatedAt:Date.now()}),`'${to}'(으)로 바꿨어요.`);return}
   if(t.dataset.reglink){if(need("admin"))regLink(t.dataset.reglink);return}
-  if(t.dataset.regdel){if(!need("admin"))return;const l=byId(t.dataset.regdel);if(!l)return;if(!confirm(`${l.code} 미등록 항목을 삭제할까요? 되돌릴 수 없어요.`))return;write(()=>deleteLight(l.id),"삭제했어요.");return}
+  if(t.dataset.regdel){if(!need("admin"))return;const l=byId(t.dataset.regdel);if(!l)return;if(!await dgConfirm(`${l.code} 미등록 항목을 삭제해요. 되돌릴 수 없어요.`,{title:"삭제할까요?",ok:"삭제",danger:true}))return;write(()=>deleteLight(l.id),"삭제했어요.");return}
   if(t.dataset.platefix){if(need("inspect"))plateFix(t.dataset.platefix);return}
   if(t.dataset.ir){IR[t.dataset.ir]=t.dataset.ir==="period"?+t.dataset.v:t.dataset.v;IR.show=30;render();return}
   if(t.id==="irMore"){IR.show+=30;render();return}
@@ -1532,16 +1559,16 @@ document.addEventListener("click",async e=>{
   if(t.dataset.ptshowchecked!==undefined){pt.showChecked=!pt.showChecked;ptDraw(true);return}
   if(t.dataset.ptlogfilter){pt.historyFilter=t.dataset.ptlogfilter;pt.historyLimit=10;ptDraw(true);return}
   if(t.id==="ptHistoryMore"){pt.historyLimit=Math.min(500,pt.historyLimit+10);ptDraw(true);return}
-  if(t.dataset.ptdrop){if(pt.on&&$("#ptHistory")?.open&&!confirm("이 순찰 기록을 빼고 다시 확인할까요?"))return;pt.marks=pt.marks.filter(m=>m.id!==t.dataset.ptdrop);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
+  if(t.dataset.ptdrop){if(pt.on&&$("#ptHistory")?.open&&!await dgConfirm("이 순찰 기록을 빼고 다시 확인할까요?",{ok:"빼기",cancel:"그대로 두기"}))return;pt.marks=pt.marks.filter(m=>m.id!==t.dataset.ptdrop);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
   if(t.id==="ptUndo"){const m=pt.marks.pop();if(m)toast(`${m.code} ${m.result} 표시를 취소했어요.`);ptDraw(true);return}
   if(t.id==="ptVoice"){pt.voice=!pt.voice;t.setAttribute("aria-pressed",pt.voice);if(pt.voice)ptSay("음성 안내를 켰어요.");return}
   if(t.id==="ptPause"){pt.paused=!pt.paused;t.textContent=pt.paused?"순찰 재개":"일시정지";t.setAttribute("aria-pressed",pt.paused);return}
   if(t.id==="ptEnd"){ptFinish();return}
   if(t.id==="ptSave"){if(need("inspect"))ptSave(t);return}
-  if(t.id==="ptDiscard"){if((pt.marks.length||pt.spots.length)&&!confirm("표시한 내용을 저장하지 않고 끝낼까요?"))return;ptReset();closeSheet();return}
+  if(t.id==="ptDiscard"){if((pt.marks.length||pt.spots.length)&&!await dgConfirm("표시한 내용을 저장하지 않고 끝낼까요?",{ok:"저장 없이 끝내기",cancel:"돌아가기",danger:true}))return;ptReset();closeSheet();return}
   if(t.dataset.ptmap){openPatrolMap(t.dataset.ptmap);return}
   if(t.dataset.ptspot){ptSpot();return}
-  if(t.dataset.ptspotdel){if(pt.on&&$("#ptHistory")?.open&&!confirm("이 어두운 지점 기록을 뺄까요?"))return;pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
+  if(t.dataset.ptspotdel){if(pt.on&&$("#ptHistory")?.open&&!await dgConfirm("이 어두운 지점 기록을 뺄까요?",{ok:"빼기",cancel:"그대로 두기"}))return;pt.spots.splice(+t.dataset.ptspotdel,1);if($("#ptSumm"))ptSummary();else ptDraw(true);return}
   if(t.dataset.ptspotobserve!==undefined){const i=+t.dataset.ptspotobserve,sp=pt.spots[i];if(!sp||!need("inspect"))return;if(!pt.sessionId)pt.sessionId=DGData.newId("patrol-session");DGLighting.openObservation({lat:sp.lat,lng:sp.lng,observedAt:sp.at,level:"dark",label:"순찰 중 어두운 지점",note:"순찰 기록 · GPS ±"+sp.acc+"m"+(sp.near?" · "+sp.near+" 근처":""),originKind:"patrol",originId:pt.sessionId,originPointId:String(i),positionAccuracy:sp.acc}).catch(error=>toast(error.message));return}
   if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;S.tab="admin";render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
   if(t.id==="ptListen"){ptListen(!pt.listen);return}
@@ -1686,10 +1713,10 @@ function noPlateSection(){
 }
 async function regLink(id){
   const l=byId(id);if(!l)return;
-  const txt=prompt(`${l.code} 을(를) 대장의 어느 등에 연결할까요?\n표찰 번호를 적어 주세요 (예: 산수동 642, 지호로 65-5)`);if(!txt)return;
+  const txt=await dgPrompt(`${l.code} 을(를) 대장의 어느 등에 연결할까요?`,{title:"대장 등 연결",placeholder:"표찰 번호 (예: 산수동 642, 지호로 65-5)",ok:"찾기",required:true});if(!txt)return;
   const p=parseCode(txt);const t=p&&lookup(p);
   if(!t||t.reg){toast("대장에서 그 번호를 찾지 못했어요.");return}
-  if(!confirm(`${t.code} (${t.dong}) 에 연결하고, 이 미등록 항목은 '대장반영'으로 바꿀까요?`))return;
+  if(!await dgConfirm(`${t.code} (${t.dong}) 에 연결하고, 이 미등록 항목은 '대장반영'으로 바꿔요.`,{title:"연결할까요?",ok:"연결"}))return;
   await write(async()=>{await patchLight(id,{reg:"대장반영",linkedId:t.id,updatedAt:Date.now()});if(l.status&&l.status!=="정상")await patchLight(t.id,{status:l.status,updatedAt:Date.now()})},`${t.code}에 연결했어요.`);
 }
 /* ---------- inspection review: the office checks what came back from the field, stamps it as seen, or sends it back ---------- */
@@ -1860,7 +1887,7 @@ async function backupImport(){
   if(BK.busy||!BK.file)return;if(!BK.preview||BK.preview.file!==BK.file||BK.preview.overwrite!==BK.overwrite||BK.preview.roles!==BK.roles){await backupPreview();return}
   if(!FB&&typeof db.commitMany!=="function"&&!BK.overwrite){toast("이 저장소에서는 덮어쓰기 방지 복원을 보장할 수 없어요. Firebase 또는 기기 저장 모드를 이용하세요.");return}
   const plan=BK.preview;
-  if(!confirm(`추가 ${plan.add}건, 덮어쓰기 ${plan.replace}건, 건너뜀 ${plan.skip}건을 가져올까요?${plan.roles?"\n사용자 역할도 바뀝니다.":""}`))return;
+  if(!await dgConfirm(`추가 ${plan.add}건, 덮어쓰기 ${plan.replace}건, 건너뜀 ${plan.skip}건${plan.roles?"\n사용자 역할도 바뀝니다.":""}`,{title:"백업을 가져올까요?",ok:"가져오기",danger:plan.replace>0||!!plan.roles}))return;
   BK.busy=true;BK.msg="복원하는 중…";render();let n=0,skip=0;const failures=[];
   if(plan.operational){
     BK.msg="연결된 업무 기록을 서버에서 복원하는 중…";render();
@@ -2095,7 +2122,7 @@ function inspReviewSection(){
 async function inspReview(id,redo){
   if(!need("admin"))return;
   const i=(IR.more||S.insp).find(x=>x.id===id);if(!i)return;
-  let reason="";if(redo){const value=prompt(`${i.code} 재점검을 요청하는 이유 (점검자에게 보여요)`,"");if(value==null)return;reason=value.trim().slice(0,200)}
+  let reason="";if(redo){const value=await dgPrompt(`${i.code} 재점검을 요청하는 이유 (점검자에게 보여요)`,{title:"재점검 요청",multiline:true,maxLength:200,ok:"요청"});if(value==null)return;reason=value.trim().slice(0,200)}
   const now=Date.now(),patch=redo?{redo:true,redoNote:reason,redoBy:S.me||null,redoAt:now}:{reviewedBy:S.me||null,reviewedAt:now};
   const ok=await write(async()=>{
     const inspectionRef=db.doc("inspections/"+id);
@@ -2119,7 +2146,10 @@ async function inspReview(id,redo){
 const PHOTO_MAX=6,PHOTO_LABELS=["전경","표찰","고장 부위","조치 전","조치 후","기타"];
 let GAL={};
 function renderPhotoStrip(){const box=$("#iPhotos");if(!box||!draft)return;box.innerHTML=(draft.photos||[]).map((ph,i)=>`<div class="pt"><button type="button" style="padding:0;border:0;background:none" data-pedit="${i}"><img src="${ph.thumb}" alt="${esc(ph.label)}"></button><div class="lab">${esc(ph.label)}${ph.marked?" ✎":""}</div><button type="button" class="x" data-pdel="${i}" aria-label="사진 빼기">×</button></div>`).join("")}
-function editPhotoMeta(ph){const l=prompt(`구분을 고르세요: ${PHOTO_LABELS.join(" / ")}`,ph.label);if(l==null)return;if(PHOTO_LABELS.includes(l.trim()))ph.label=l.trim();const n=prompt("사진 설명 (선택)",ph.note||"");if(n!=null)ph.note=n.trim().slice(0,120);renderPhotoStrip()}
+async function editPhotoMeta(ph){
+  const l=await DGDialog.choose("이 사진은 무엇을 찍은 건가요?",{title:"사진 구분",options:PHOTO_LABELS.map(v=>({value:v,label:v})),value:ph.label});
+  if(l==null)return;if(PHOTO_LABELS.includes(String(l).trim()))ph.label=String(l).trim();
+  const n=await dgPrompt("사진 설명 (선택)",{title:ph.label,value:ph.note||"",placeholder:"예: 기둥 하단 부식",maxLength:120,ok:"저장"});if(n!=null)ph.note=n.trim().slice(0,120);renderPhotoStrip()}
 function captionText(code,note){const d=new Date();const pos=S.pos?` · ${S.pos.lat.toFixed(5)}, ${S.pos.lng.toFixed(5)}`:"";return `${code||""} · ${fmtDT(d.getTime())} · ${S.names[S.me]||"점검자"}${pos}${note?" · "+note:""}`}
 let photoEditor=null,photoEditorRun=0;
 function cancelPhotoEditor(){photoEditorRun++;if(photoEditor)photoEditor.close(false)}
@@ -2222,7 +2252,7 @@ async function setRepFromPhoto(id,photoId,slot){
   return write(async()=>patchLight(id,await repPatchFor(reps,{},[slot])),`이 사진을 '${slot}' 대표 사진으로 정했어요.`);
 }
 async function clearRepPhoto(id,slot){
-  if(!byId(id)||!REP_SLOTS.includes(slot))return false;if(!confirm(`'${slot}' 대표 사진을 뺄까요? 사진 이력에는 그대로 남아요.`))return false;
+  if(!byId(id)||!REP_SLOTS.includes(slot))return false;if(!await dgConfirm(`'${slot}' 대표 사진을 빼요. 사진 이력에는 그대로 남아요.`,{title:"대표 사진을 뺄까요?",ok:"빼기"}))return false;
   return write(()=>patchLight(id,{[REP_FIELDS[slot]]:null,updatedAt:Date.now()}),"대표 사진을 뺐어요.");
 }
 
@@ -2282,20 +2312,20 @@ function posMapDraw(){
 async function posFix(){
   const l=byId(PK.id),pos=PK.pos;if(!l||!pos)return;const has=typeof l.lat==="number";const dist=has?Math.round(distM(pos,l)):null;
   if(can("admin")){
-    if(!confirm(`${l.code}의 좌표를 현재 위치(±${pos.acc}m)로 ${has?"바로잡을까요? "+dist+"m 옮겨요.":"등록할까요?"} 변경 이력에 남아요.`))return;
+    if(!await dgConfirm(`${l.code}의 좌표를 현재 위치(±${pos.acc}m)로 ${has?"바로잡아요. "+dist+"m 옮겨요.":"등록해요."} 변경 이력에 남아요.`,{title:has?"좌표를 바로잡을까요?":"좌표를 등록할까요?",ok:has?"바로잡기":"등록"}))return;
     const changes=[{f:"lat",from:has?l.lat:null,to:+pos.lat.toFixed(6)},{f:"lng",from:has?l.lng:null,to:+pos.lng.toFixed(6)}];
     const entry={at:Date.now(),by:S.me||null,changes,note:`점검 중 위치 확인(GPS ±${pos.acc}m)`};
     const ok=await write(()=>patchLight(l.id,{lat:changes[0].to,lng:changes[1].to,acc:pos.acc,posSuggest:null,edits:[...(l.edits||[]).slice(-29),entry],updatedAt:entry.at}),`${l.code} 좌표를 현재 위치로 ${has?"바로잡았어요":"등록했어요"}.`);
     if(ok)setTimeout(()=>posDraw(),80);
   }else{
-    if(!confirm(`현재 위치(±${pos.acc}m)를 ${l.code}의 좌표로 제안할까요? 관리자가 확인한 뒤 적용해요.`))return;
+    if(!await dgConfirm(`현재 위치(±${pos.acc}m)를 ${l.code}의 좌표로 제안해요. 관리자가 확인한 뒤 적용해요.`,{title:"좌표를 제안할까요?",ok:"제안"}))return;
     const ok=await write(()=>patchLight(l.id,{posSuggest:{lat:+pos.lat.toFixed(6),lng:+pos.lng.toFixed(6),acc:pos.acc,dist:dist||0,at:Date.now(),by:S.me||null},updatedAt:Date.now()}),"좌표 제안을 남겼어요. 관리자가 적용할 수 있어요.");
     if(ok){const fx=$("#posFix");if(fx)fx.hidden=true}
   }
 }
 async function posApplySuggest(id){
   const l=byId(id),sg=l&&l.posSuggest;if(!sg)return;const has=typeof l.lat==="number";
-  if(!confirm(`${l.code}의 좌표를 제안 좌표(${fmtD(sg.at)} ${S.names[sg.by]||"점검자"}, ±${sg.acc}m)로 바꿀까요?`))return;
+  if(!await dgConfirm(`${l.code}의 좌표를 제안 좌표(${fmtD(sg.at)} ${S.names[sg.by]||"점검자"}, ±${sg.acc}m)로 바꿔요.`,{title:"제안 좌표를 적용할까요?",ok:"적용"}))return;
   const changes=[{f:"lat",from:has?l.lat:null,to:sg.lat},{f:"lng",from:has?l.lng:null,to:sg.lng}];const entry={at:Date.now(),by:S.me||null,changes,note:"점검자 좌표 제안 적용"};
   const ok=await write(()=>patchLight(l.id,{lat:sg.lat,lng:sg.lng,acc:sg.acc,posSuggest:null,edits:[...(l.edits||[]).slice(-29),entry],updatedAt:entry.at}),`${l.code} 좌표를 제안대로 바꿨어요.`);
   if(ok){if($("#leSave"))openLightEdit(id);else openLight(id)}
@@ -2481,7 +2511,7 @@ async function saveLightEdit(id,btn){
 async function undoLightEdit(id){
   const l=byId(id);if(!l||!l.edits||!l.edits.length)return;
   const e=l.edits[l.edits.length-1];if(e.undone){toast("이미 되돌린 변경이에요.");return}
-  if(!confirm(`${fmtDT(e.at)}의 변경(${e.changes.map(c=>EDIT_FIELDS[c.f]).join(", ")})을 되돌릴까요?`))return;
+  if(!await dgConfirm(`${fmtDT(e.at)}의 변경(${e.changes.map(c=>EDIT_FIELDS[c.f]).join(", ")})을 되돌려요.`,{title:"되돌릴까요?",ok:"되돌리기"}))return;
   const patch={};for(const c of e.changes)patch[c.f]=c.from;
   const back={at:Date.now(),by:S.me||null,changes:e.changes.map(c=>({f:c.f,from:c.to,to:c.from})),undone:true};
   patch.edits=[...l.edits.slice(-29),back];patch.updatedAt=back.at;
@@ -2496,7 +2526,7 @@ async function exportEditsCSV(){
 }
 async function plateFix(id){
   const l=byId(id);if(!l)return;
-  const txt=prompt(`${l.code} 에 새로 단 표찰 번호를 적어 주세요 (예: 산수동 915)`);if(!txt)return;
+  const txt=await dgPrompt(`${l.code} 에 새로 단 표찰 번호를 적어 주세요.`,{title:"표찰 번호 변경",placeholder:"예: 산수동 915",ok:"변경",required:true});if(!txt)return;
   const p=parseCode(txt);if(!p){toast("번호 형식을 못 읽었어요. 예: 산수동 915, 지호로 65-5");return}
   const dup=lookup(p);if(dup&&dup.id!==id){toast(`${labelText(p)}은(는) 이미 ${dup.code}로 등록돼 있어요.`);return}
   const patch={code:labelText(p),plateFixed:true,plateFixedAt:Date.now(),updatedAt:Date.now()};

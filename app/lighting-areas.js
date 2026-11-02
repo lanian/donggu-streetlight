@@ -1,6 +1,8 @@
 /* Explicit review areas: exclusions and narrow public-path exceptions preserve field evidence. */
 (function (root) {
   'use strict';
+  /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
+  const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   const Core = root.DGLightingAreaCore, Commands = root.DGLightingAreaCommands;
   const KIND = 'lightingAreaDraft', JOB = 'lighting-area';
   const REASONS = { mountain: '산·숲', private: '사유지·단지 내부', non_walkway: '통행로 아님', water: '하천·수면', other: '기타', public_path: '공공 보행로·확인할 길' };
@@ -169,7 +171,7 @@
     if (!current()) return;
     if (recordId && !old && !(resume && saved)) fail('구역을 찾지 못했어요. 목록을 새로고침해 주세요.');
     if (resume && !saved && !old) fail('이어 쓸 구역 초안이 없어요.');
-    const useSaved = saved && (resume || saved.pending || confirm('이 구역의 작성 중인 초안을 이어 쓸까요?'));
+    const useSaved = saved && (resume || saved.pending || await ask('이 구역의 작성 중인 초안을 이어 쓸까요?', { ok: '이어 쓰기', cancel: '새로 시작' }));
     if (useSaved) { state.draft = saved; state.draft.readonly = !canWrite(); }
     else {
       const effect = input?.effect === 'include' ? 'include' : 'exclude';
@@ -337,7 +339,7 @@
     if (action === 'toggle') return save(true);
     if (action === 'discard') {
       const draft = state.draft, form = Q('#laForm'), sequence = editorSequence, scope = generation;
-      if (!draft || !confirm('작성 중인 구역 초안을 버릴까요? 저장된 구역은 유지돼요.')) return;
+      if (!draft || !await ask('작성 중인 구역 초안을 버려요. 저장된 구역은 유지돼요.', { title: '초안을 버릴까요?', ok: '버리기', danger: true })) return;
       await discardDraft(draft.recordId); if (!ownsView(form, draft, sequence, scope)) return;
       editorSequence++; returnFromEditor(draft); return;
     }
@@ -347,7 +349,7 @@
       Q('#laVertices').value = lines.join('\n'); changed(); return;
     }
     if (action === 'reload-draft') {
-      if (!confirm('현재 창의 저장되지 않은 입력 대신 최신 초안을 열까요?')) return;
+      if (!await ask('현재 창의 저장되지 않은 입력 대신 최신 초안을 열까요?', { ok: '최신 초안 열기', cancel: '현재 입력 유지' })) return;
       const id = state.draft?.recordId, sequence = ++editorSequence, scope = generation; await writes.catch(() => {});
       const saved = id && await root.DGOffline.get(KIND, id); if (sequence !== editorSequence || scope !== generation) return;
       state.draft = saved; if (saved) { delete saved.conflict; saved.saveError = ''; renderEditor(); }

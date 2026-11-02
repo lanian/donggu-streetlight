@@ -1,6 +1,8 @@
 /* The legacy field UI is connected here; business commands stay in independent modules. */
 (function (root) {
   'use strict';
+  /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
+  const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   let api, attached = false, initialized = false, timer = null, patrolTimer = null, memoryPending = false, autosaveError = '', patrolKey = '', draftWrite = Promise.resolve(), resolveReady, operationsUnsubscribe;
   const readyPromise = new Promise(resolve => { resolveReady = resolve; });
   const finishing = new Map(), busy = new Set();
@@ -36,7 +38,7 @@
   async function restorePatrol() {
     const saved = await root.DGOffline.get('patrol', 'current'); if (!saved) return api.toast('복구할 순찰 초안이 없어요.');
     const current = api.patrol();
-    if (current.on && patrolSnapshot() && !confirm('현재 순찰을 기기에 보관한 초안으로 바꿀까요?')) return;
+    if (current.on && patrolSnapshot() && !await ask('현재 순찰을 기기에 보관한 초안으로 바꿀까요?', { ok: '초안으로 바꾸기', cancel: '현재 순찰 유지' })) return;
     api.resumePatrol(saved); api.toast('이전 순찰을 불러왔어요. 이동 기록은 정지 상태로 시작해요.');
   }
   async function finishInspection(job) {
@@ -64,7 +66,7 @@
     let job = source.__saveJob;
     if (!job) {
       const missing = api.checks().filter(([key]) => !source.checks[key]);
-      if (missing.length && !confirm('점검표 ' + missing.length + '개 항목이 비어 있어요. 나머지를 양호로 기록하고 저장할까요?')) return;
+      if (missing.length && !await ask('점검표 ' + missing.length + '개 항목이 비어 있어요. 나머지를 양호로 기록하고 저장할까요?', { ok: '양호로 기록하고 저장', cancel: '돌아가기' })) return;
       for (const [key] of missing) source.checks[key] = 'ok';
       if (!source.result) api.suggestResult();
       if (!source.result) return api.toast('점검 결과를 선택해 주세요.');
