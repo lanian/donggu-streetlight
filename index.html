@@ -2830,6 +2830,7 @@ function openPatrol(dong){
     <div class="bottom"><div class="seg ptview"><button type="button" data-ptview="none" aria-pressed="true">목록</button><button type="button" data-ptview="cam" aria-pressed="false">카메라</button><button type="button" data-ptview="map" aria-pressed="false">지도</button></div><button class="tb" id="ptUndo">취소</button><button class="tb" id="ptVoice" aria-pressed="false">안내</button><button class="tb" id="ptListen" aria-pressed="false">음성</button><button class="tb" id="ptPause" aria-pressed="false">정지</button></div>`;
   try{history.pushState({pt:1},"");pt.hist=true}catch(e){}
   $("#ptHistory")?.addEventListener("toggle",()=>{if(pt.on)ptDraw(true)});
+  if(!pt.resizeBound){pt.resizeBound=true;window.addEventListener("resize",()=>{if(pt.on&&$("#ptHistory")?.open)ptDraw(true)})}
   ptDraw(true);
   toast("운전자는 조작하지 마세요. 동승자가 보면서 꺼진 등을 누르세요.");
   if(!navigator.geolocation){$("#ptAhead").innerHTML=`<div class="empty">이 기기는 위치를 쓸 수 없어요.</div>`;return}

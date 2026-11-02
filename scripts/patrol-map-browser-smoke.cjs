@@ -123,6 +123,27 @@ const server=http.createServer((req,res)=>{
    await page.locator('#ptMapFollow').click();await page.waitForTimeout(300);
    assert.equal(await page.evaluate(()=>pt.mapFollow&&$('#ptMapRot').style.transform==='rotate(-40deg)'),true,'따라가기 restores heading-up');
 
+   // 6. many records: the list scrolls inside the open panel and its last row is reachable (regression: PR #17 removed its height cap)
+   checks.push('record list scrolls with many records');
+   const scrollCase=async()=>{
+     await page.evaluate(()=>{const ls=S.lights.filter(l=>Number.isFinite(l.lat)).slice(0,30);pt.marks=ls.slice(0,15).map((l,i)=>({id:l.id,code:l.code,result:i%3?'정상':'고장',at:Date.now()-i*60000}));ptDraw(true)});
+     await page.evaluate(()=>{$('#ptHistory').open=true});await page.waitForFunction(()=>$('#ptHistory').open&&$('#ptLog .ptlogrow'));
+     await page.evaluate(()=>ptDraw(true));await page.waitForTimeout(200);
+     const m=await page.evaluate(()=>{const log=$('#ptLog'),panel=$('#ptHistory').getBoundingClientRect(),r=log.getBoundingClientRect();return {rows:log.querySelectorAll('.ptlogrow').length,scrollable:log.scrollHeight>log.clientHeight+2,inside:r.bottom<=panel.bottom+1&&r.top>=panel.top,client:log.clientHeight,overflow:getComputedStyle(log).overflowY}});
+     assert.equal(m.rows,10,'first page of records is rendered');
+     assert.equal(m.scrollable,true,'the list is taller than its box so it can scroll: '+JSON.stringify(m));
+     assert.equal(m.inside,true,'the list box ends inside the panel, nothing is clipped away: '+JSON.stringify(m));
+     assert.equal(m.overflow,'auto');
+     await page.evaluate(()=>{const log=$('#ptLog');log.scrollTop=log.scrollHeight});await page.waitForTimeout(100);
+     assert.ok(await page.evaluate(()=>$('#ptLog').scrollTop>0),'scrollTop moves');
+     assert.ok(await page.evaluate(()=>{const b=$('#ptHistoryMore').getBoundingClientRect(),p=$('#ptHistory').getBoundingClientRect();return b.bottom<=p.bottom+1&&b.top>=p.top}),'the "더 보기" button at the end of the list can be scrolled into view');
+     await page.evaluate(()=>{$('#ptHistory').open=false});await page.waitForFunction(()=>!$('#ptHistory').open);
+   };
+   await scrollCase();
+   await page.setViewportSize({width:844,height:390});await page.waitForTimeout(300);
+   await scrollCase();
+   await page.setViewportSize({width:390,height:844});await page.waitForTimeout(200);
+
    await page.evaluate(()=>ptFinish());
    assert.deepEqual(errors,[]);
    console.log(JSON.stringify({results:checks,browserErrors:errors},null,2));
