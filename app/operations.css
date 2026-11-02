@@ -33,6 +33,15 @@
 .ptfull .ptqueuebar button{flex:none;min-height:44px;min-width:102px;border:1px solid #455672;background:#16243A;color:#E5ECFA;border-radius:10px;padding:6px 10px;font-size:12px;font-weight:700}
 .ptfull .ptqueuebar button[aria-pressed="true"]{background:#453515;border-color:#E89A0C;color:#FFCF70}
 .ptfull .ptqueuebar button:focus-visible,.ptfull .pthistory button:focus-visible,.ptfull .pthistory>summary:focus-visible{outline:3px solid #FFCE67;outline-offset:2px}
+/* opened, the record panel shares the side area with the next light and the mark buttons instead of pushing the map down:
+   the queue keeps its first card, the panel takes the rest and scrolls inside */
+.ptfull .pthistory[open]{flex:1 1 220px;min-height:220px;max-height:none}
+.ptfull .side:has(.pthistory[open]) .ptbtns{grid-template-columns:repeat(4,1fr);gap:6px}
+.ptfull .side:has(.pthistory[open]) .ptbtns button{min-height:46px;font-size:13px;padding:4px 2px}
+.ptfull .side:has(.pthistory[open]) .ptbtns button small{display:none}
+.ptfull .pthistory[open] .ptlog{flex:1 1 auto;min-height:0;max-height:none}
+.ptfull .side:has(.pthistory[open]) .ptahead{flex:none;overflow:hidden}
+.ptfull .side:has(.pthistory[open]) .ptahead .ptcard:not(.first){display:none}
 .ptfull .pthistory{margin:3px 12px 5px;flex:none;min-height:0;max-height:min(46vh,380px);border:1px solid #34445F;background:#121E32;border-radius:12px;overflow:hidden;color:#DFE7F4;display:flex;flex-direction:column}
 .ptfull .pthistory:not([open]){max-height:64px}
 .ptfull .pthistory:not([open]) > :not(summary){display:none!important}
@@ -53,7 +62,7 @@
 .ptfull .ptlog .ptlogrow button{flex:none;min-height:42px;min-width:48px;padding:6px 9px;margin-left:0;border:1px solid #51627D;border-radius:9px;background:#23334D;color:#E4ECF8;font-weight:650}
 .ptfull .ptlog .ptlogempty{padding:12px 4px;color:#B5C2D7;font-size:12px}
 .ptfull .ptlog .ptlogmore{width:100%;min-height:44px;margin:6px 0 0;padding:8px;border-radius:9px;background:#293C58;border-color:#4E6384;color:#E9F0FB;font-size:12px;font-weight:700}
-@media(orientation:landscape) and (min-width:600px){.ptfull .ptlog{display:block;max-height:min(24vh,170px)}.ptfull .pthistory{max-height:min(42vh,330px)}}
+@media(orientation:landscape) and (min-width:600px){.ptfull .ptlog{display:block;max-height:min(24vh,170px)}.ptfull .pthistory{max-height:min(42vh,330px)}.ptfull .pthistory[open]{flex:1 1 110px;min-height:110px}.ptfull .side:has(.pthistory[open]) .ptbtns{grid-template-columns:1fr 1fr;gap:6px}.ptfull .side:has(.pthistory[open]) .ptbtns button{min-height:40px;font-size:13px}.ptfull .side:has(.pthistory[open]) .ptahead .ptcard{min-height:40px}}
 #ptSumm .ptsummary-issue-title{font-weight:750;margin:14px 0 8px;color:var(--bad);font-size:14px}
 #ptSumm .ptsummary-normal{margin:12px 0;border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
 #ptSumm .ptsummary-normal>summary{min-height:50px;padding:12px 15px;cursor:pointer;font-weight:700;color:var(--ink);list-style:none}
