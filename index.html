@@ -204,7 +204,11 @@ textarea.f-in{min-height:84px;resize:vertical}
 .ptbtns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 .ptbtns button{min-height:76px;border-radius:14px;border:0;font-size:19px;font-weight:800;color:#fff}
 .ptbtns .bad{background:#C2372B}.ptbtns .warn{background:#B8740A}.ptcam{height:34vh;min-height:200px;margin-bottom:8px}.ptcam[hidden]{display:none}
-.ptmap{height:34vh;min-height:200px;margin-bottom:8px;border-radius:12px;overflow:hidden}.ptmap[hidden]{display:none}
+.ptmap{height:34vh;min-height:200px;margin-bottom:8px;border-radius:12px;overflow:hidden;position:relative}.ptmap[hidden]{display:none}
+/* heading-up: the map itself is drawn 142% larger and rotated inside the box, so the road ahead points up; buttons stay outside the rotated layer */
+.ptmap .ptrot{position:absolute;left:-21%;top:-21%;width:142%;height:142%;transform-origin:50% 50%;transition:transform .45s linear;will-change:transform}.ptmap .locbtn,.ptmap .ptnorth{z-index:1001}
+.ptmap .ptnorth{position:absolute;left:10px;top:10px;min-height:36px;padding:0 10px}.ptmap .ptnorth[aria-pressed="true"] i{transform:none}.ptmap .ptnorth i{display:inline-block;transition:transform .45s linear;font-style:normal}
+.ptmapnum div,.ptme .car{transition:transform .45s linear}.ptmap .ptmapnum div{transform:rotate(calc(-1 * var(--ptrot,0deg)))}
 .meicon{background:none;border:0}.meicon .dot{position:absolute;left:23px;top:23px;width:14px;height:14px;border-radius:50%;background:#2F5DA8;border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
 .meicon .pulse{position:absolute;left:18px;top:18px;width:24px;height:24px;border-radius:50%;background:rgba(47,93,168,.35);animation:mepulse 2s ease-out infinite}
 .meicon .cone{position:absolute;left:0;top:0;width:60px;height:60px;transform-origin:50% 50%;background:conic-gradient(from -28deg at 50% 50%,rgba(47,93,168,.45) 0deg,rgba(47,93,168,.45) 56deg,transparent 56deg);border-radius:50%;clip-path:polygon(50% 50%,0 0,100% 0)}.meicon .cone[hidden]{display:none}
@@ -1542,7 +1546,8 @@ document.addEventListener("click",async e=>{
   if(t.dataset.ptspotform){const sp=pt.spots[+t.dataset.ptspotform];if(!sp)return;S.tab="admin";render();openAdminSection("reg");const la=$("#nLat");if(!la){toast("등록 권한이 없어요.");return}la.value=sp.lat;$("#nLng").value=sp.lng;$("#nAddr").value=`순찰 중 어두운 지점${sp.near?` (${sp.near} 근처 ${sp.nearD}m)`:""}`;$("#nNote").value=`야간 순찰 ${fmtDT(sp.at)} 어두운 지점, GPS ±${sp.acc}m`;const el=document.getElementById("sec-reg");if(el)window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-64,behavior:"smooth"});return}
   if(t.id==="ptListen"){ptListen(!pt.listen);return}
   if(t.dataset.ptview){ptView(t.dataset.ptview);return}
-  if(t.id==="ptMapFollow"){pt.mapFollow=true;t.setAttribute("aria-pressed","true");if(pt.map&&pt.pos)pt.map.setView([pt.pos.lat,pt.pos.lng],Math.max(pt.map.getZoom(),17));return}
+  if(t.id==="ptMapFollow"){pt.mapFollow=true;t.setAttribute("aria-pressed","true");if(pt.map&&pt.pos)pt.map.setView([pt.pos.lat,pt.pos.lng],Math.max(pt.map.getZoom(),17));if(pt.map)ptMapDraw(true);return}
+  if(t.id==="ptMapHeadUp"){pt.headUp=!pt.headUp;try{localStorage.setItem("dg_ptHeadUp",pt.headUp?"1":"0")}catch(e){}ptMapHeadLabel();if(pt.map){pt.mapFollow=true;$("#ptMapFollow")?.setAttribute("aria-pressed","true");ptMapDraw(true)}toast(pt.headUp?"진행 방향이 위로 가도록 지도를 돌려요.":"북쪽이 위로 가는 지도예요.");return}
   if(t.id==="ptShare"){const p={start:pt.start,end:pt.end,dist:pt.dist,dong:pt.dong,passed:[...pt.passed.keys()],marks:pt.marks,spots:pt.spots};navigator.share({title:"야간 순찰 일지",text:ptReportText(p)}).catch(()=>{});return}
   if(t.dataset.ptgo){if(need("inspect"))openPatrol(t.dataset.ptgo);return}
   if(t.dataset.ptunmap){const cut=Date.now()-PT_DAYS*86400000;const pts=S.lights.filter(l=>!l.removed&&typeof l.lat==="number"&&!(PT_LAST[l.id]&&PT_LAST[l.id].at>cut));openMap("custom",{pts,title:`최근 ${PT_DAYS}일 순찰 안 된 등`});return}
@@ -2811,7 +2816,7 @@ function openPatrol(dong){
     <div class="body">
       <div class="view" id="ptView" hidden>
         <div class="arwrap ptcam" id="ptCamWrap" hidden><video id="ptCam" playsinline muted></video><div class="fallback">카메라를 쓸 수 없어요.</div><div id="ptLayer"></div><div class="arhud"><span id="ptCamHead">진행 방향 기준</span></div></div>
-        <div class="gmap ptmap" id="ptMapBox" hidden><button class="btn sm locbtn" id="ptMapFollow" aria-pressed="true">따라가기</button></div>
+        <div class="gmap ptmap" id="ptMapBox" hidden><div class="ptrot" id="ptMapRot"></div><button class="btn sm locbtn" id="ptMapFollow" aria-pressed="true">따라가기</button><button class="btn sm ptnorth" id="ptMapHeadUp" aria-pressed="true" title="진행 방향을 위로 / 북쪽을 위로"><i>⬆</i> 진행 방향</button></div>
       </div>
       <div class="side">
         <div class="ptqueuebar"><b id="ptQueueLabel">앞쪽 미점검</b><button type="button" id="ptShowChecked" data-ptshowchecked="1" aria-pressed="false">표시한 등 보기</button></div>
@@ -2901,33 +2906,48 @@ function ptMap(on){
   if(!pt.mapOn)return;
   if(!window.L){box.insertAdjacentHTML("beforeend",`<div class="empty">지도 라이브러리를 불러오지 못했어요.</div>`);return}
   const ll=pt.pos?[pt.pos.lat,pt.pos.lng]:(S.pos?[S.pos.lat,S.pos.lng]:[35.146,126.923]);
-  pt.map=L.map(box,{zoomControl:false,attributionControl:true,tap:true,preferCanvas:true}).setView(ll,17);
+  let rot=$("#ptMapRot");if(!rot){rot=document.createElement("div");rot.className="ptrot";rot.id="ptMapRot";box.prepend(rot)}rot.innerHTML="";rot.style.transform="";
+  pt.map=L.map(rot,{zoomControl:false,attributionControl:true,tap:true,preferCanvas:true}).setView(ll,17);
   DongguPWA.tileLayer(L).addTo(pt.map);
   pt.mapFollow=true;$("#ptMapFollow").setAttribute("aria-pressed","true");
-  pt.map.on("dragstart",()=>{pt.mapFollow=false;$("#ptMapFollow").setAttribute("aria-pressed","false")});
+  pt.map.on("dragstart",()=>{pt.mapFollow=false;$("#ptMapFollow").setAttribute("aria-pressed","false");ptMapRotate(0)});
+  if(pt.headUp==null){try{pt.headUp=localStorage.getItem("dg_ptHeadUp")!=="0"}catch(e){pt.headUp=true}}ptMapHeadLabel();
   pt.mapTrack=L.polyline(pt.track.slice(-600),{color:"#2F5DA8",weight:4,opacity:.7}).addTo(pt.map);drawGu(pt.map);
   pt.mapLights=L.layerGroup().addTo(pt.map);pt.mapMarks=L.layerGroup().addTo(pt.map);
   pt.mapMe=L.marker(ll,{icon:L.divIcon({className:"ptme",html:'<div class="car"></div>',iconSize:[22,26],iconAnchor:[11,17]}),interactive:false,zIndexOffset:1000}).addTo(pt.map);
   pt.mapCenter=null;pt.mapKey="";
   setTimeout(()=>pt.map&&pt.map.invalidateSize(),250);ptMapDraw(true);
 }
+function ptMapRotate(deg){
+  const rot=$("#ptMapRot");pt.mapRot=deg||0;if(!rot)return;
+  rot.style.transform=deg?`rotate(${Math.round(deg)}deg)`:"";rot.parentElement.style.setProperty("--ptrot",Math.round(deg)+"deg"); // number badges counter-rotate through this variable, no redraw needed
+  const n=$("#ptMapHeadUp i");if(n)n.style.transform=`rotate(${Math.round(deg)}deg)`; // the little arrow always shows where north went
+}
+function ptMapHeadLabel(){const b=$("#ptMapHeadUp");if(!b)return;b.setAttribute("aria-pressed",String(!!pt.headUp));b.lastChild.textContent=pt.headUp?" 진행 방향":" 북쪽 위"}
 function ptMapDraw(force){
   if(!pt.mapOn||!pt.map||!pt.pos)return;
   const ll=[pt.pos.lat,pt.pos.lng];
-  pt.mapMe.setLatLng(ll);const car=pt.mapMe.getElement()&&pt.mapMe.getElement().querySelector(".car");if(car)car.style.transform=`rotate(${pt.heading==null?0:Math.round(pt.heading)}deg)`;
-  if(pt.mapFollow){const h=pt.heading;const ahead=h==null?ll:[pt.pos.lat+60*Math.cos(h*Math.PI/180)/110540,pt.pos.lng+60*Math.sin(h*Math.PI/180)/(111320*Math.cos(pt.pos.lat*Math.PI/180))];pt.map.panTo(ahead,{animate:true,duration:.4})}
+  pt.mapMe.setLatLng(ll);
+  // heading-up while following: the map turns so the road ahead points up and the car points up; otherwise north-up with a turning car
+  const rotDeg=pt.mapFollow&&pt.headUp&&pt.heading!=null?-pt.heading:0;ptMapRotate(rotDeg);
+  const car=pt.mapMe.getElement()&&pt.mapMe.getElement().querySelector(".car");if(car)car.style.transform=`rotate(${pt.heading==null?0:Math.round(pt.heading+rotDeg)}deg)`;
+  if(pt.mapFollow){ // keep the car about 70% down the visible box so the road ahead gets most of the space, whatever the box height
+    const h=pt.heading;const box=$("#ptMapBox");const off=h==null?0:Math.max(30,Math.min(160,(box?box.clientHeight:300)*0.2));
+    const z=pt.map.getZoom();const px=pt.map.project(ll,z);const ahead=h==null?ll:pt.map.unproject(px.add([off*Math.sin(h*Math.PI/180),-off*Math.cos(h*Math.PI/180)]),z);
+    pt.map.panTo(ahead,{animate:true,duration:.4})}
   if(pt.track.length>1)pt.mapTrack.setLatLngs(pt.track.slice(-600));
   // nearby lights: refreshed when the car has moved 80 m from the last refresh
   if(force||!pt.mapCenter||distM(pt.mapCenter,pt.pos)>80){pt.mapCenter={lat:pt.pos.lat,lng:pt.pos.lng};pt.mapLights.clearLayers();const G=lightGrid();const me=G.toXY(pt.pos);
     for(const {it} of G.near(me.x,me.y,320)){const l=it.l;if(l.removed)continue;const m=L.circleMarker([l.lat,l.lng],{radius:l.status==="정상"?5:7,color:KIND_COL[l.kind]||"#fff",weight:2,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});m.bindTooltip(esc(l.code));m.addTo(pt.mapLights)}}
-  const key=[...pt.passed.keys()].length+"|"+pt.marks.map(m=>m.id+m.result).join(",")+"|"+pt.spots.length+"|"+(pt.sel||"")+"|"+pt.ahead.map(a=>a.l.id).join(",");
+  const key=[...pt.passed.keys()].length+"|"+pt.marks.map(m=>m.id+m.result).join(",")+"|"+pt.spots.length+"|"+(pt.sel||"")+"|"+pt.ahead.map(a=>a.l.id).join(",")+"|"+pt.showChecked;
   if(force||key!==pt.mapKey){pt.mapKey=key;pt.mapMarks.clearLayers();
     const marked=new Map(pt.marks.map(m=>[m.id,m.result]));
     for(const id of pt.passed.keys()){if(marked.has(id))continue;const l=byId(id);if(l&&typeof l.lat==="number")L.circleMarker([l.lat,l.lng],{radius:3,color:"#2E8B57",weight:2,fillColor:"#2E8B57",fillOpacity:1,interactive:false}).addTo(pt.mapMarks)}
     for(const m of pt.marks){const l=byId(m.id);if(l&&typeof l.lat==="number")L.circleMarker([l.lat,l.lng],{radius:9,color:"#fff",weight:2,fillColor:m.result==="고장"?"#C2372B":m.result==="정상"?"#2E8B57":"#E89A0C",fillOpacity:1,interactive:false}).addTo(pt.mapMarks)}
     for(const sp of pt.spots)L.circleMarker([sp.lat,sp.lng],{radius:8,color:"#fff",weight:2,fillColor:"#5B4B9E",fillOpacity:1,interactive:false}).addTo(pt.mapMarks);
-    const fid=pt.sel||(pt.ahead[0]&&pt.ahead[0].l.id);
-    pt.ahead.forEach((a,i)=>{const l=a.l;if(typeof l.lat!=="number")return;const m=L.marker([l.lat,l.lng],{icon:L.divIcon({className:"ptmapnum "+(fid===l.id?"sel":""),html:`<div>${i+1}</div>`,iconSize:[26,26],iconAnchor:[13,13]}),zIndexOffset:500});m.on("click",()=>{pt.sel=pt.sel===l.id?null:l.id;ptDraw(true)});m.addTo(pt.mapMarks)});
+    // the same numbers as the card list: checked lamps leave the queue (unless "표시한 등 보기") and keep only their result circle
+    const queue=DGPatrolHistory.candidates(pt.ahead,pt.marks,pt.showChecked);const fid=pt.sel||(queue[0]&&queue[0].l.id);
+    queue.forEach((a,i)=>{const l=a.l;if(typeof l.lat!=="number")return;const m=L.marker([l.lat,l.lng],{icon:L.divIcon({className:"ptmapnum "+(fid===l.id?"sel":""),html:`<div>${i+1}</div>`,iconSize:[26,26],iconAnchor:[13,13]}),zIndexOffset:fid===l.id?900:500}); /* the selected number stays on top of neighbours */ m.on("click",()=>{pt.sel=pt.sel===l.id?null:l.id;ptDraw(true)});m.addTo(pt.mapMarks)});
   }
 }
 function ptStopCam(){pt.camRun=(pt.camRun||0)+1;stopMediaStream(pt.stream);pt.stream=null;pt.camOn=false;const v=$("#ptCam");if(v)v.srcObject=null}
