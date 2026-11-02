@@ -53,7 +53,7 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
 
     // 2. the plan: starts from my position, lies above the target list, shows progress, next stop and per-leg distances
     checks.push('plan with next stop and legs');
-    await page.locator('[data-dg="make-plan"]').click(); await page.waitForFunction(() => DGOperations.state.plan && DGOperations.state.plan.stops.length === 10);
+    await page.locator('[data-dg="make-plan"]').click(); await page.waitForFunction(() => DGOperations.state.plan && DGOperations.state.plan.stops.length === 10 && document.querySelector('.dg-plan'));
     assert.deepEqual((await stops()).slice().sort(), nearestIds.slice().sort(), 'the plan holds the picked lights');
     const plan = await page.evaluate(() => DGOperations.state.plan);
     assert.equal(plan.stops[0].id, nearestIds[0], 'the route starts at the light nearest to me');
