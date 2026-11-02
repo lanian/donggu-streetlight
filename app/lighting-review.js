@@ -250,6 +250,7 @@ async function exportReviewCSV() {
 }
 function cleanupLightingReviewMap() {
   if (gmap) {
+    gmap._dgClosing = true; // the map view's moveend redraw must not add paths to a map that is going away
     meStop(); if (gmap.stop) gmap.stop();
     // Remove paths while their renderer still has its drawing context. Removing
     // the map first can let later path removal queue a redraw on a dead canvas.

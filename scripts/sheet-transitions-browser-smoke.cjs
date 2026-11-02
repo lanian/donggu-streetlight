@@ -43,8 +43,8 @@ const server = http.createServer((req, res) => {
     await page.goBack(); await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
   }
   try {
-    await scenario('map popup opens facility and phone Back closes the destination', async page => {
-      await page.evaluate(() => { const light = S.lights.find(l => Number.isFinite(l.lat)); openMap('custom', { title: '전이 확인', pts: [light] }); gmapLayer.getLayers()[0].openPopup(); });
+    await scenario('map card opens facility and phone Back closes the destination', async page => {
+      await page.evaluate(() => { const light = S.lights.find(l => Number.isFinite(l.lat)); openMap('custom', { title: '전이 확인', pts: [light] }); gmapLayer.getLayers()[0].fire('click'); /* the marker opens the info card (popups were replaced) */ });
       await page.locator('[data-map-open]').click(); await page.locator('#iMemo').waitFor({ state: 'attached' });
       assert.equal(await page.evaluate(() => gmap === null && ME.watch === null), true, 'opening the facility releases the map it came from');
       await stableSheet(page, '#iMemo', '#gmap');

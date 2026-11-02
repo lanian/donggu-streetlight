@@ -44,3 +44,4 @@ jobs:
           node scripts/patrol-compact-browser-smoke.cjs
           node scripts/patrol-map-browser-smoke.cjs
           node scripts/dialog-browser-smoke.cjs
+          node scripts/map-view-browser-smoke.cjs
