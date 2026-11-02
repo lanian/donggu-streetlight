@@ -2748,6 +2748,10 @@ let gmap=null,gmapLayer=null,gmapMe=null,gmapPts=[],gmapKind="전체";
 const GM={status:"전체",hidden:new Set(),q:"",sel:null,near:false,bound:false,route:null,labelMax:300,cellPx:72,clusterBelow:16,labelFrom:18};
 const MAP_STATUS=["전체","고장","점검필요","수리중","정상","주기 경과"];
 // marker fill = status, marker ring = kind (plate colour); the kind chips above the map filter it
+/* Leaflet's canvas renderer schedules its redraw on the next frame; when a map is removed in that same frame (closing a
+   screen right after a pan or a layer change) the callback ran against a deleted drawing context ("clearRect" of
+   undefined). A renderer that no longer has a context has nothing to draw. */
+if(window.L&&L.Canvas&&!L.Canvas.prototype._dgSafe){const redraw=L.Canvas.prototype._redraw;L.Canvas.prototype._redraw=function(){if(!this._ctx||!this._map)return;return redraw.apply(this,arguments)};L.Canvas.prototype._dgSafe=true}
 function drawGu(map){if(ROADS&&ROADS.gu&&window.L)try{L.polygon((ROADS.gu.polygons||[]).map(p=>[p.outer,...(p.holes||[])]),{color:"#16233D",weight:2,dashArray:"6 4",fill:false,opacity:.6,interactive:false}).addTo(map)}catch(e){}}
 function mapStatusOf(l){return GM.status==="전체"||(GM.status==="주기 경과"?isDue(l):l.status===GM.status)}
 function mapVisiblePts(){return gmapPts.filter(l=>(gmapKind==="전체"||(l.kind||"가로등")===gmapKind)&&mapStatusOf(l)&&!GM.hidden.has(l.status))}
