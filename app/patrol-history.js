@@ -74,8 +74,19 @@
       log.insertAdjacentHTML('beforeend', '<button type="button" class="ptlogmore" id="ptHistoryMore">'
         + '이전 기록 10건 더 보기 · 남은 ' + snap.remaining + '건</button>');
     }
+    fitLog(details, log);
     log.scrollTop = scroll;
     return snap;
+  }
+  /* The list sits inside <details>, where the browser wraps the content in its own box, so flex sizing cannot reach it.
+     Its height is measured instead: whatever room the open panel has below the summary and the filter row. */
+  function fitLog(details, log) {
+    if (typeof getComputedStyle !== 'function' || !details.getBoundingClientRect) return;
+    const panel = details.getBoundingClientRect(), list = log.getBoundingClientRect();
+    if (!panel.height || !list.width) { log.style.removeProperty('max-height'); return; }
+    const style = getComputedStyle(log);
+    const room = Math.floor(panel.bottom - list.top - (parseFloat(style.marginBottom) || 0) - 1);
+    if (room >= 60) log.style.maxHeight = room + 'px'; else log.style.removeProperty('max-height');
   }
   /* Summary cards are present as before, but normal records are hidden behind disclosure. */
   function compactSummary(box, session) {
