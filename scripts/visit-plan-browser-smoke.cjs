@@ -1,0 +1,128 @@
+/* 미점검·방문 계획: picking targets (가까운 순, 10곳/전체 선택), the plan up top with progress and the next stop,
+   per-leg distances, auto-completion from saved inspections, reordering (위/아래, 내 위치에서 다시 정렬),
+   the numbered route map and 길찾기. GPS is a fixed fake position; nothing leaves the local registry. */
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { chromium } = require(process.env.DONGGU_PLAYWRIGHT_MODULE || 'playwright');
+const root = process.env.DG_OPERATIONS_ROOT || path.resolve(__dirname, '..');
+const server = http.createServer((req, res) => {
+  const pathname = new URL(req.url, 'http://localhost').pathname;
+  const file = path.resolve(root, '.' + decodeURIComponent(pathname) + (pathname.endsWith('/') ? 'index.html' : ''));
+  if (!file.startsWith(root + path.sep) || !fs.existsSync(file)) return res.writeHead(404).end();
+  res.setHeader('Content-Type', ({ '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' })[path.extname(file)] || 'application/octet-stream');
+  res.end(fs.readFileSync(file));
+});
+const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
+(async () => {
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = 'http://localhost:' + server.address().port;
+  const browser = await chromium.launch({ executablePath: process.env.DONGGU_CHROMIUM || undefined, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-zygote'] });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', geolocation: HERE, permissions: ['geolocation'] });
+  await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.fulfill({ status: 200, body: '', contentType: route.request().url().includes('.js') ? 'text/javascript' : 'text/plain' }));
+  const page = await context.newPage(), errors = [], checks = [];
+  page.on('pageerror', e => errors.push(e.message)); page.on('dialog', d => { errors.push('native dialog: ' + d.message()); d.dismiss(); });
+  const stops = () => page.evaluate(() => DGOperations.state.plan.stops.map(s => s.id));
+  const dist = (a, b) => { const R = 6371000, r = x => x * Math.PI / 180, dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng), s = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(s)); };
+  try {
+    await page.goto(origin);
+    await page.waitForFunction(() => S.live && DGOffline.ready && S.me === 'local' && DGIntegration.initialized);
+    await page.evaluate(() => { S.demoRole = 'admin'; S.tab = 'admin'; render(); openAdminSection('due'); });
+    await page.locator('#dgDueFilter').waitFor();
+    assert.equal(await page.locator('.dg-plan').count(), 0, 'no plan yet');
+    assert.equal(await page.locator('[data-dg="make-plan"]').isDisabled(), true, 'nothing picked → the plan button waits');
+
+    // 1. 가까운 순 + 가까운 10곳 선택: the ten nearest to the fixed position, sorted outward, with distances shown
+    checks.push('nearest-first picking');
+    await page.locator('[data-dg="due-sort"]').click(); await page.waitForFunction(() => DGOperations.state.pos && DGOperations.state.dueSort === 'near');
+    await page.locator('.dg-due-row .dg-dist').first().waitFor();
+    const shown = await page.evaluate(() => [...document.querySelectorAll('.dg-due-row .dg-dist')].slice(0, 10).map(e => parseFloat(e.textContent)));
+    assert.ok(shown.every((d, i) => i === 0 || d >= shown[i - 1]), 'rows are ordered by distance: ' + shown.join(','));
+    await page.locator('[data-dg="pick-near"]').click(); await page.waitForTimeout(200);
+    assert.equal(await page.evaluate(() => DGOperations.state.planPick.size), 10);
+    assert.equal(await page.locator('[data-plan-light]:checked').count(), 10, 'the ten rows are ticked');
+    assert.match(await page.locator('[data-dg="make-plan"]').textContent(), /선택한 10곳/);
+    const nearestIds = await page.evaluate(() => [...document.querySelectorAll('.dg-due-row')].slice(0, 10).map(r => r.querySelector('[data-plan-light]').dataset.planLight));
+    // untick one by hand, then 선택 해제 clears everything
+    await page.locator('[data-plan-light]').first().uncheck(); await page.waitForTimeout(100);
+    assert.equal(await page.evaluate(() => DGOperations.state.planPick.size), 9); assert.match(await page.locator('[data-dg="make-plan"]').textContent(), /9곳/);
+    await page.locator('[data-dg="pick-none"]').click(); await page.waitForTimeout(200);
+    assert.equal(await page.locator('[data-plan-light]:checked').count(), 0);
+    await page.locator('[data-dg="pick-near"]').click(); await page.waitForTimeout(200);
+
+    // 2. the plan: starts from my position, lies above the target list, shows progress, next stop and per-leg distances
+    checks.push('plan with next stop and legs');
+    await page.locator('[data-dg="make-plan"]').click(); await page.waitForFunction(() => DGOperations.state.plan && DGOperations.state.plan.stops.length === 10 && document.querySelector('.dg-plan'));
+    assert.deepEqual((await stops()).slice().sort(), nearestIds.slice().sort(), 'the plan holds the picked lights');
+    const plan = await page.evaluate(() => DGOperations.state.plan);
+    assert.equal(plan.stops[0].id, nearestIds[0], 'the route starts at the light nearest to me');
+    assert.ok(plan.stops.slice(1).every((s, i) => Math.abs(s.distanceFromPrevious - dist(plan.stops[i], s)) < 2), 'each stop carries the straight-line distance from the previous one');
+    assert.ok(await page.evaluate(() => document.querySelector('.dg-plan').getBoundingClientRect().top < document.querySelector('#dgDueTargets').getBoundingClientRect().top), 'the plan comes before the target list');
+    assert.equal(await page.locator('.dg-progress').getAttribute('aria-valuenow'), '0');
+    assert.equal(await page.locator('.dg-plan-next b').textContent(), plan.stops[0].code);
+    assert.match(await page.locator('.dg-plan-next small').textContent(), /다음 방문지 1\/10 · 내 위치에서 \d+m/);
+    assert.equal(await page.locator('.dg-plan-stop .n').nth(2).textContent(), '3');
+    assert.match(await page.locator('.dg-plan-stop').nth(1).locator('small').textContent(), /\+\d+m/);
+    assert.equal(await page.evaluate(() => DGOperations.state.planPick.size), 0, 'picks are consumed by the plan');
+
+    // 3. 방문 완료 on the next card, then an inspection saved later marks a stop done by itself
+    checks.push('visited and auto-completed stops');
+    await page.locator('.dg-plan-next [data-dg="plan-visit"]').click(); await page.waitForFunction(code => document.querySelector('.dg-plan-next b')?.textContent === code, plan.stops[1].code);
+    assert.equal(await page.evaluate(() => DGOperations.state.plan.stops[0].visited), true, 'the next card moved on because the first stop is ticked');
+    assert.equal(await page.locator('.dg-progress').getAttribute('aria-valuenow'), '10');
+    await page.evaluate(() => { byId(DGOperations.state.plan.stops[1].id).lastInspected = Date.now() + 1; render(); }); await page.waitForTimeout(200);
+    assert.equal(await page.locator('.dg-plan-stop.done').count(), 2);
+    assert.equal(await page.locator('.dg-plan-stop').nth(1).locator('.dg-auto').textContent(), '점검 완료');
+    assert.equal(await page.locator('.dg-plan-stop').nth(1).locator('[data-plan-visited]').isDisabled(), true, 'an auto-completed stop cannot be unticked');
+    assert.equal(await page.locator('.dg-plan-next b').textContent(), plan.stops[2].code);
+    assert.equal(await page.locator('.dg-progress').getAttribute('aria-valuenow'), '20');
+    assert.equal(await page.evaluate(async () => (await DGOffline.get('plan', 'current')).stops[0].visited), true, 'the tick is on the device');
+
+    // 4. reordering: 아래로 swaps, 내 위치에서 다시 정렬 keeps done stops first and sorts the rest from here
+    checks.push('reordering');
+    const before = await stops();
+    await page.locator('[data-dg="plan-down"][data-index="2"]').click(); await page.waitForFunction(id => DGOperations.state.plan.stops[3].id === id, before[2]);
+    assert.equal((await stops())[2], before[3]);
+    assert.ok(await page.evaluate(() => DGOperations.state.plan.stops[3].distanceFromPrevious > 0), 'legs are recomputed');
+    await page.locator('[data-dg="plan-up"][data-index="3"]').click(); await page.waitForFunction(id => DGOperations.state.plan.stops[2].id === id, before[2]);
+    // shuffle the rest, then re-sort from my position: done stops stay in front, the first open stop is the nearest open one
+    await page.evaluate(() => { const p = DGOperations.state.plan; const rest = p.stops.slice(2).reverse(); p.stops = [...p.stops.slice(0, 2), ...rest]; render(); });
+    await page.locator('[data-dg="plan-reorder"]').click(); await page.waitForFunction(() => DGOperations.state.plan.reorderedAt);
+    const after = await page.evaluate(() => DGOperations.state.plan.stops.map(s => ({ id: s.id, lat: s.lat, lng: s.lng })));
+    assert.deepEqual(after.slice(0, 2).map(s => s.id), before.slice(0, 2), 'completed stops keep their place');
+    const open = after.slice(2), me = { lat: HERE.latitude, lng: HERE.longitude };
+    assert.equal(open[0].id, open.slice().sort((a, b) => dist(me, a) - dist(me, b))[0].id, 'the first open stop is the one nearest to me');
+
+    // 5. the plan map draws the stops in order with a connecting line; done stops are greyed; a tap opens the card
+    checks.push('numbered route map');
+    await page.locator('[data-dg="plan-map"]').click(); await page.waitForFunction(() => gmap && gmapLayer && document.querySelectorAll('.maprt').length === 10);
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.maprt div')].map(d => d.textContent)), ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+    assert.equal(await page.locator('.maprt.done').count(), 2);
+    assert.equal(await page.evaluate(() => gmapLayer.getLayers().filter(l => l instanceof L.Polyline && !(l instanceof L.Polygon)).length), 1, 'one dashed line joins the stops');
+    assert.equal(await page.locator('#gmap .mapcl').count(), 0, 'no grouping on a plan map');
+    await page.locator('.maprt').nth(2).click(); await page.locator('#mapCard:not([hidden])').waitFor();
+    assert.equal(await page.locator('#mapCard b').first().textContent(), await page.evaluate(() => byId(DGOperations.state.plan.stops[2].id).code));
+    await page.goBack(); await page.locator('.dg-plan').waitFor();
+
+    // 6. 길찾기 from the next card offers the map apps for that stop
+    checks.push('길찾기 from the next card');
+    await page.evaluate(() => { window.__opened = []; window.open = u => { window.__opened.push(u); return null; }; });
+    await page.locator('.dg-plan-next [data-dg="plan-route"]').click();
+    await page.locator('#dgDialog:not([hidden]) [data-dgdlg-choice]').first().waitFor();
+    await page.locator('#dgDialog [data-dgdlg-choice]', { hasText: '구글 지도' }).click();
+    const next = await page.evaluate(() => DGOperations.state.plan.stops.find(s => !s.visited && (byId(s.id).lastInspected || 0) < DGOperations.state.plan.createdAt));
+    const opened = await page.evaluate(() => window.__opened);
+    assert.equal(opened.length, 1); assert.ok(opened[0].includes('destination=' + next.lat + ',' + next.lng), opened[0]);
+
+    // 7. the plan survives a reload, including the auto-completion rule
+    checks.push('plan persists');
+    const saved = await page.evaluate(() => DGOperations.state.plan.stops.map(s => s.id + ':' + s.visited));
+    await page.reload(); await page.waitForFunction(() => S.live && DGOffline.ready && S.me === 'local' && DGIntegration.initialized);
+    await page.evaluate(() => { S.demoRole = 'admin'; S.tab = 'admin'; render(); openAdminSection('due'); }); await page.locator('.dg-plan').waitFor();
+    assert.deepEqual(await page.evaluate(() => DGOperations.state.plan.stops.map(s => s.id + ':' + s.visited)), saved);
+
+    assert.deepEqual(errors, []);
+    console.log(JSON.stringify({ results: checks, browserErrors: errors }, null, 2));
+  } finally { await context.close(); await browser.close(); server.close(); }
+})().catch(error => { console.error(error.stack); server.close(); process.exitCode = 1; });
