@@ -65,10 +65,23 @@
 .ptfull .ptlog .ptlogempty{padding:12px 4px;color:#B5C2D7;font-size:12px}
 .ptfull .ptlog .ptlogmore{width:100%;min-height:44px;margin:6px 0 0;padding:8px;border-radius:9px;background:#293C58;border-color:#4E6384;color:#E9F0FB;font-size:12px;font-weight:700}
 @media(orientation:landscape) and (min-width:600px){.ptfull .ptlog{display:block;max-height:min(24vh,170px)}.ptfull .pthistory{max-height:min(42vh,330px)}
-/* landscape phones have ~220px beside the map: the open record panel takes the whole side column (the map and its numbers stay), with a one-line summary and short filter buttons */
-.ptfull .side{position:relative}.ptfull .pthistory[open]{position:absolute;top:0;right:12px;bottom:0;left:0;margin:0;min-height:0;max-height:none;z-index:6;box-shadow:0 0 0 1px #34445F}
+/* landscape phones give the side ~220px. The body becomes a grid: the map or camera on the left with the four mark buttons in
+   one row under it, the queue on the right with the room the buttons used to take; the open record panel covers the right
+   column only, so the map and the buttons stay in reach. In list view the buttons fill the left column as a 2×2 block. */
+.ptfull>p{display:none} /* the static hint about 기준 동 gives its line to the map */
+.ptfull .body{display:grid;grid-template-columns:55% minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto auto;position:relative;column-gap:6px}
+.ptfull .body>.view{grid-column:1;grid-row:1/4;padding:0 0 0 12px;min-height:0}
+.ptfull .side{display:contents}
+.ptfull .side .ptqueuebar{grid-column:2;grid-row:1;min-height:36px;padding:0 12px 0 0}
+.ptfull .side .ptahead{grid-column:2;grid-row:2;min-height:0;padding:2px 12px 2px 0;overflow:auto}
+.ptfull .side .ptbtns{grid-column:1;grid-row:4;grid-template-columns:repeat(4,1fr);gap:6px;margin:4px 0 0 12px}.ptfull .side .ptbtns button{min-height:46px;font-size:14px;padding:4px 2px}.ptfull .side .ptbtns button small{display:none}
+.ptfull .body:has(.view[hidden]) .ptbtns{grid-row:1/5;grid-template-columns:1fr 1fr;align-content:stretch;margin:0 0 0 12px}.ptfull .body:has(.view[hidden]) .ptbtns button{min-height:0;font-size:17px}.ptfull .body:has(.view[hidden]) .ptbtns button small{display:block}
+.ptfull .side .pthistory{grid-column:2;grid-row:3;margin:2px 12px 0 0}.ptfull .pthistory:not([open]){max-height:40px}.ptfull .pthistory:not([open])>summary{min-height:38px;padding:4px 12px;grid-template-rows:auto}.ptfull .pthistory:not([open]) #ptHistoryLatest{display:none}.ptfull .pthistory:not([open]) .ptchevron{grid-row:1}
+.ptfull .side #ptHeard{grid-column:2;grid-row:4;padding:0 12px 0 0!important}
+.ptfull .pthistory[open]{position:absolute;grid-column:auto;grid-row:auto;top:0;right:12px;bottom:0;left:calc(55% + 6px);margin:0;min-height:0;max-height:none;z-index:6;box-shadow:0 0 0 1px #34445F}
 .ptfull .pthistory[open]>summary{min-height:44px;padding:6px 12px;grid-template-rows:auto}.ptfull .pthistory[open] #ptHistoryLatest{display:none}.ptfull .pthistory[open] .ptchevron{grid-row:1}
-.ptfull .pthistory[open] .ptlogfilters{padding:5px 9px 4px}.ptfull .pthistory[open] .ptlogfilters button{min-height:32px}.ptfull .pthistory[open] .ptlog .ptlogrow{min-height:40px}.ptfull .pthistory[open] .ptlog .ptlogrow button{min-height:34px}}
+.ptfull .pthistory[open] .ptlogfilters{padding:5px 9px 4px}.ptfull .pthistory[open] .ptlogfilters button{min-height:32px}.ptfull .pthistory[open] .ptlog .ptlogrow{min-height:40px}.ptfull .pthistory[open] .ptlog .ptlogrow button{min-height:34px}
+.ptfull .side:has(.pthistory[open]) .ptahead .ptcard:not(.first){display:flex}.ptfull .side:has(.pthistory[open]) .ptahead{overflow:auto}}
 #ptSumm .ptsummary-issue-title{font-weight:750;margin:14px 0 8px;color:var(--bad);font-size:14px}
 #ptSumm .ptsummary-normal{margin:12px 0;border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
 #ptSumm .ptsummary-normal>summary{min-height:50px;padding:12px 15px;cursor:pointer;font-weight:700;color:var(--ink);list-style:none}

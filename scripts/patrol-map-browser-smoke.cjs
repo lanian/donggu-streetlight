@@ -125,6 +125,7 @@ const server=http.createServer((req,res)=>{
 
    // 6. many records: the list scrolls inside the open panel and its last row is reachable (regression: PR #17 removed its height cap)
    checks.push('record list scrolls with many records');
+   let innerSize='portrait';
    const scrollCase=async()=>{
      await page.evaluate(()=>{const ls=S.lights.filter(l=>Number.isFinite(l.lat)).slice(0,30);pt.marks=ls.slice(0,15).map((l,i)=>({id:l.id,code:l.code,result:i%3?'정상':'고장',at:Date.now()-i*60000}));ptDraw(true)});
      await page.evaluate(()=>{$('#ptHistory').open=true});await page.waitForFunction(()=>$('#ptHistory').open&&$('#ptLog .ptlogrow'));
@@ -137,11 +138,16 @@ const server=http.createServer((req,res)=>{
      await page.evaluate(()=>{const log=$('#ptLog');log.scrollTop=log.scrollHeight});await page.waitForTimeout(100);
      assert.ok(await page.evaluate(()=>$('#ptLog').scrollTop>0),'scrollTop moves');
      assert.ok(await page.evaluate(()=>{const b=$('#ptHistoryMore').getBoundingClientRect(),p=$('#ptHistory').getBoundingClientRect();return b.bottom<=p.bottom+1&&b.top>=p.top}),'the "더 보기" button at the end of the list can be scrolled into view');
+     // the mark buttons stay usable while the records are open: visible, and not under the panel
+     assert.ok(await page.evaluate(()=>{const b=$('#ptOkBtn').getBoundingClientRect(),p=$('#ptHistory').getBoundingClientRect();const el=document.elementFromPoint(b.left+b.width/2,b.top+b.height/2);return b.height>0&&b.bottom<=innerHeight&&el&&(el===$('#ptOkBtn')||$('#ptOkBtn').contains(el))&&!(b.right>p.left&&b.left<p.right&&b.bottom>p.top&&b.top<p.bottom)}),'켜져 있음 button is visible and not covered by the open record panel ('+innerSize+')');
      await page.evaluate(()=>{$('#ptHistory').open=false});await page.waitForFunction(()=>!$('#ptHistory').open);
    };
    await scrollCase();
-   await page.setViewportSize({width:844,height:390});await page.waitForTimeout(300);
+   await page.setViewportSize({width:844,height:390});await page.waitForTimeout(300);innerSize='landscape';
    await scrollCase();
+   // landscape: the queue is not hidden under the buttons any more — at least two cards fit beside the map
+   assert.ok(await page.evaluate(()=>[...document.querySelectorAll('#ptAhead .ptcard')].filter(c=>{const r=c.getBoundingClientRect(),a=$('#ptAhead').getBoundingClientRect();return r.top>=a.top-1&&r.bottom<=a.bottom+1}).length>=2),'two queue cards are visible in landscape');
+   assert.ok(await page.evaluate(()=>{const b=$('.ptfull .ptbtns').getBoundingClientRect(),v=$('#ptMapBox').getBoundingClientRect();return b.top>=v.bottom-1&&b.left<v.right}),'in landscape the buttons sit under the map');
    await page.setViewportSize({width:390,height:844});await page.waitForTimeout(200);
 
    await page.evaluate(()=>ptFinish());
