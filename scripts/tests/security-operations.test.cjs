@@ -71,7 +71,8 @@ test('logout asks before discarding any draft category and still permits an expl
   for(const kind of ['draft','patrol','workDraft','workCompletion']){
     const fixture=deviceFixture({ready:true,jobs:async()=>[],list:async name=>name===kind?[{id:'draft'}]:[]});
     vm.runInContext(between('async function fbSignOut(){','function vSignIn(){'),fixture.sandbox);
-    fixture.sandbox.confirm=()=>false;await vm.runInContext('fbSignOut()',fixture.sandbox);assert.equal(fixture.result().signedOut,0,kind);
-    fixture.sandbox.confirm=()=>true;await vm.runInContext('fbSignOut()',fixture.sandbox);assert.equal(fixture.result().signedOut,1,kind);
+    // the sign-out question goes through the in-app dialog helper (dgConfirm); answering no keeps the session
+    fixture.sandbox.dgConfirm=async()=>false;fixture.sandbox.dgAlert=async()=>true;await vm.runInContext('fbSignOut()',fixture.sandbox);assert.equal(fixture.result().signedOut,0,kind);
+    fixture.sandbox.dgConfirm=async()=>true;await vm.runInContext('fbSignOut()',fixture.sandbox);assert.equal(fixture.result().signedOut,1,kind);
   }
 });

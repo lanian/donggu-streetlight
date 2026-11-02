@@ -42,7 +42,7 @@ const server = http.createServer((req, res) => {
       await page.screenshot({ path: path.join(screenshotDirectory, name), fullPage: false });
     };
     page.on('pageerror', error => errors.push(error.stack || error.message));
-    page.on('dialog', dialog => dialog.accept());
+    page.on('dialog', dialog => dialog.accept()); await page.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
     await page.goto(origin);
     await page.waitForFunction(() => typeof S !== 'undefined' && S.live && DGOffline.ready && DGIntegration.initialized && DGLighting.state.loaded && DGLightingAreas.state.loaded);
     assert.equal(await page.evaluate(() => FIREBASE_CONFIG), null);

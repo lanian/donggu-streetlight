@@ -33,7 +33,7 @@ async function main() {
   const context=await browser.newContext({viewport:{width:390,height:844},serviceWorkers:'block'});
   await context.route('**/*',route=>{const u=new URL(route.request().url());return u.origin===origin?route.continue():route.fulfill({status:200,contentType:u.pathname.endsWith('.js')?'text/javascript':'text/css',body:''});});
   const page=await context.newPage(), errors=[];
-  page.on('pageerror',e=>errors.push(e.message)); page.on('dialog',dialog=>dialog.accept());
+  page.on('pageerror',e=>errors.push(e.message)); page.on('dialog',dialog=>dialog.accept()); await page.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
   const boot=async()=>{await page.goto(origin);await page.waitForFunction(()=>typeof S!=='undefined'&&S.live&&DGOffline.ready);assert.equal(await page.evaluate(()=>window.FIREBASE_CONFIG),null);assert.equal(await page.evaluate(()=>DGIntegration.whenReady()),true);await page.evaluate(()=>DGOperations.load());};
   // Escape/Back now leave one level at a time (navigation stack); the helper closes every level.
   const close=async()=>{if(await page.locator('#sheet.open').count()){await page.evaluate(()=>closeSheet('all'));await page.waitForFunction(()=>!document.querySelector('#sheet').classList.contains('open'));}};

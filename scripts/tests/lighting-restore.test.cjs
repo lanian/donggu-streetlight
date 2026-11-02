@@ -61,7 +61,7 @@ function fixture(backend, collections, overwrite = false) {
     DGData: { ...Data, newId: prefix => prefix + '-test-' + (++id) }, DGLightingCommands: Commands, DGLightingModel: Model,
     DGOffline: { ready: true, durable: false, register() {}, subscribe() {}, get: async () => null, list: async () => [], jobs: async () => [] },
     BK, BK_COLS: ['lightingContext', 'lightingOperations'], FB: backend.fb ? { fs: backend.fb } : null, db: backend.db, S: state,
-    listAllRecords: (collection, options) => backend.db.readAll(collection, options), confirm: () => true, render() {}, toast() {},
+    listAllRecords: (collection, options) => backend.db.readAll(collection, options), confirm: () => true, dgConfirm: async () => true, render() {}, toast() {},
     dl: { save: async value => { downloads.push(value); } }
   });
   vm.runInContext(source('app/restore.js'), context);

@@ -81,7 +81,7 @@ function fixture(backend, collections, overwrite = false) {
     DGData: { ...Data, newId: prefix => prefix + '-test-' + (++serial) }, DGLightingAreaCore: Core, DGLightingAreaCommands: Commands,
     DGOffline: { ready: true, register() {}, subscribe() {}, jobs: async () => [], get: async () => null, list: async () => [] },
     BK, FB: backend.fb ? { fs: backend.fb } : null, db: backend.db, S: state,
-    listAllRecords: (collection, options) => backend.db.readAll(collection, options), confirm: () => true, render() {}, toast() {}, fmtD: () => '2026.10.26',
+    listAllRecords: (collection, options) => backend.db.readAll(collection, options), confirm: () => true, dgConfirm: async () => true, render() {}, toast() {}, fmtD: () => '2026.10.26',
     dl: { save: async value => { downloads.push(value); } }
   });
   vm.runInContext(source('app/restore.js'), context);

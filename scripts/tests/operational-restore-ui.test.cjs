@@ -34,7 +34,7 @@ function fixture({ enabled = true, oversized = false, loseReply = false } = {}) 
   };
   const context = vm.createContext({ console, Date, Math, TextEncoder, crypto: webcrypto, BK, BK_COLS: Object.keys(collections), S: { me: 'admin' }, FB: { fs: db }, db,
     FIREBASE_CONFIG: { functionsEnabled: enabled }, DGSecurity: { call },
-    listAllRecords: async () => [], render() {}, toast() {}, confirm: () => true,
+    listAllRecords: async () => [], render() {}, toast() {}, confirm: () => true, dgConfirm: async () => true,
     DGLighting: { load: async () => {} }, DGOperations: { load: async () => {} }, DGLightingWorkflows: { loadTasks: async () => {}, loadHistory: async () => {} }
   });
   vm.runInContext(source('app/data.js'), context); vm.runInContext(source('app/restore.js'), context);

@@ -1,6 +1,8 @@
 /* Follow-up tasks, explicit import previews, and immutable brightness review history. */
 (function (root) {
   'use strict';
+  /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
+  const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   const C = root.DGLightingWorkflowCore, Commands = root.DGLightingWorkflowCommands;
   const state = { tasks: [], tasksLoaded: false, tasksError: '', taskFilter: 'open', taskShow: 40, runs: [], runsLoaded: false, runsError: '', runShow: 30, draft: null,
     import: { parsed: null, name: '', agency: '', dataset: '', mapping: {}, preview: null, busy: false, progress: '', show: 50 } };
@@ -152,7 +154,7 @@
     if (!current()) return;
     if (recordId && !old && !(resume && previous)) C.fail('업무를 찾지 못했어요. 새로고침해 주세요.');
     if (resume && !previous && !old) C.fail('이어 쓸 재확인 초안이 없어요.');
-    if (previous && (resume || previous.pending || confirm('작성 중인 재확인 초안을 이어 쓸까요?'))) { state.draft = previous; if (old) state.draft.readonly = taskReadonly(old); }
+    if (previous && (resume || previous.pending || await ask('작성 중인 재확인 초안을 이어 쓸까요?', { ok: '이어 쓰기', cancel: '새로 시작' }))) { state.draft = previous; if (old) state.draft.readonly = taskReadonly(old); }
     else if (old) state.draft = taskFromRecord(old, previous?.draftRevision ?? null);
     else {
       const now = Date.now(), data = { title: input?.title || '', lat: input?.lat ?? '', lng: input?.lng ?? '', radius: input?.radius || 10, note: input?.note || '', originKind: input?.originKind || 'manual', originId: input?.originId || '', evidenceIds: input?.evidenceIds || [], assignedTo: actor(), dueAt: now + 86400000, reviewMinute: input?.reviewMinute ?? 1260, status: 'open', observationId: '', completionNote: '', completedAt: 0, completedBy: '' };
@@ -310,11 +312,11 @@
     if (action === 'tasks-more') { state.taskShow += 40; return notify(); } if (action === 'history-more') { state.runShow += 30; return notify(); }
     if (action === 'task-new') return openTask(); if (action === 'task-open') return openTask(null, button.dataset.id); if (action === 'task-resume') return openTask(null, button.dataset.id, true);
     if (action === 'candidate-task') return candidateTask(button.dataset.candidate); if (action === 'record-task') return recordTask(button.dataset.recordId);
-    if (action === 'task-complete') return saveTask('completed'); if (action === 'task-cancel' && confirm('재확인 업무를 취소할까요?')) return saveTask('cancelled');
+    if (action === 'task-complete') return saveTask('completed'); if (action === 'task-cancel' && await ask('재확인 업무를 취소할까요?', { ok: '업무 취소', cancel: '돌아가기', danger: true })) return saveTask('cancelled');
     if (action === 'task-reopen') return reopenTask(button.dataset.id);
-    if (action === 'task-discard' && confirm('작성 중인 재확인 초안을 버릴까요?')) { const id = state.draft.recordId; await discardDraft(id); api.closeSheet(); return; }
+    if (action === 'task-discard' && await ask('작성 중인 재확인 초안을 버릴까요?', { ok: '버리기', danger: true })) { const id = state.draft.recordId; await discardDraft(id); api.closeSheet(); return; }
     if (action === 'task-reload-draft') {
-      if (!confirm('현재 창의 저장되지 않은 입력 대신 다른 탭이 저장한 최신 초안을 열까요?')) return;
+      if (!await ask('현재 창의 저장되지 않은 입력 대신 다른 탭이 저장한 최신 초안을 열까요?', { ok: '최신 초안 열기', cancel: '현재 입력 유지' })) return;
       const id = state.draft.recordId; await taskWrites.catch(() => {}); const saved = await root.DGOffline.get('lightingTaskDraft', id); state.draft = saved;
       if (saved) { delete saved.conflict; renderTask(); } else { await loadTasks(); if (state.tasks.some(t => t.id === id)) await openTask(null, id); else api.closeSheet(); } return;
     }

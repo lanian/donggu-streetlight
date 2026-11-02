@@ -1,6 +1,8 @@
 /* Shared input boundaries and optional Firebase administration. No connection is made on load. */
 (function(root){
   'use strict';
+  /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
+  const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   function csvCell(value){let s=String(value??'');if(/^[\s\u0000-\u001f]*[=+\-@＝＋－＠]/u.test(s)||/^[\t\r\n]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';}
   function safeImageSrc(value){return typeof value==='string'&&value.length<=1500000&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value)?value:'';}
   function inspectionThumbs(record){return Array.isArray(record&&record.thumbs)?record.thumbs.slice(0,6).filter(t=>t&&typeof t==='object'&&typeof t.id==='string'&&t.id.length<=200&&!t.id.includes('/')&&safeImageSrc(t.t)):[];}
@@ -44,7 +46,7 @@
       const action=button.dataset.dgAction;
       if(action==='device'){
         const value=!!document.getElementById('dgDeviceTrusted').checked;
-        if(!confirm('작성 중인 내용과 전송 대기 작업을 먼저 저장했나요? 저장 방식을 바꾸고 화면을 다시 엽니다.'))return;
+        if(!await ask('작성 중인 내용과 전송 대기 작업을 먼저 저장했나요? 저장 방식을 바꾸고 화면을 다시 엽니다.',{title:'저장 방식을 바꿀까요?',ok:'바꾸고 다시 열기'}))return;
         if(await hasPendingWork())throw new Error('저장 대기함의 미전송 작업과 작성 중인 초안을 먼저 저장하거나 직접 정리하세요.');
         if(!value&&root.DGOffline&&root.DGOffline.ready)await root.DGOffline.clear();
         if(!value&&typeof FB!=='undefined'&&FB){await FB.fs.terminate();await FB.fs.clearPersistence();}

@@ -1,5 +1,7 @@
 (function (root) {
   'use strict';
+  /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
+  const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   const C = root.DGOperationsCore;
   let api, loading = null, reloadRequested = false, attached = false, detailToken = 0, editorRequest = 0;
   let draftWrites = Promise.resolve();
@@ -327,7 +329,7 @@
       completionNote: d.note, afterPhotos: [...(d.existingPhotos || []), ...d.photos.map(p => p.id)],
       parts: clone(d.parts), measurements: clone(d.measurements), verificationNote: Q('#woVerification') ? Q('#woVerification').value : '' };
     C.transition(order, target, input, api.state().me, admin(), Date.now());
-    if (['cancelled', 'verified'].includes(target) && !confirm(target === 'verified' ? '조치 후 원본 사진과 조치 내용을 확인했나요? 검수 승인 시 연결된 자재 재고도 반영돼요.' : '이 작업을 취소할까요? 처리 이력은 유지돼요.')) return;
+    if (['cancelled', 'verified'].includes(target) && !await ask(target === 'verified' ? '조치 후 원본 사진과 조치 내용을 확인했나요? 검수 승인 시 연결된 자재 재고도 반영돼요.' : '이 작업을 취소해요. 처리 이력은 유지돼요.', target === 'verified' ? { title: '검수 승인', ok: '확인했어요, 승인' } : { title: '작업을 취소할까요?', ok: '작업 취소', cancel: '돌아가기', danger: true })) return;
     const job = { id: uuid('command'), kind: 'transition', workId: order.id, target, actor: api.state().me, at: Date.now(), input, photos: target === 'completed' ? clone(d.photos) : [], facilityStatus: Q('#woFacilityStatus') ? Q('#woFacilityStatus').value : '', lightUpdatedAt: state.lightVersion, closeReports: !!(Q('#woCloseReports') && Q('#woCloseReports').checked), draftKey: d.storageId };
     if (job.closeReports) job.reportVersions = { ...state.reportVersions };
     d.pending = job.id; lockForm(form, true); button.disabled = true;
@@ -388,7 +390,7 @@
     if (action === 'make-plan') { const chosen = [...document.querySelectorAll('[data-plan-light]:checked')].map(x => api.byId(x.dataset.planLight)).filter(Boolean); if (!chosen.length) throw new Error('방문할 시설을 선택해 주세요.'); state.plan = C.planVisits(chosen, api.state().pos); await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
     if (action === 'plan-map') return api.openMap('custom', { title: '방문 계획 · 직선 순서', pts: state.plan.stops.map(s => api.byId(s.id)).filter(Boolean) });
     if (action === 'plan-up') { const i = +button.dataset.index; if (i > 0) [state.plan.stops[i - 1], state.plan.stops[i]] = [state.plan.stops[i], state.plan.stops[i - 1]]; state.plan.distance = Math.round(state.plan.stops.slice(1).reduce((sum, p, n) => sum + C.distance(state.plan.stops[n], p), 0)); await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
-    if (action === 'clear-plan') { if (!confirm('현재 방문 계획을 지울까요? 점검 기록은 유지돼요.')) return; state.plan = null; await root.DGOffline.remove('plan', 'current'); return notify(); }
+    if (action === 'clear-plan') { if (!await ask('현재 방문 계획을 지워요. 점검 기록은 유지돼요.', { title: '방문 계획을 지울까요?', ok: '지우기', danger: true })) return; state.plan = null; await root.DGOffline.remove('plan', 'current'); return notify(); }
     if (action === 'plan-csv') return download('동구_방문계획', [['순서', '시설', '시설ID', '법정동', '위도', '경도', '방문', '연결 작업ID'], ...state.plan.stops.map((p, i) => [i + 1, p.code, p.id, p.dong, p.lat, p.lng, p.visited ? '방문' : '미방문', (p.workIds || []).join(' · ')])]);
     if (['work-csv', 'work-map', 'work-plan'].includes(action)) {
       const { rows, metadata } = await fullSelectedOrders();
@@ -403,7 +405,7 @@
     if (action === 'retry-all') { await root.DGOffline.flush({ retry: true }); return refreshQueue(); }
     if (action === 'retry-job') { const result = await root.DGOffline.retry(button.dataset.id); api.toast(result.state === 'synced' ? '저장했어요.' : result.error || '전송을 기다리고 있어요.'); return refreshQueue(); }
     if (action === 'discard-job') {
-      if (!confirm('이 대기 항목을 지울까요? 이미 서버에 반영된 기록은 삭제하지 않아요.')) return;
+      if (!await ask('이 대기 항목을 지워요. 이미 서버에 반영된 기록은 삭제하지 않아요.', { title: '대기 항목을 지울까요?', ok: '지우기', danger: true })) return;
       const job = state.jobs.find(j => j.id === button.dataset.id);
       await root.DGOffline.discard(button.dataset.id);
       if (job && job.kind === 'work' && job.payload) await releasePending(job);
@@ -411,7 +413,7 @@
     }
     if (action === 'recover-draft') { if (button.dataset.kind === 'lightingAreaDraft') return root.DGLightingAreas.openEditor(null, button.dataset.id, true); if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return api.openLight(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
     if (action === 'discard-draft') {
-      if (!confirm('작성 중인 이 초안을 폐기할까요?')) return;
+      if (!await ask('작성 중인 이 초안을 폐기할까요?', { ok: '폐기', danger: true })) return;
       const kind = button.dataset.kind, id = button.dataset.id, saved = await root.DGOffline.get(kind, id);
       if (kind === 'lightingAreaDraft') { await root.DGLightingAreas.discardDraft(id); return refreshQueue(); }
       if (kind === 'lightingTaskDraft') { await root.DGLightingWorkflows.discardDraft(id); return refreshQueue(); }
