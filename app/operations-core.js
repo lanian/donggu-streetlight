@@ -106,16 +106,85 @@
     const x = Math.sin(dlat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dlng / 2) ** 2;
     return 6371000 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(Math.max(0, 1 - x)));
   }
+  /* Visit order (노선) on straight lines: no road network is used, so this is a suggested order, not a driving route.
+     1) duplicate facilities merge into one stop (their linked works are kept together);
+     2) with a start position the route begins at the nearest stop, otherwise every stop is tried as the start;
+     3) the nearest-neighbour chain is then improved with 2-opt (uncrossing legs) and Or-opt (moving 1~3 stops). */
+  const PLAN_MAX = 200;
   function planVisits(lights, origin) {
-    const left = [...new Map(lights.filter(l => !l.removed && Number.isFinite(l.lat) && Number.isFinite(l.lng)).map(l => [l.id, l])).values()].map(l => ({ id: l.id, code: l.code, dong: l.dong, lat: l.lat, lng: l.lng, workIds: Array.isArray(l.workIds) ? [...new Set(l.workIds)] : [] }));
-    if (left.length > 200) fail('한 방문 계획에는 최대 200개 시설을 선택해 주세요.');
-    const result = []; let current = origin || left[0], total = 0;
-    while (left.length) {
-      let index = 0, best = Infinity;
-      left.forEach((p, i) => { const d = distance(current, p); if (d < best) { best = d; index = i; } });
-      const next = left.splice(index, 1)[0]; total += best; result.push({ ...next, distanceFromPrevious: Math.round(best), visited: false }); current = next;
+    const merged = new Map();
+    for (const l of lights) {
+      if (!l || l.removed || !Number.isFinite(l.lat) || !Number.isFinite(l.lng)) continue;
+      const works = Array.isArray(l.workIds) ? l.workIds : [], seen = merged.get(l.id);
+      if (seen) { for (const id of works) if (!seen.workIds.includes(id)) seen.workIds.push(id); continue; }
+      merged.set(l.id, { id: l.id, code: l.code, dong: l.dong, lat: l.lat, lng: l.lng, workIds: [...new Set(works)] });
     }
-    return { stops: result, distance: Math.round(total), method: 'straight-line-nearest', createdAt: Date.now() };
+    const left = [...merged.values()];
+    if (left.length > PLAN_MAX) fail('한 방문 계획에는 최대 ' + PLAN_MAX + '개 시설을 선택해 주세요.');
+    const start = origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng) ? { lat: origin.lat, lng: origin.lng } : null;
+    const order = routeOrder(left, start);
+    const stops = order.map(i => ({ ...left[i], distanceFromPrevious: 0, visited: false }));
+    const plan = { stops, distance: 0, method: 'straight-line-optimized', createdAt: Date.now() };
+    if (start) { plan.origin = start; plan.startDistance = stops.length ? Math.round(distance(start, stops[0])) : 0; }
+    return planLegs(plan);
+  }
+  /* legs between consecutive stops; the walk from the start position to the first stop is kept apart in startDistance */
+  function planLegs(plan) {
+    plan.stops.forEach((s, i) => { s.distanceFromPrevious = i ? Math.round(distance(plan.stops[i - 1], s)) : 0; });
+    plan.distance = plan.stops.reduce((sum, s) => sum + s.distanceFromPrevious, 0);
+    return plan;
+  }
+  function routeOrder(points, start) {
+    const n = points.length; if (n < 2) return points.map((_, i) => i);
+    // local flat projection in metres: accurate enough inside one district and much cheaper than haversine
+    const lat0 = (start || points[0]).lat, k = Math.cos(lat0 * Math.PI / 180) * 111320, xy = points.map(p => [(p.lng - (start || points[0]).lng) * k, (p.lat - lat0) * 110574]);
+    const D = (i, j) => Math.hypot(xy[i][0] - xy[j][0], xy[i][1] - xy[j][1]);
+    const chain = first => {
+      const used = new Uint8Array(n), out = [first]; used[first] = 1; let cur = first, total = 0;
+      for (let step = 1; step < n; step++) { let best = -1, bd = Infinity; for (let j = 0; j < n; j++) if (!used[j]) { const d = D(cur, j); if (d < bd) { bd = d; best = j; } } used[best] = 1; out.push(best); total += bd; cur = best; }
+      return { out, total };
+    };
+    let route, fixFirst = !!start;
+    if (start) {
+      let first = 0, bd = Infinity; // the projection is centred on the start, so it sits at (0, 0)
+      xy.forEach(([x, y], i) => { const d = Math.hypot(x, y); if (d < bd) { bd = d; first = i; } });
+      route = chain(first).out;
+    } else {
+      let best = null; for (let f = 0; f < n; f++) { const c = chain(f); if (!best || c.total < best.total) best = c; }
+      route = best.out;
+    }
+    improveRoute(route, D, fixFirst);
+    return route;
+  }
+  function improveRoute(r, D, fixFirst) {
+    const n = r.length, lo = fixFirst ? 1 : 0, EPS = 1e-6;
+    for (let pass = 0, improved = true; improved && pass < 60; pass++) {
+      improved = false;
+      // 2-opt on an open path: reverse r[i..j]
+      for (let i = lo; i < n - 1; i++) for (let j = i + 1; j < n; j++) {
+        const before = (i > 0 ? D(r[i - 1], r[i]) : 0) + (j < n - 1 ? D(r[j], r[j + 1]) : 0);
+        const after = (i > 0 ? D(r[i - 1], r[j]) : 0) + (j < n - 1 ? D(r[i], r[j + 1]) : 0);
+        if (after < before - EPS) { for (let a = i, b = j; a < b; a++, b--) [r[a], r[b]] = [r[b], r[a]]; improved = true; }
+      }
+      // Or-opt: move a run of 1~3 stops (either way round) to the best other gap
+      for (let len = 1; len <= 3; len++) for (let i = lo; i + len <= n; i++) {
+        const seg = r.slice(i, i + len), prev = i > 0 ? r[i - 1] : -1, next = i + len < n ? r[i + len] : -1;
+        const removeGain = (prev >= 0 ? D(prev, seg[0]) : 0) + (next >= 0 ? D(seg[len - 1], next) : 0) - (prev >= 0 && next >= 0 ? D(prev, next) : 0);
+        const rest = [...r.slice(0, i), ...r.slice(i + len)];
+        let bestCost = removeGain - EPS, bestAt = -1, bestRev = false;
+        for (let g = fixFirst ? 1 : 0; g <= rest.length; g++) {
+          if (g === i) continue; // the gap it came from
+          const a = g > 0 ? rest[g - 1] : -1, b = g < rest.length ? rest[g] : -1;
+          for (const rev of [false, true]) {
+            const h = rev ? seg[len - 1] : seg[0], t = rev ? seg[0] : seg[len - 1];
+            const cost = (a >= 0 ? D(a, h) : 0) + (b >= 0 ? D(t, b) : 0) - (a >= 0 && b >= 0 ? D(a, b) : 0);
+            if (cost < bestCost) { bestCost = cost; bestAt = g; bestRev = rev; }
+          }
+        }
+        if (bestAt >= 0) { const moved = bestRev ? seg.slice().reverse() : seg; rest.splice(bestAt, 0, ...moved); r.splice(0, n, ...rest); improved = true; }
+      }
+    }
+    return r;
   }
   function normalizeRegistry(value) {
     let rows;
@@ -185,5 +254,5 @@
     if (next < 0) fail('재고보다 많은 수량을 출고할 수 없어요.');
     return { ...item, quantity: Math.round(next * 1000) / 1000, revision: item.revision + 1 };
   }
-  return { STATES, PRIORITIES, TYPES, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, transition, inspectionState, kstDateKey, workQuery, filterOrders, distance, planVisits, normalizeRegistry, registryDiff, analytics, inventoryChange };
+  return { STATES, PRIORITIES, TYPES, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, transition, inspectionState, kstDateKey, workQuery, filterOrders, distance, planLegs, PLAN_MAX, planVisits, normalizeRegistry, registryDiff, analytics, inventoryChange };
 });

@@ -1,6 +1,6 @@
 /* 미점검·방문 계획: picking targets (가까운 순, 10곳/전체 선택), the plan up top with progress and the next stop,
    per-leg distances, auto-completion from saved inspections, reordering (위/아래, 내 위치에서 다시 정렬),
-   the numbered route map and 길찾기. GPS is a fixed fake position; nothing leaves the local registry. */
+   the numbered route map, 길찾기 and 다음 N곳 경로 (waypoints). GPS is a fixed fake position; nothing leaves the local registry. */
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -99,6 +99,8 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
     await page.locator('[data-dg="plan-map"]').click(); await page.waitForFunction(() => gmap && gmapLayer && document.querySelectorAll('.maprt').length === 10);
     assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.maprt div')].map(d => d.textContent)), ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
     assert.equal(await page.locator('.maprt.done').count(), 2);
+    assert.equal(await page.locator('.maprt.next').count(), 1, 'the next stop is marked on the map');
+    assert.equal(await page.locator('.maprt.next div').textContent(), '3', 'the next stop carries its plan number');
     assert.equal(await page.evaluate(() => gmapLayer.getLayers().filter(l => l instanceof L.Polyline && !(l instanceof L.Polygon)).length), 1, 'one dashed line joins the stops');
     assert.equal(await page.locator('#gmap .mapcl').count(), 0, 'no grouping on a plan map');
     await page.locator('.maprt').nth(2).click(); await page.locator('#mapCard:not([hidden])').waitFor();
@@ -114,6 +116,18 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
     const next = await page.evaluate(() => DGOperations.state.plan.stops.find(s => !s.visited && (byId(s.id).lastInspected || 0) < DGOperations.state.plan.createdAt));
     const opened = await page.evaluate(() => window.__opened);
     assert.equal(opened.length, 1); assert.ok(opened[0].includes('destination=' + next.lat + ',' + next.lng), opened[0]);
+
+    // 6b. 다음 N곳 경로 hands the next open stops to the map app as waypoints, in plan order
+    checks.push('다음 N곳 경로');
+    await page.evaluate(() => { window.__opened = []; });
+    await page.locator('[data-dg="plan-route-ahead"]').click();
+    await page.locator('#dgDialog [data-dgdlg-choice]', { hasText: '구글 지도 · 도보' }).click();
+    const ahead = await page.evaluate(() => { const p = DGOperations.state.plan; return p.stops.filter(s => !s.visited && (byId(s.id).lastInspected || 0) < p.createdAt).slice(0, 6); });
+    const routeUrl = new URL((await page.evaluate(() => window.__opened))[0]);
+    assert.equal(routeUrl.searchParams.get('destination'), ahead[5].lat + ',' + ahead[5].lng, 'the sixth open stop is the destination');
+    assert.equal(routeUrl.searchParams.get('waypoints'), ahead.slice(0, 5).map(s => s.lat + ',' + s.lng).join('|'), 'the five before it are waypoints in order');
+    assert.equal(routeUrl.searchParams.get('travelmode'), 'walking');
+    assert.match(await page.locator('.dg-plan p').first().textContent(), /남은 8곳 약 [\d.]+k?m\(내 위치부터\)/);
 
     // 7. the plan survives a reload, including the auto-completion rule
     checks.push('plan persists');

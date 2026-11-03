@@ -373,3 +373,28 @@ test('failure to durably enqueue prevents execution and retains a retryable call
   queue.register('work', async () => { calls++; }); const payload = { id: 'j', memo: 'keep this draft' };
   await assert.rejects(queue.submit('work', payload, { id: 'j' }), { code: 'quota-exceeded' }); assert.equal(calls, 0); assert.equal(payload.memo, 'keep this draft');
 });
+
+test('visit routes start at the stop nearest to me, uncross legs and beat the plain nearest-neighbour chain', () => {
+  // a ladder of points where greedy nearest-neighbour leaves a long jump back
+  let seed = 7; const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+  const pts = Array.from({ length: 120 }, (_, i) => ({ id: 'p' + i, code: 'P' + i, lat: 35.13 + rnd() * 0.04, lng: 126.9 + rnd() * 0.05 }));
+  const me = { lat: 35.15, lng: 126.92 };
+  const greedy = (() => { const left = [...pts]; let cur = me, total = 0, first = null; while (left.length) { let bi = 0, bd = Infinity; left.forEach((p, i) => { const d = C.distance(cur, p); if (d < bd) { bd = d; bi = i; } }); cur = left.splice(bi, 1)[0]; if (!first) first = cur; else total += bd; } return { first, total }; })();
+  const plan = C.planVisits(pts, me);
+  assert.equal(plan.stops.length, 120); assert.equal(new Set(plan.stops.map(s => s.id)).size, 120);
+  assert.equal(plan.stops[0].id, greedy.first.id, 'the first stop is the one nearest to me');
+  assert.equal(plan.startDistance, Math.round(C.distance(me, plan.stops[0])));
+  assert.equal(plan.stops[0].distanceFromPrevious, 0);
+  assert.equal(plan.distance, plan.stops.reduce((s, x) => s + x.distanceFromPrevious, 0));
+  assert.ok(plan.distance < greedy.total * 0.95, plan.distance + ' vs greedy ' + Math.round(greedy.total));
+  // no two legs cross (2-opt optimum on the flat projection)
+  const k = Math.cos(35.15 * Math.PI / 180), P = s => [s.lng * k, s.lat], cross = (a, b, c, d) => { const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])); return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0; };
+  const xs = plan.stops.map(P);
+  for (let i = 0; i < xs.length - 1; i++) for (let j = i + 2; j < xs.length - 1; j++) assert.ok(!cross(xs[i], xs[i + 1], xs[j], xs[j + 1]), 'legs ' + i + ' and ' + j + ' cross');
+  // without a position every stop is tried as the start (no start leg is stored)
+  const free = C.planVisits(pts, null); assert.ok(free.distance < greedy.total * 0.95); assert.equal(free.origin, undefined); assert.equal(free.startDistance, undefined);
+  // the same facility twice merges its linked works
+  const merged = C.planVisits([{ ...pts[0], workIds: ['w1'] }, { ...pts[0], workIds: ['w2', 'w1'] }], me);
+  assert.equal(merged.stops.length, 1); assert.deepEqual(merged.stops[0].workIds, ['w1', 'w2']);
+  assert.throws(() => C.planVisits(Array.from({ length: 201 }, (_, i) => ({ id: 'x' + i, lat: 35, lng: 126 })), me), /최대 200/);
+});
