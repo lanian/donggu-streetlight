@@ -363,7 +363,26 @@
   }
   // a stop counts as done when it was ticked, or when the light was inspected after the plan was made
   const stopDone = (plan, s) => !!s.visited || (Number(api.byId(s.id)?.lastInspected) || 0) >= (plan.createdAt || 0);
-  function relegs(plan) { plan.stops.forEach((s, i) => { s.distanceFromPrevious = i ? Math.round(C.distance(plan.stops[i - 1], s)) : 0; }); plan.distance = plan.stops.reduce((sum, s) => sum + (s.distanceFromPrevious || 0), 0); return plan; }
+  function relegs(plan) { C.planLegs(plan); if (plan.origin && plan.stops[0]) plan.startDistance = Math.round(C.distance(plan.origin, plan.stops[0])); return plan; }
+  const ROUTE_STOPS = 6; // stops handed to a map app at once (네이버 지도 takes 5 waypoints + the destination)
+  /* the open stops still ahead, in plan order, and their straight-line length (from my position when known) */
+  function remaining(plan, done) {
+    const open = plan.stops.filter((s, i) => !done[i]);
+    let m = 0; open.forEach((s, i) => { if (i) m += C.distance(open[i - 1], s); });
+    const fromMe = open.length && state.pos ? C.distance(state.pos, open[0]) : 0;
+    return { open, meters: m + fromMe, fromMe: !!(open.length && state.pos) };
+  }
+  /* 다음 N곳 경로: several stops as waypoints in one map app route, starting from the device's current position */
+  async function routeAhead(plan) {
+    const done = plan.stops.map(s => stopDone(plan, s)), ahead = plan.stops.filter((s, i) => !done[i]).slice(0, ROUTE_STOPS);
+    if (!ahead.length) return api.toast('남은 방문지가 없어요.');
+    const dest = ahead[ahead.length - 1], via = ahead.slice(0, -1), name = s => encodeURIComponent(s.code || '방문지'), ll = s => s.lat + ',' + s.lng;
+    const naver = mode => 'nmap://route/' + mode + '?dlat=' + dest.lat + '&dlng=' + dest.lng + '&dname=' + name(dest) + via.map((s, i) => '&v' + (i + 1) + 'lat=' + s.lat + '&v' + (i + 1) + 'lng=' + s.lng + '&v' + (i + 1) + 'name=' + name(s)).join('') + '&appname=lanian.github.io';
+    const google = mode => 'https://www.google.com/maps/dir/?api=1&destination=' + ll(dest) + (via.length ? '&waypoints=' + encodeURIComponent(via.map(ll).join('|')) : '') + '&travelmode=' + mode;
+    const options = [{ value: naver('car'), label: '네이버 지도 · 차량', hint: '앱이 설치된 경우 · 경유지 ' + via.length + '곳' }, { value: google('driving'), label: '구글 지도 · 차량' }, { value: google('walking'), label: '구글 지도 · 도보' }];
+    const url = root.DGDialog ? await root.DGDialog.choose(ahead.map(s => s.code).join(' → '), { title: '다음 ' + ahead.length + '곳을 한 경로로 열까요?', options }) : options[1].value;
+    if (url) root.open(url, '_blank', 'noopener');
+  }
   function dueView() {
     ensure(); const rows = dueLights(), plan = state.plan, shown = rows.slice(0, state.dueShow);
     state.planPick = new Set([...state.planPick].filter(id => api.byId(id) && !api.byId(id).removed));
@@ -377,14 +396,14 @@
   function planView(plan) {
     const done = plan.stops.map(s => stopDone(plan, s)), doneCount = done.filter(Boolean).length, nextIndex = done.indexOf(false), next = nextIndex >= 0 ? plan.stops[nextIndex] : null;
     const nextLight = next && api.byId(next.id), fromMe = next && state.pos ? C.distance(state.pos, next) : null;
-    const pct = plan.stops.length ? Math.round(doneCount / plan.stops.length * 100) : 0;
+    const pct = plan.stops.length ? Math.round(doneCount / plan.stops.length * 100) : 0, left = remaining(plan, done);
     return '<h2>내 방문 계획 <span class="muted">' + doneCount + '/' + plan.stops.length + '곳</span></h2><div class="panel dg-plan">' +
       '<div class="dg-progress" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100" aria-label="방문 진행"><i style="width:' + pct + '%"></i></div>' +
-      '<p>직선 연결 약 ' + (plan.distance / 1000).toFixed(1) + 'km · ' + (plan.createdAt ? time(plan.createdAt) + ' 작성' : '') + (plan.filters ? ' · 보수 작업 조건에서 만든 계획' : '') + '</p>' +
+      '<p>방문지 사이 직선 약 ' + fmtM(plan.distance) + (left.open.length && left.open.length < plan.stops.length || left.fromMe ? ' · 남은 ' + left.open.length + '곳 약 ' + fmtM(left.meters) + (left.fromMe ? '(내 위치부터)' : '') : '') + ' · ' + (plan.createdAt ? time(plan.createdAt) + ' 작성' : '') + (plan.filters ? ' · 보수 작업 조건에서 만든 계획' : '') + '</p>' +
       (next ? '<div class="dg-plan-next"><small>다음 방문지 ' + (nextIndex + 1) + '/' + plan.stops.length + (fromMe != null ? ' · 내 위치에서 ' + fmtM(fromMe) : '') + '</small><b>' + E(next.code) + '</b> <span class="muted">' + E(next.dong) + (nextLight ? ' · ' + E(C.inspectionState(nextLight, Number(state.settings.inspectionDays) || 90, Date.now()).label) : '') + '</span><div class="split"><button class="btn sodium sm" data-light="' + E(next.id) + '">점검하기</button><button class="btn ghost sm" data-dg="plan-route" data-id="' + E(next.id) + '">길찾기</button><button class="btn ghost sm" data-dg="plan-visit" data-index="' + nextIndex + '">방문 완료</button></div></div>' : '<div class="dg-plan-next done"><b>모든 방문지를 마쳤어요.</b> <span class="muted">계획을 지우거나 새 계획을 만들 수 있어요.</span></div>') +
-      '<p class="muted">직선 거리로 제안한 방문 순서예요. 차량 통행·일방통행·도로 진입 경로는 현장에서 확인해 주세요. 방문 표시로 점검 결과가 바뀌지는 않아요. 계획을 만든 뒤 점검을 저장한 시설은 자동으로 완료로 표시돼요.</p>' +
-      '<div class="split"><button class="btn ghost sm" data-dg="plan-map">계획 지도</button><button class="btn ghost sm" data-dg="plan-reorder">내 위치에서 다시 정렬</button><button class="btn ghost sm" data-dg="plan-csv">계획 CSV</button><button class="btn ghost sm" data-dg="clear-plan">계획 지우기</button></div>' +
-      plan.stops.map((s, i) => '<div class="dg-plan-stop' + (done[i] ? ' done' : '') + (i === nextIndex ? ' next' : '') + '"><label><input type="checkbox" data-plan-visited="' + i + '"' + (s.visited ? ' checked' : '') + (done[i] && !s.visited ? ' disabled title="점검을 저장해 완료됐어요"' : '') + '> <span class="n">' + (i + 1) + '</span> <b>' + E(s.code) + '</b><small>' + E(s.dong) + (i ? ' · +' + fmtM(s.distanceFromPrevious) : ' · 출발') + (done[i] && !s.visited ? ' · <span class="dg-auto">점검 완료</span>' : '') + '</small></label><span class="dg-plan-acts"><button class="btn ghost sm" data-light="' + E(s.id) + '">점검</button>' + (s.workIds || []).map((id, n) => '<button class="btn ghost sm" data-dg="open-work" data-id="' + E(id) + '">보수 ' + (n + 1) + '</button>').join('') + '<button class="btn ghost sm" data-dg="plan-up" data-index="' + i + '"' + (!i ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 위로">위로</button><button class="btn ghost sm" data-dg="plan-down" data-index="' + i + '"' + (i === plan.stops.length - 1 ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 아래로">아래로</button></span></div>').join('') + '</div>';
+      '<p class="muted">직선 거리로 교차하는 구간을 줄여 제안한 방문 순서예요. 차량 통행·일방통행·도로 진입 경로는 현장에서 확인해 주세요. 방문 표시로 점검 결과가 바뀌지는 않아요. 계획을 만든 뒤 점검을 저장한 시설은 자동으로 완료로 표시돼요.</p>' +
+      '<div class="split">' + (left.open.length > 1 ? '<button class="btn ghost sm" data-dg="plan-route-ahead">다음 ' + Math.min(ROUTE_STOPS, left.open.length) + '곳 경로</button>' : '') + '<button class="btn ghost sm" data-dg="plan-map">계획 지도</button><button class="btn ghost sm" data-dg="plan-reorder">내 위치에서 다시 정렬</button><button class="btn ghost sm" data-dg="plan-csv">계획 CSV</button><button class="btn ghost sm" data-dg="clear-plan">계획 지우기</button></div>' +
+      plan.stops.map((s, i) => '<div class="dg-plan-stop' + (done[i] ? ' done' : '') + (i === nextIndex ? ' next' : '') + '"><label><input type="checkbox" data-plan-visited="' + i + '"' + (s.visited ? ' checked' : '') + (done[i] && !s.visited ? ' disabled title="점검을 저장해 완료됐어요"' : '') + '> <span class="n">' + (i + 1) + '</span> <b>' + E(s.code) + '</b><small>' + E(s.dong) + (i ? (s.distanceFromPrevious < 15 ? ' · 앞 시설과 같은 자리' : ' · +' + fmtM(s.distanceFromPrevious)) : ' · 출발') + (done[i] && !s.visited ? ' · <span class="dg-auto">점검 완료</span>' : '') + '</small></label><span class="dg-plan-acts"><button class="btn ghost sm" data-light="' + E(s.id) + '">점검</button>' + (s.workIds || []).map((id, n) => '<button class="btn ghost sm" data-dg="open-work" data-id="' + E(id) + '">보수 ' + (n + 1) + '</button>').join('') + '<button class="btn ghost sm" data-dg="plan-up" data-index="' + i + '"' + (!i ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 위로">위로</button><button class="btn ghost sm" data-dg="plan-down" data-index="' + i + '"' + (i === plan.stops.length - 1 ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 아래로">아래로</button></span></div>').join('') + '</div>';
   }
   async function refreshQueue() {
     if (!root.DGOffline.ready) return;
@@ -424,19 +443,22 @@
     }
     if (action === 'pick-none') { state.planPick.clear(); return notify(); }
     if (action === 'make-plan') { const chosen = [...state.planPick].map(id => api.byId(id)).filter(Boolean).slice(0, 200); if (!chosen.length) throw new Error('방문할 시설을 선택해 주세요.'); state.plan = C.planVisits(chosen, state.pos || api.state().pos); state.planPick.clear(); await root.DGOffline.put('plan', 'current', state.plan); api.toast(state.plan.stops.length + '곳 방문 계획을 만들었어요.'); return notify(); }
-    if (action === 'plan-map') return api.openMap('custom', { title: '방문 계획 · 직선 순서', pts: state.plan.stops.map(s => api.byId(s.id)).filter(Boolean), ordered: true, done: state.plan.stops.filter(s => stopDone(state.plan, s)).map(s => s.id) });
+    if (action === 'plan-map') { const done = state.plan.stops.filter(s => stopDone(state.plan, s)).map(s => s.id), next = state.plan.stops.find(s => !done.includes(s.id)); return api.openMap('custom', { title: '방문 계획 · 직선 순서', pts: state.plan.stops.map(s => api.byId(s.id)).filter(Boolean), ordered: true, order: state.plan.stops.map(s => s.id), done, next: next?.id || null }); }
+    if (action === 'plan-route-ahead') return routeAhead(state.plan);
     if (action === 'plan-route') return api.route ? api.route(button.dataset.id) : api.toast('길찾기를 쓸 수 없어요.');
     if (action === 'plan-visit') { const s = state.plan.stops[+button.dataset.index]; if (!s) return; s.visited = true; await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
     if (action === 'plan-reorder') {
       if (!state.pos && !await locate()) return;
       const done = state.plan.stops.filter(s => stopDone(state.plan, s)), left = state.plan.stops.filter(s => !stopDone(state.plan, s));
       if (left.length < 2) { api.toast('다시 정렬할 남은 방문지가 없어요.'); return; }
+      const before = remaining(state.plan, state.plan.stops.map(s => stopDone(state.plan, s))).meters;
       const re = C.planVisits(left, state.pos); state.plan.stops = [...done, ...re.stops.map(s => ({ ...s, visited: false }))]; relegs(state.plan); state.plan.reorderedAt = Date.now();
-      await root.DGOffline.put('plan', 'current', state.plan); api.toast('내 위치에서 가까운 순으로 남은 방문지를 다시 정렬했어요.'); return notify();
+      const after = remaining(state.plan, state.plan.stops.map(s => stopDone(state.plan, s))).meters, saved = before - after;
+      await root.DGOffline.put('plan', 'current', state.plan); api.toast('내 위치부터 남은 ' + left.length + '곳을 다시 정렬했어요' + (saved >= 50 ? ' · 직선 약 ' + fmtM(saved) + ' 단축' : '') + '.'); return notify();
     }
     if (action === 'plan-up' || action === 'plan-down') { const i = +button.dataset.index, j = action === 'plan-up' ? i - 1 : i + 1; if (j < 0 || j >= state.plan.stops.length) return; [state.plan.stops[i], state.plan.stops[j]] = [state.plan.stops[j], state.plan.stops[i]]; relegs(state.plan); await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
     if (action === 'clear-plan') { if (!await ask('현재 방문 계획을 지워요. 점검 기록은 유지돼요.', { title: '방문 계획을 지울까요?', ok: '지우기', danger: true })) return; state.plan = null; await root.DGOffline.remove('plan', 'current'); return notify(); }
-    if (action === 'plan-csv') return download('동구_방문계획', [['순서', '시설', '시설ID', '법정동', '위도', '경도', '방문', '연결 작업ID'], ...state.plan.stops.map((p, i) => [i + 1, p.code, p.id, p.dong, p.lat, p.lng, p.visited ? '방문' : '미방문', (p.workIds || []).join(' · ')])]);
+    if (action === 'plan-csv') return download('동구_방문계획', [['순서', '시설', '시설ID', '법정동', '위도', '경도', '앞 방문지에서 직선m', '방문', '연결 작업ID'], ...state.plan.stops.map((p, i) => [i + 1, p.code, p.id, p.dong, p.lat, p.lng, i ? p.distanceFromPrevious : '', stopDone(state.plan, p) ? (p.visited ? '방문' : '점검 완료') : '미방문', (p.workIds || []).join(' · ')])]);
     if (['work-csv', 'work-map', 'work-plan'].includes(action)) {
       const { rows, metadata } = await fullSelectedOrders();
       if (action === 'work-csv') return download('동구_보수작업', [['조회 조건', [(C.STATES[state.filter] || (state.filter === 'open' ? '미완료 전체' : '전체 기록')), state.workDong, state.mine ? '내 담당' : '담당 전체', state.urgent ? '긴급' : '우선순위 전체', { all: '기한 전체', today: '오늘 기한 KST', overdue: '기한 초과' }[state.deadline]].join(' · ')], ['자료 출처', sourceText(metadata)], ['작업', '작업ID', '시설', '시설ID', '담당', '상태', '기한', '비용', '완료'], ...rows.map(w => [w.title, w.id, w.code, w.lightId, label(w.assignedTo), C.STATES[w.status], time(w.dueAt), w.costTotal, time(w.verifiedAt)])]);
