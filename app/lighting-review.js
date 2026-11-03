@@ -299,17 +299,21 @@ function returnLightingReview() {
     if (selected) { selected.focus({ preventScroll: true }); if (S.rvMapEntryKey !== S.rvSelectedKey) selected.scrollIntoView({ block: 'center' }); }
   });
 }
+/* how many candidates one review map draws at once; the 5천여 등 반경 원이 지도 부담의 대부분이라 후보 수는 넉넉히 둘 수 있다 */
+const RV_MAP_SIZES = [200, 1000, 'all'], RV_MAP_DEFAULT = 1000;
+function rvMapPageSize(total) { const v = S.rvMapPageSize || RV_MAP_DEFAULT; return v === 'all' ? Math.max(1, total) : Number(v) || RV_MAP_DEFAULT; }
 function openReviewMap(idx, pageIndex) {
   const rv = rvFresh(); if (!rv) return toast(S.rvMessage || '먼저 검토를 실행해 주세요.');
   const all = rvList(rv), multi = idx === 'all', previousMap = !!$('#rvMapSummary');
   if (!all.length) return toast('현재 보기의 후보가 없어요.');
   if (!previousMap && $('#asecBody')) { S.rvListScroll = $('#sheet').scrollTop; S.rvMapEntryKey = idx === 'all' ? '' : all[Number(idx)]?.key; }
-  const page = multi ? Math.max(0, Math.min(Math.ceil(all.length / 200) - 1, Number.isInteger(pageIndex) ? pageIndex : 0)) : 0;
-  const selectedIndex = multi ? -1 : Number(idx), cs = multi ? all.slice(page * 200, (page + 1) * 200) : [all[selectedIndex]];
+  const size = rvMapPageSize(all.length), page = multi ? Math.max(0, Math.min(Math.ceil(all.length / size) - 1, Number.isInteger(pageIndex) ? pageIndex : 0)) : 0;
+  const selectedIndex = multi ? -1 : Number(idx), cs = multi ? all.slice(page * size, (page + 1) * size) : [all[selectedIndex]];
   if (!cs[0]) return toast('후보 목록이 바뀌었어요. 목록에서 다시 선택하세요.');
   if (!multi) S.rvSelectedKey = cs[0].key || rvCandidateKey(cs[0]);
   const center = multi ? null : cs[0].mid;
-  const nav = multi ? '<button class="btn ghost sm" data-rvpage="' + (page - 1) + '"' + (page === 0 ? ' disabled' : '') + '>이전 200곳</button><span>' + (page * 200 + 1) + '–' + Math.min(all.length, (page + 1) * 200) + ' / ' + all.length + '곳</span><button class="btn ghost sm" data-rvpage="' + (page + 1) + '"' + ((page + 1) * 200 >= all.length ? ' disabled' : '') + '>다음 200곳</button>' : '<button class="btn ghost sm" data-rvmap="' + (selectedIndex - 1) + '"' + (selectedIndex === 0 ? ' disabled' : '') + '>이전 후보</button><span>' + (selectedIndex + 1) + ' / ' + all.length + '곳</span><button class="btn ghost sm" data-rvmap="' + (selectedIndex + 1) + '"' + (selectedIndex === all.length - 1 ? ' disabled' : '') + '>다음 후보</button>';
+  const pages = Math.ceil(all.length / size), sizeChoice = '<span class="seg rv-map-size" role="group" aria-label="한 번에 볼 후보 수">' + RV_MAP_SIZES.map(v => '<button type="button" data-rvpagesize="' + v + '" aria-pressed="' + (String(S.rvMapPageSize || RV_MAP_DEFAULT) === String(v)) + '">' + (v === 'all' ? '전체' : v.toLocaleString() + '곳') + '</button>').join('') + '</span>';
+  const nav = multi ? sizeChoice + (pages > 1 ? '<button class="btn ghost sm" data-rvpage="' + (page - 1) + '"' + (page === 0 ? ' disabled' : '') + '>이전</button><span>' + (page * size + 1).toLocaleString() + '–' + Math.min(all.length, (page + 1) * size).toLocaleString() + ' / ' + all.length.toLocaleString() + '곳</span><button class="btn ghost sm" data-rvpage="' + (page + 1) + '"' + (page + 1 >= pages ? ' disabled' : '') + '>다음</button>' : '<span>' + all.length.toLocaleString() + '곳 모두 표시</span>') : '<button class="btn ghost sm" data-rvmap="' + (selectedIndex - 1) + '"' + (selectedIndex === 0 ? ' disabled' : '') + '>이전 후보</button><span>' + (selectedIndex + 1) + ' / ' + all.length + '곳</span><button class="btn ghost sm" data-rvmap="' + (selectedIndex + 1) + '"' + (selectedIndex === all.length - 1 ? ' disabled' : '') + '>다음 후보</button>';
   cleanupLightingReviewMap();
   S.asec = null;
   // one level for the whole map: candidate previous/next and page moves replace it, back returns to the list
@@ -338,7 +342,7 @@ function openReviewMap(idx, pageIndex) {
     rvThemed(L.circle([record.lat, record.lng], { radius: record.radius, color: rvTheme(source ? 'include' : 'observe'), dashArray: '4 5', weight: 2, fillOpacity: .04 }), { color: source ? 'include' : 'observe', fillColor: source ? 'include' : 'observe' }).bindPopup('<b>' + esc(record.label) + '</b><br>' + esc(DGLighting.recordSummary(record)) + '<br>' + esc(DGLighting.kstTime(record.observedAt)) + '<br>입력한 범위이며, 수치 반영 여부는 후보의 근거를 확인하세요.<br><button class="btn sm" data-lc="edit" data-id="' + esc(record.id) + '">기록 보기</button>').addTo(gmapLayer);
   }
   cs.forEach((c, i) => {
-    const index = multi ? page * 200 + i : selectedIndex;
+    const index = multi ? page * size + i : selectedIndex;
     const tok = { color: rvToken(c) };
     if (c.pts) rvThemed(L.polyline(c.pts.map(p => [p.lat, p.lng]), { color: rvColor(c), weight: 7, opacity: .8 }), tok).addTo(gmapLayer);
     else if (c.a) rvThemed(L.polyline([[c.a.lat, c.a.lng], [c.b.lat, c.b.lng]], { color: rvColor(c), weight: 3, dashArray: '6 5' }), tok).addTo(gmapLayer);
