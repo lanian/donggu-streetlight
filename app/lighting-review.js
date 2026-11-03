@@ -189,7 +189,25 @@ function runLightingReview() {
   }, 30);
 }
 function rvLabel(c) { const q = c.context.coverage; return (q.unit === 'm' && (q.dark > 0 && q.dark < q.total || q.conflict > 0 && q.conflict < q.total) ? '일부 ' : '') + DGLighting.classification(c.context.classification); }
-function rvColor(c) { return { conflict: '#9b278e', observed_dark: '#C2372B', observed_bright: '#176d66', external_supported: '#176d66', partial_supported: '#337fa5', data_gap: '#4A5873' }[c.context.classification] || '#b97900'; }
+const RV_FALLBACK = { conflict: '#9b278e', dark: '#C2372B', bright: '#176d66', partial: '#337fa5', gap: '#4A5873', weak: '#b97900', auto: '#89919a', include: '#168174', exclude: '#5f6670', 'exclude-fill': '#69737f', 'lamp-on': '#9b7500', 'lamp-off': '#C2372B', 'lamp-fill': '#F5C542', observe: '#2466ba' };
+function rvToken(c) { return { conflict: 'conflict', observed_dark: 'dark', observed_bright: 'bright', external_supported: 'bright', partial_supported: 'partial', data_gap: 'gap' }[c.context.classification] || 'weak'; }
+// list borders use the CSS variable so they follow a theme switch without re-rendering
+function rvColorVar(c) { const t = rvToken(c); return 'var(--rv-' + t + ',' + RV_FALLBACK[t] + ')'; }
+// Leaflet writes colors as SVG attributes, which cannot hold var(); resolve the current theme value instead
+function rvTheme(name) {
+  let v = '';
+  try { v = getComputedStyle(document.documentElement).getPropertyValue('--rv-' + name).trim(); } catch (_) {}
+  return v || RV_FALLBACK[name];
+}
+function rvColor(c) { return rvTheme(rvToken(c)); }
+// remember which theme tokens a map layer uses so a later theme switch can restyle it in place
+function rvThemed(layer, tokens) { layer._rvTokens = tokens; return layer; }
+function rvRestyleMap() {
+  if (!gmapLayer?.eachLayer) return;
+  gmapLayer.eachLayer(layer => { const t = layer._rvTokens; if (!t || !layer.setStyle) return; const style = {}; for (const k in t) style[k] = rvTheme(t[k]); layer.setStyle(style); });
+}
+if (typeof document !== 'undefined' && document.documentElement && typeof MutationObserver === 'function') new MutationObserver(rvRestyleMap).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+if (typeof matchMedia === 'function') { const mq = matchMedia('(prefers-color-scheme: dark)'); if (mq.addEventListener) mq.addEventListener('change', rvRestyleMap); }
 function rvIndex(value) { return Number(value).toFixed(2); }
 function rvAdvice(c) {
   return { conflict: '밝음·어두움 관찰이 겹쳐요. 현장을 다시 확인하세요.', observed_dark: '어둡다는 현장 근거가 있어요. 우선 확인하세요.', data_gap: '등록된 광원 자료가 부족해요. 실제로 어두운지는 확인이 필요해요.', model_weak: '대장 모델상 부족해요. 주변의 다른 빛과 현장을 확인하세요.', partial_supported: '일부 구간은 보완됐어요. 남은 구간을 확인하세요.', observed_bright: '이 시간과 관찰 범위에서는 밝음·보통 근거가 있어요.', external_supported: '확인된 외부 광원이 모델을 보완해요.', model_lit: '모델상 기준 이상이에요. 현장 근거도 함께 확인하세요.' }[c.context.classification] || '반영 근거를 확인하세요.';
@@ -236,7 +254,7 @@ function reviewSection() {
     (S.rvMessage ? '<p class="notice" role="status">' + esc(S.rvMessage) + '</p>' : '') +
     (rv ? '<p class="muted">' + esc(dongLabel(rv.dong)) + ' · ' + DGLighting.minuteText(rv.minute) + ' KST · 관리 대장 ' + rv.n.toLocaleString() + '개 · 검토 ' + esc(DGLighting.kstTime(rv.at)) + '</p>' + rvAreaSummaryHTML(rv) + '<div class="rv-toolbar"><div class="grid2"><div><label class="f" for="rvEvidence">근거별 보기</label><select class="f-in" id="rvEvidence">' + Object.entries({ all: '전체 후보 · 보완된 곳도 유지', attention: '우선 현장 확인', dark: '현장 어두움·관찰 충돌', supported: '외부 광원·밝음 관찰로 보완', gap: '90m 안 등록 광원 자료 부족' }).map(([v, t]) => '<option value="' + v + '"' + (v === (S.rvEvidence || 'all') ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div><div><label class="f" for="rvSort">정렬</label><select class="f-in" id="rvSort">' + Object.entries({ priority: '확인 우선순위', length: '긴 도로 구간부터', name: '장소 이름순' }).map(([v, t]) => '<option value="' + v + '"' + (v === (S.rvSort || 'priority') ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div></div><label class="f" for="rvQuery">장소·동·주변 시설 검색</label><input class="f-in" type="search" id="rvQuery" value="' + esc(S.rvQuery || '') + '" placeholder="도로 이름이나 주변 표찰 번호"><div class="split"><strong role="status">표시 ' + cs.length + '곳 / 전체 ' + rv.cands.length + '곳' + (rv.mode === 'roads' ? ' · ' + (cs.reduce((s, c) => s + (c.len || 0), 0) / 1000).toFixed(2) + 'km' : '') + '</strong><button class="btn ghost sm" data-rvclear>보기 초기화</button></div>' + (cs.length ? '<div class="split"><button class="btn sm" data-rvmap="all">표시 후보 지도</button><button class="btn ghost sm" id="csv4">현재 보기 CSV</button></div>' : '') + '</div>' +
       (sk.ways || sk.apt || sk.forest ? '<p class="muted">제외: 사유지·주차장 통로 ' + (sk.ways || 0) + '개 · 단지 ' + (sk.apt || 0) + 'm · 산·숲 ' + (sk.forest || 0) + 'm</p>' : '') +
-      (cs.length ? cs.slice(0, rv.show).map((c, i) => '<article tabindex="-1" class="panel rv-candidate' + (c.key === S.rvSelectedKey ? ' rv-selected' : '') + '" data-rvkey="' + esc(c.key || rvCandidateKey(c)) + '" style="border-left:5px solid ' + rvColor(c) + '"><div class="split"><b>#' + (i + 1) + ' ' + esc(rvTitle(c)) + '</b><span class="chip">' + esc(rvLabel(c)) + '</span></div><p class="muted">' + esc(c.dong || '지역 확인 필요') + ' · ' + (c.point ? '현장 관찰 지점' : c.len != null ? esc(c.typeLabel) + ' · ' + c.len + 'm' : '시설 간격 ' + c.d + 'm · 대장 기준 간격 ' + c.need + 'm') + (c.nolight ? ' · 90m 안 등록 광원 자료 부족' : '') + '</p>' + rvEvidenceHTML(c) + rvButtons(c, i) + '</article>').join('') : '<p class="empty">현재 자료와 조건에서 표시할 후보가 없어요.' + (rv.cands.length ? ' 검색어나 근거별 보기 조건을 바꿔 보세요.' : ' 제외 범위도 확인해 주세요. 실제로 모두 밝다는 뜻은 아니에요.') + '</p>') +
+      (cs.length ? cs.slice(0, rv.show).map((c, i) => '<article tabindex="-1" class="panel rv-candidate' + (c.key === S.rvSelectedKey ? ' rv-selected' : '') + '" data-rvkey="' + esc(c.key || rvCandidateKey(c)) + '" style="border-left:5px solid ' + rvColorVar(c) + '"><div class="split"><b>#' + (i + 1) + ' ' + esc(rvTitle(c)) + '</b><span class="chip">' + esc(rvLabel(c)) + '</span></div><p class="muted">' + esc(c.dong || '지역 확인 필요') + ' · ' + (c.point ? '현장 관찰 지점' : c.len != null ? esc(c.typeLabel) + ' · ' + c.len + 'm' : '시설 간격 ' + c.d + 'm · 대장 기준 간격 ' + c.need + 'm') + (c.nolight ? ' · 90m 안 등록 광원 자료 부족' : '') + '</p>' + rvEvidenceHTML(c) + rvButtons(c, i) + '</article>').join('') : '<p class="empty">현재 자료와 조건에서 표시할 후보가 없어요.' + (rv.cands.length ? ' 검색어나 근거별 보기 조건을 바꿔 보세요.' : ' 제외 범위도 확인해 주세요. 실제로 모두 밝다는 뜻은 아니에요.') + '</p>') +
       (cs.length > rv.show ? '<button class="btn ghost block" id="rvMore">더 보기 · ' + (cs.length - rv.show) + '곳 남음</button>' : '') : '') + '</div>';
 }
 async function exportReviewCSV() {
@@ -303,26 +321,28 @@ function openReviewMap(idx, pageIndex) {
   gmap = L.map('gmap', { preferCanvas: false, zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false }); const ownerMap = gmap;
   DongguPWA.tileLayer(L).addTo(gmap); gmapLayer = L.layerGroup().addTo(gmap); gmapPts = []; meStop();
   if (rv.mode === 'roads') for (const area of ROADS?.areas || []) {
-    L.polygon([area.pts, ...(area.holes || [])], { color: '#89919a', weight: 1, dashArray: '3 6', fillOpacity: .08 }).bindPopup('<b>자동 제외 · ' + esc(area.name || (area.t === 'forest' ? '산·숲' : '단지 내부')) + '</b><p>도로 자료의 영역을 기준으로 제외해요. 실제 보행로는 별도 예외 포함 구역으로 지정할 수 있어요.</p><button class="btn ghost sm" data-asec="lightingareas">검토 구역 관리</button>').addTo(gmapLayer);
+    rvThemed(L.polygon([area.pts, ...(area.holes || [])], { color: rvTheme('auto'), weight: 1, dashArray: '3 6', fillOpacity: .08 }), { color: 'auto', fillColor: 'auto' }).bindPopup('<b>자동 제외 · ' + esc(area.name || (area.t === 'forest' ? '산·숲' : '단지 내부')) + '</b><p>도로 자료의 영역을 기준으로 제외해요. 실제 보행로는 별도 예외 포함 구역으로 지정할 수 있어요.</p><button class="btn ghost sm" data-asec="lightingareas">검토 구역 관리</button>').addTo(gmapLayer);
   }
   for (const area of rv.areas || []) {
     if (area.disabled) continue;
-    const options = { color: area.effect === 'include' ? '#168174' : '#5f6670', weight: 2, dashArray: area.effect === 'include' ? '7 4' : null, fillColor: '#69737f', fillOpacity: area.effect === 'include' ? .03 : .16 };
-    const layer = area.shape === 'circle' ? L.circle([area.lat, area.lng], { ...options, radius: area.radius }) : L.polygon(area.vertices.map(p => [p.lat, p.lng]), options);
+    const tokens = { color: area.effect === 'include' ? 'include' : 'exclude', fillColor: 'exclude-fill' };
+    const options = { color: rvTheme(tokens.color), weight: 2, dashArray: area.effect === 'include' ? '7 4' : null, fillColor: rvTheme(tokens.fillColor), fillOpacity: area.effect === 'include' ? .03 : .16 };
+    const layer = rvThemed(area.shape === 'circle' ? L.circle([area.lat, area.lng], { ...options, radius: area.radius }) : L.polygon(area.vertices.map(p => [p.lat, p.lng]), options), tokens);
     layer.bindPopup('<b>' + esc(area.label) + '</b><p>' + esc(DGLightingAreaCore.effects[area.effect]) + ' · ' + esc(DGLightingAreaCore.reasons[area.reason]) + '</p><button class="btn ghost sm" data-la="edit" data-id="' + esc(area.id) + '">구역 확인·수정</button>').addTo(gmapLayer);
   }
   const pts = S.lights.filter(l => !l.removed && Number.isFinite(l.lat) && Number.isFinite(l.lng) && (center ? distM(center, l) <= Math.max(180, cs[0].len || 0) : inDong(l, rv.dong)));
-  for (const l of pts) L.circle([l.lat, l.lng], { radius: reachOf(l), color: onOf(l) ? '#9b7500' : '#C2372B', weight: 1, fillColor: '#F5C542', fillOpacity: onOf(l) ? .16 : .03 }).bindPopup(esc(l.code) + ' · ' + esc(l.status) + '<br>대장 모델 반경 ' + reachOf(l) + 'm<br><button class="btn sm" data-map-open="' + esc(l.id) + '">시설 열기</button>').addTo(gmapLayer);
+  for (const l of pts) rvThemed(L.circle([l.lat, l.lng], { radius: reachOf(l), color: rvTheme(onOf(l) ? 'lamp-on' : 'lamp-off'), weight: 1, fillColor: rvTheme('lamp-fill'), fillOpacity: onOf(l) ? .16 : .03 }), { color: onOf(l) ? 'lamp-on' : 'lamp-off', fillColor: 'lamp-fill' }).bindPopup(esc(l.code) + ' · ' + esc(l.status) + '<br>대장 모델 반경 ' + reachOf(l) + 'm<br><button class="btn sm" data-map-open="' + esc(l.id) + '">시설 열기</button>').addTo(gmapLayer);
   for (const record of DGLighting.state.records) {
     if (record.removed || !Number.isFinite(record.lat) || !Number.isFinite(record.lng) || Math.abs(record.lat) > 90 || Math.abs(record.lng) > 180 || !Number.isFinite(record.radius) || record.radius < 5 || record.radius > 80 || center && distM(center, record) > Math.max(200, cs[0].len || 0)) continue;
     const source = record.kind === 'source';
-    L.circle([record.lat, record.lng], { radius: record.radius, color: source ? '#168174' : '#2466ba', dashArray: '4 5', weight: 2, fillOpacity: .04 }).bindPopup('<b>' + esc(record.label) + '</b><br>' + esc(DGLighting.recordSummary(record)) + '<br>' + esc(DGLighting.kstTime(record.observedAt)) + '<br>입력한 범위이며, 수치 반영 여부는 후보의 근거를 확인하세요.<br><button class="btn sm" data-lc="edit" data-id="' + esc(record.id) + '">기록 보기</button>').addTo(gmapLayer);
+    rvThemed(L.circle([record.lat, record.lng], { radius: record.radius, color: rvTheme(source ? 'include' : 'observe'), dashArray: '4 5', weight: 2, fillOpacity: .04 }), { color: source ? 'include' : 'observe', fillColor: source ? 'include' : 'observe' }).bindPopup('<b>' + esc(record.label) + '</b><br>' + esc(DGLighting.recordSummary(record)) + '<br>' + esc(DGLighting.kstTime(record.observedAt)) + '<br>입력한 범위이며, 수치 반영 여부는 후보의 근거를 확인하세요.<br><button class="btn sm" data-lc="edit" data-id="' + esc(record.id) + '">기록 보기</button>').addTo(gmapLayer);
   }
   cs.forEach((c, i) => {
     const index = multi ? page * 200 + i : selectedIndex;
-    if (c.pts) L.polyline(c.pts.map(p => [p.lat, p.lng]), { color: rvColor(c), weight: 7, opacity: .8 }).addTo(gmapLayer);
-    else if (c.a) L.polyline([[c.a.lat, c.a.lng], [c.b.lat, c.b.lng]], { color: rvColor(c), weight: 3, dashArray: '6 5' }).addTo(gmapLayer);
-    L.circleMarker([c.mid.lat, c.mid.lng], { radius: 8, color: rvColor(c), fillOpacity: .9 }).bindPopup('<b>#' + (index + 1) + ' ' + esc(rvTitle(c)) + '</b><p>' + esc(rvLabel(c)) + (c.len ? ' · ' + c.len + 'm' : '') + '</p><p>' + esc(rvAdvice(c)) + '</p><button class="btn sm" data-rvmap="' + index + '">이 후보 자세히 확인</button>').addTo(gmapLayer);
+    const tok = { color: rvToken(c) };
+    if (c.pts) rvThemed(L.polyline(c.pts.map(p => [p.lat, p.lng]), { color: rvColor(c), weight: 7, opacity: .8 }), tok).addTo(gmapLayer);
+    else if (c.a) rvThemed(L.polyline([[c.a.lat, c.a.lng], [c.b.lat, c.b.lng]], { color: rvColor(c), weight: 3, dashArray: '6 5' }), tok).addTo(gmapLayer);
+    rvThemed(L.circleMarker([c.mid.lat, c.mid.lng], { radius: 8, color: rvColor(c), fillOpacity: .9 }), { color: tok.color, fillColor: tok.color }).bindPopup('<b>#' + (index + 1) + ' ' + esc(rvTitle(c)) + '</b><p>' + esc(rvLabel(c)) + (c.len ? ' · ' + c.len + 'm' : '') + '</p><p>' + esc(rvAdvice(c)) + '</p><button class="btn sm" data-rvmap="' + index + '">이 후보 자세히 확인</button>').addTo(gmapLayer);
   });
   const backView = typeof NAV !== 'undefined' ? NAV.mapView : null; if (typeof NAV !== 'undefined') NAV.mapView = null;
   if (backView && backView.center) gmap.setView(backView.center, backView.zoom); // back from a screen opened on this map

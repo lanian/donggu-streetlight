@@ -241,15 +241,22 @@
       drawMap(true); editorMap.invalidateSize();
     } catch (error) { destroyMap(); element.hidden = true; Q('#laMapHint').textContent = '지도를 열지 못했어요. 좌표로 범위를 지정해 주세요. ' + errorText(error); }
   }
+  // editor colors follow the day/night theme (Leaflet needs resolved values, not var())
+  const areaColor = effect => {
+    const name = effect === 'include' ? 'bright' : 'weak', fallback = effect === 'include' ? '#176d66' : '#b97900';
+    try { return getComputedStyle(document.documentElement).getPropertyValue('--rv-' + name).trim() || fallback; } catch (_) { return fallback; }
+  };
+  if (typeof MutationObserver === 'function' && root.document?.documentElement) new MutationObserver(() => drawMap()).observe(root.document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  if (typeof root.matchMedia === 'function') { const mq = root.matchMedia('(prefers-color-scheme: dark)'); if (mq.addEventListener) mq.addEventListener('change', () => drawMap()); }
   function drawMap(fit = false) {
     if (!editorMap || !mapLayer || !state.draft || !Q('#laMap')?.isConnected) return;
     mapLayer.clearLayers(); const draft = state.draft, data = draft.data;
     for (const record of state.records.filter(r => !r.disabled && r.id !== draft.recordId)) {
-      const style = { color: record.effect === 'include' ? '#176d66' : '#b97900', weight: 1, opacity: .45, fillOpacity: .04, interactive: false };
+      const style = { color: areaColor(record.effect), weight: 1, opacity: .45, fillOpacity: .04, interactive: false };
       if (record.shape === 'circle') root.L.circle([record.lat, record.lng], { ...style, radius: record.radius }).addTo(mapLayer);
       else root.L.polygon(record.vertices.map(p => [p.lat, p.lng]), style).addTo(mapLayer);
     }
-    const style = { color: data.effect === 'include' ? '#176d66' : '#b97900', weight: 3, dashArray: data.disabled ? '5 5' : null, fillOpacity: data.disabled ? .04 : .15, interactive: false };
+    const style = { color: areaColor(data.effect), weight: 3, dashArray: data.disabled ? '5 5' : null, fillOpacity: data.disabled ? .04 : .15, interactive: false };
     let layer;
     if (data.shape === 'circle' && pointValid(data) && +data.radius > 0 && +data.radius <= 1000) layer = root.L.circle([+data.lat, +data.lng], { ...style, radius: +data.radius }).addTo(mapLayer);
     else if (data.shape === 'polygon') {
