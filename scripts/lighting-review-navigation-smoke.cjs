@@ -194,12 +194,17 @@ const server = http.createServer((req, res) => {
     await page.locator('[data-rvmap="all"]').click();
     await page.waitForFunction(() => gmap && gmapLayer);
     const markerCount = () => page.evaluate(() => gmapLayer.getLayers().filter(layer => layer instanceof L.CircleMarker && !(layer instanceof L.Circle)).length);
+    assert.equal(await markerCount(), 205, 'the default page (1,000) shows every candidate at once');
+    assert.match(await page.locator('.rv-map-nav').textContent(), /205곳 모두 표시/);
+    assert.equal(await page.locator('[data-rvpage]').count(), 0, 'no paging when everything fits');
+    await page.locator('[data-rvpagesize="200"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-rvpagesize="200"]')?.getAttribute('aria-pressed') === 'true');
     assert.equal(await markerCount(), 200);
     assert.match(await page.locator('.rv-map-nav').textContent(), /1–200\s*\/\s*205곳/);
     await page.locator('[data-rvpage="1"]').click();
     assert.equal(await markerCount(), 5);
     assert.match(await page.locator('.rv-map-nav').textContent(), /201–205\s*\/\s*205곳/);
-    assert.equal(await page.getByRole('button', { name: '다음 200곳', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '다음', exact: true }).isDisabled(), true);
     await page.evaluate(() => gmapLayer.getLayers().filter(layer => layer instanceof L.CircleMarker && !(layer instanceof L.Circle)).at(-1).openPopup());
     await page.locator('.leaflet-popup [data-rvmap="204"]').click();
     assert.equal(await page.locator('#rvMapSummary h3').textContent(), '검증길 205');
@@ -207,7 +212,7 @@ const server = http.createServer((req, res) => {
     await page.locator('[data-rvback]').click();
     await page.waitForFunction(() => document.querySelector('.rv-selected')?.textContent.includes('검증길 205'));
     assert.equal(await page.locator('.rv-candidate').count(), 205);
-    record('all 205 candidates are reachable through map pages and returning from the last one expands the list correctly');
+    record('all 205 candidates fit one map by default, 200-per-page paging still reaches them all, and returning from the last one expands the list correctly');
 
     const longRoad = [{ name: '긴 도로 전체 보기', length: 2400, score: 1,
       points: [{ lat: 35.139, lng: 126.919 }, { lat: 35.144, lng: 126.932 }, { lat: 35.137, lng: 126.945 }] }];

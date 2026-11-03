@@ -1464,6 +1464,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="rvMore"){S.review.show+=30;render();return}
   if(t.hasAttribute("data-rvback")){if(navDepth()>1&&navTop().key==="rvmap")closeSheet();else returnLightingReview();return}
   if(t.dataset.rvpage!==undefined){openReviewMap("all",+t.dataset.rvpage);return}
+  if(t.dataset.rvpagesize!==undefined){const v=t.dataset.rvpagesize;S.rvMapPageSize=v==="all"?"all":+v;openReviewMap("all",0);return}
   if(t.hasAttribute("data-rvclear")){S.rvQuery="";S.rvEvidence="all";S.rvSort="priority";if(S.review)S.review.show=20;for(const[id,value]of [["rvQuery",""],["rvEvidence","all"],["rvSort","priority"]]){const el=document.getElementById(id);if(el)el.value=value}render();return}
   if(t.dataset.rvmap!==undefined){openReviewMap(t.dataset.rvmap);return}
   if(t.dataset.rvreg){reviewToForm(t.dataset.rvreg);return}
