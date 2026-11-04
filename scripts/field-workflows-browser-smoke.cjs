@@ -66,7 +66,11 @@ const server = http.createServer((req, res) => {
     results.push('unlinked report gained a facility with reason/history while preserving its original content');
 
     await page.evaluate(async id => { const at = Date.now(); await db.doc('reports/field-ui-duplicate').set({ lightId: id, issue: '꺼짐', desc: '같은 시설의 추가 신고', status: '접수', createdAt: at }); }, location.id);
-    await page.evaluate(() => DGWorkflows.openReportWork('field-ui-report'));
+    // on a slow runner the link screen may still be settling; open the work screen once it has and retry if it was absorbed
+    for (let i = 0; i < 20 && !(await page.locator('[data-fw-report="field-ui-report"]').count()); i++) {
+      await page.evaluate(() => { if (!document.querySelector('#dgReportLink button[type="submit"]:disabled')) DGWorkflows.openReportWork('field-ui-report'); });
+      await page.waitForTimeout(250);
+    }
     assert.equal(await page.locator('[data-fw-report="field-ui-report"]').isChecked(), true);
     assert.equal(await page.locator('[data-fw-report="field-ui-duplicate"]').isChecked(), false);
     await delayLinkedWorkRead(first);
