@@ -29,6 +29,8 @@ async function poll(page, predicate, argument, label) {
 
 function serverFor(directory) {
   return http.createServer((req, res) => {
+  // Browser checks always run the device (체험) mode: the deployed firebase-config.js points at the real project.
+  if (req.url.split('?')[0].endsWith('/firebase-config.js')) { res.setHeader('Content-Type', 'text/javascript'); return res.end('window.FIREBASE_CONFIG = null;'); }
     let pathname;
     try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); }
     catch { return res.writeHead(400).end(); }

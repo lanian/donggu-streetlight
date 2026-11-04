@@ -3,6 +3,8 @@ const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),
 const {chromium}=require(process.env.DONGGU_PLAYWRIGHT_MODULE||'playwright');
 const root=process.env.DG_OPERATIONS_ROOT||path.resolve(__dirname,'..');
 const server=http.createServer((req,res)=>{
+  // Browser checks always run the device (체험) mode: the deployed firebase-config.js points at the real project.
+  if (req.url.split('?')[0].endsWith('/firebase-config.js')) { res.setHeader('Content-Type', 'text/javascript'); return res.end('window.FIREBASE_CONFIG = null;'); }
   const u=new URL(req.url,'http://localhost');
   const file=path.resolve(root,'.'+decodeURIComponent(u.pathname)+(u.pathname.endsWith('/')?'index.html':''));
   if(!file.startsWith(root+path.sep)||!fs.existsSync(file))return res.writeHead(404).end();

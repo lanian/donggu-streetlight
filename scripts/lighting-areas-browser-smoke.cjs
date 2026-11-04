@@ -13,6 +13,8 @@ const registry = { cols: ['id', 'kind', 'code', 'dong', 'lampType', 'lat', 'lng'
   ['area-light-b', '가로등', '구역검증 2', '지산동', 'LED일반형', latitude, lngAt(35)]
 ] };
 const server = http.createServer((req, res) => {
+  // Browser checks always run the device (체험) mode: the deployed firebase-config.js points at the real project.
+  if (req.url.split('?')[0].endsWith('/firebase-config.js')) { res.setHeader('Content-Type', 'text/javascript'); return res.end('window.FIREBASE_CONFIG = null;'); }
   let pathname; try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch (_) { return res.writeHead(400).end(); }
   const file = path.resolve(root, '.' + pathname + (pathname.endsWith('/') ? 'index.html' : ''));
   if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return res.writeHead(404).end();

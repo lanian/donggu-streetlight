@@ -9,6 +9,8 @@ const { chromium } = require(process.env.DONGGU_PLAYWRIGHT_MODULE || 'playwright
 const root = process.env.DG_OPERATIONS_ROOT || path.resolve(__dirname, '..');
 const stages = new Map();
 const server = http.createServer((req, res) => {
+  // Browser checks always run the device (체험) mode: the deployed firebase-config.js points at the real project.
+  if (req.url.split('?')[0].endsWith('/firebase-config.js')) { res.setHeader('Content-Type', 'text/javascript'); return res.end('window.FIREBASE_CONFIG = null;'); }
   const pathname = new URL(req.url, 'http://localhost').pathname;
   if (req.method === 'POST' && (pathname === '/gw' || pathname === '/st')) {
     let body = ''; req.on('data', c => body += c); req.on('end', () => {
