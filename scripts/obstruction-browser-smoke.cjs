@@ -23,6 +23,7 @@ const overpass = { elements: [
   { type: 'node', id: 3, lat: latitude + .0003, lon: longitude, tags: { highway: 'bus_stop', name: '가림로입구' } },
   { type: 'node', id: 4, lat: latitude + .0003, lon: longitude, tags: { amenity: 'bench' } },
   { type: 'way', id: 5, tags: { amenity: 'school', name: '가림초등학교' }, geometry: ring(.001, -.001, .001) },
+  { type: 'way', id: 7, tags: { amenity: 'kindergarten', name: '가림유치원' }, geometry: ring(-.002, .001, .0004) },
   { type: 'relation', id: 6, tags: { boundary: 'administrative', admin_level: '6', name: '동구' }, members: [{ type: 'way', role: 'outer', geometry: ring(-.01, -.01, .02) }] }
 ] };
 async function poll(page, predicate, argument, label) {
@@ -140,9 +141,11 @@ async function poll(page, predicate, argument, label) {
     record('the review archive keeps obstruction ids, the unobstructed index and nearby crossings');
 
     // 6. the road network download keeps crossings, bus stops and school areas as points of interest
-    const loaded = await page.evaluate(async () => { ROADS = null; try { await idbSet('roads', null); } catch (_) {} const r = await roadsLoad(); return { pois: r.pois, gu: !!r.gu, areas: r.areas.length }; });
+    const loaded = await page.evaluate(async () => { ROADS = null; try { await idbSet('roads', null); } catch (_) {} const r = await roadsLoad(); return { pois: r.pois, gu: !!r.gu, areas: r.areas.map(a => a.name) }; });
     assert.ok(loaded.gu, 'the 동구 boundary arrives with the roads');
-    assert.deepEqual(loaded.pois.map(p => p.t).sort(), ['bus', 'crossing', 'school']);
+    assert.deepEqual(loaded.pois.map(p => p.t).sort(), ['bus', 'crossing', 'school', 'school']);
+    assert.ok(loaded.pois.some(p => p.name === '가림유치원' && p.r > 0), 'a kindergarten mapped as an area is a point of interest');
+    assert.deepEqual(loaded.areas, ['가림초등학교'], 'the kindergarten ground does not become a review exclusion area');
     const school = loaded.pois.find(p => p.t === 'school'); assert.equal(school.name, '가림초등학교'); assert.ok(school.r > 50, 'a school area keeps an approximate radius');
     assert.equal(loaded.pois.find(p => p.t === 'bus').name, '가림로입구');
     record('the Overpass download keeps crossings, bus stops and school areas next to the roads and the 동구 boundary');

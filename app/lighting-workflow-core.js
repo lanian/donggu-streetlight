@@ -61,13 +61,14 @@
     for (const r of ctx.records.filter(r => r.kind === 'observation')) {
       const state = Model.recordState(r, options);
       if (!state.active || !['bright', 'adequate', 'dark'].includes(r.level)) { excluded.push({ id: r.id, label: r.label, reason: state.reason || 'unknown_observation' }); continue; }
-      const base = options.baseAt(r), result = Model.evaluate(ctx, r, base);
+      // base is the registry index after 가림·가설물, the same value candidates use; the unobstructed one is kept beside it
+      const registryBase = options.baseAt(r), result = Model.evaluate(ctx, r, registryBase), base = result.base;
       if (result.fieldLevel === 'conflict') { excluded.push({ id: r.id, label: r.label, reason: 'conflict' }); continue; }
       const bright = r.level !== 'dark', baseBright = base >= ctx.weak, adjustedBright = result.adjusted >= ctx.weak;
       counts.compared++; counts.baseMatched += Number(bright === baseBright); counts.adjustedMatched += Number(bright === adjustedBright);
       counts.baseMissedDark += Number(!bright && baseBright); counts.adjustedMissedDark += Number(!bright && adjustedBright);
       counts.baseWeakButBright += Number(bright && !baseBright); counts.adjustedWeakButBright += Number(bright && !adjustedBright);
-      rows.push({ id: r.id, label: r.label, lat: r.lat, lng: r.lng, observedAt: r.observedAt, level: r.level, base, adjusted: result.adjusted, baseMatch: bright === baseBright, adjustedMatch: bright === adjustedBright, lux: r.lux });
+      rows.push({ id: r.id, label: r.label, lat: r.lat, lng: r.lng, observedAt: r.observedAt, level: r.level, base, adjusted: result.adjusted, baseMatch: bright === baseBright, adjustedMatch: bright === adjustedBright, lux: r.lux, ...(result.obstructions.length ? { registryBase, obstructionIds: result.obstructions.map(o => o.id) } : {}) });
     }
     for (const r of ctx.invalidRecords) excluded.push({ id: r.id, label: r.label, reason: 'invalid_record' });
     return { at: ctx.now, minute: ctx.minute, weak: ctx.weak, counts, rows, excluded };

@@ -251,3 +251,12 @@ test('a 가림·가설물 turns a lit stretch and a well-spaced pair into checke
   assert.equal(withPoi.score, plain.score + 25); assert.equal(withPoi.context.base, plain.context.base);
   assert.deepEqual(copy(plain.pois), [], 'no POI data means no bonus');
 });
+
+test('a large school ground gives the school priority to a candidate near its edge far from its centre', () => {
+  const f = fixture({ ways: [road('edge', 0)] });
+  f.roads.pois = [{ t: 'school', name: '넓은 학교', ...xy(0, 480), r: 420 }]; // centre 480 m away, grounds reach to 60 m
+  const c = f.roadsReview()[0];
+  assert.deepEqual(copy(c.pois.map(p => p.t)), ['school']); assert.ok(c.pois[0].d <= 100, 'counted from the edge: ' + c.pois[0].d);
+  const g = fixture({ ways: [road('edge', 0)] }); g.roads.pois = [{ t: 'school', name: '먼 학교', ...xy(0, 700), r: 420 }];
+  assert.deepEqual(copy(g.roadsReview()[0].pois), [], '280 m from the edge is not near');
+});

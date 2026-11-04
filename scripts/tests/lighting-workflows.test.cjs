@@ -150,3 +150,14 @@ test('compact archive rows keep the required values and a whole-district review 
   const runs = []; for (const part of parts) runs.push(await build(part));
   assert.equal(runs.reduce((n, r) => n + JSON.parse(r.candidatesJson).length, 0), 3000);
 });
+
+test('a field observation inside an obstruction is compared with the obstructed index and the run still validates', async () => {
+  const records = [observation({ level: 'dark', observedAt: now - 1000 }), { id: 'cover', kind: 'obstruction', label: '가림막', category: 'construction', operator: '', ...point, radius: 30, strength: 'high', observedAt: now - 1000, validDays: 180, note: '', removed: false }];
+  const evidence = Model.evaluate(Model.createContext(records, [], { now, minute: 1260 }), point, 1);
+  const cands = [{ name: '가림 아래 길', mid: point, context: { ...evidence, coverage: { total: 1, unit: 'point' } } }];
+  const run = await C.buildRun({ review: { at: now, minute: 1260, mode: 'pairs', dong: '전체', kind: '전체', cands }, lights: [{ id: 'registered-1', ...point, updatedAt: 12 }], records, roads: null, model: { weak: .3 }, calibration: null, baseAt: () => 1 });
+  const row = JSON.parse(run.evaluationJson).rows[0];
+  assert.equal(row.base, .25); assert.equal(row.registryBase, 1); assert.deepEqual(row.obstructionIds, ['cover']);
+  assert.ok(row.adjusted >= row.base); assert.equal(row.baseMatch, true, 'dark in the field, weak once the obstruction is counted');
+  assert.equal(C.normalizeRun(run).payloadBytes, run.payloadBytes);
+});

@@ -77,14 +77,21 @@ function rvPoiIndex() {
   let index = null;
   if (Array.isArray(ROADS?.pois)) {
     index = new Map(); // about 110 m cells; a query looks at the 3×3 block around the point
-    for (const p of ROADS.pois) { if (!RV_POI[p.t] || !Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue; const key = Math.floor(p.lat / .001) + ',' + Math.floor(p.lng / .0012); if (!index.has(key)) index.set(key, []); index.get(key).push(p); }
+    // a school area is entered in every cell its grounds plus the 100 m reach can touch, so a query needs only the 3×3 block
+    for (const p of ROADS.pois) {
+      if (!RV_POI[p.t] || !Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
+      const reach = Math.min(2000, Math.max(0, p.r || 0)) + RV_POI_RANGE[p.t], dLat = reach / 110574, dLng = reach / (111320 * Math.cos(p.lat * Math.PI / 180));
+      for (let y = Math.floor((p.lat - dLat) / .001); y <= Math.floor((p.lat + dLat) / .001); y++) for (let x = Math.floor((p.lng - dLng) / .0012); x <= Math.floor((p.lng + dLng) / .0012); x++) {
+        const key = y + ',' + x; if (!index.has(key)) index.set(key, []); index.get(key).push(p);
+      }
+    }
   }
   rvPoiCache = { roads: ROADS, index }; return index;
 }
 function rvPois(point) {
   const index = rvPoiIndex(); if (!index || !point) return [];
   const best = {}, cy = Math.floor(point.lat / .001), cx = Math.floor(point.lng / .0012);
-  for (let y = cy - 2; y <= cy + 2; y++) for (let x = cx - 2; x <= cx + 2; x++) for (const p of index.get(y + ',' + x) || []) {
+  for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++) for (const p of index.get(y + ',' + x) || []) {
     const edge = Math.max(0, distanceM(point, p) - (p.r || 0)); // a school area counts from its edge
     if (edge <= RV_POI_RANGE[p.t] && (!best[p.t] || edge < best[p.t].d)) best[p.t] = { t: p.t, name: p.name || '', d: Math.round(edge) };
   }
