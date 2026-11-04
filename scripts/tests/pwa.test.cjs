@@ -93,7 +93,7 @@ test('every required shell asset exists, and OCR readiness requires both languag
   assert.equal((await context.offlineStatus()).ocr, true);
 });
 
-async function pwaContext(dirty = false) {
+async function pwaContext(dirty = false, extra = {}) {
   const listeners = {}, calls = { posts: 0, reloads: 0, notices: 0 };
   const waiting = { addEventListener() {}, postMessage() { calls.posts++; } };
   const c = vm.createContext({ URL, encodeURIComponent, setTimeout, clearTimeout, MessageChannel,
@@ -104,7 +104,7 @@ async function pwaContext(dirty = false) {
   }); c.window = c;
   vm.runInContext(fs.readFileSync(path.join(root, 'app/pwa.js'), 'utf8'), c);
   const flags = { dirty };
-  c.DongguPWA.start({ hasPendingWork: async () => flags.dirty, notice: () => { calls.notices++; } });
+  c.DongguPWA.start({ hasPendingWork: async () => flags.dirty, notice: () => { calls.notices++; }, ...extra });
   await new Promise(setImmediate);
   return { c, flags, calls, listeners };
 }
@@ -122,4 +122,15 @@ test('activation by another tab does not reload this tab, and missing provider k
   await listeners.controllerchange(); assert.equal(calls.reloads, 0);
   c.DONGGU_MAP_PROVIDER = { requiresKey: true, apiKey: '', urlTemplate: 'https://maps.example/{z}/{x}/{y}.png' };
   const p = c.DongguPWA.provider(); assert.equal(p.offlineAllowed, false); assert.match(p.reason, /키가 없어/);
+});
+
+test('with the app pre-check, the update goes only on its yes, and an approved update reloads even with kept drafts', async () => {
+  const answer = { ok: false }, asked = { n: 0 };
+  const { c, flags, calls, listeners } = await pwaContext(true, { prepareUpdate: async () => { asked.n++; return answer.ok; } });
+  assert.equal(c.DongguPWA.updateReady(), true);
+  assert.equal(await c.DongguPWA.applyUpdate(), false); assert.equal(asked.n, 1); assert.equal(calls.posts, 0, 'a "finish first" answer keeps the old version');
+  assert.equal(calls.notices, 0, 'the pre-check explains in its own screen, no vague toast');
+  answer.ok = true; assert.equal(await c.DongguPWA.applyUpdate(), true); assert.equal(calls.posts, 1);
+  // drafts kept on the device still count as "pending" for the old check, but the person already agreed: reload
+  flags.dirty = true; await listeners.controllerchange(); assert.equal(calls.reloads, 1);
 });

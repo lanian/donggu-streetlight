@@ -85,9 +85,21 @@ const collect = async (browser, origin, serviceWorkers) => {
     await pwa.page.keyboard.press('Escape'); await pwa.page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
     revision = 'updated'; await pwa.page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
     await poll(pwa.page, async () => !!(await navigator.serviceWorker.getRegistration())?.waiting, undefined, 'an installed service-worker update');
-    assert.equal(await pwa.page.evaluate(() => DongguPWA.applyUpdate()), false);
+    // the update check first keeps the draft on the device, names it and asks; 나중에 keeps the old version and the draft
+    await pwa.page.evaluate(() => { window.__upd = DongguPWA.applyUpdate(); });
+    await pwa.page.locator('#dgDialog:not([hidden]) .dgdlg-msg').waitFor();
+    assert.match(await pwa.page.locator('#dgDialog .dgdlg-msg').textContent(), /작성 중이던 기록 1건/);
+    await pwa.page.locator('#dgDialog [data-dgdlg="cancel"]').click();
+    assert.equal(await pwa.page.evaluate(() => window.__upd), false);
     assert.equal(await pwa.page.evaluate(id => DRAFTS[id].memo, draftId), '새 버전 적용 중 보존할 초안');
+    assert.equal(await pwa.page.evaluate(async id => (await DGOffline.list('draft')).some(d => d.id === id), draftId), true, 'the draft is kept on the device');
+    // 적용하고 다시 열기: the new version loads and the kept draft is still there to continue
+    await pwa.page.evaluate(() => { window.__upd = DongguPWA.applyUpdate(); });
+    await pwa.page.locator('#dgDialog:not([hidden]) [data-dgdlg="ok"]').waitFor();
+    await Promise.all([pwa.page.waitForEvent('load'), pwa.page.locator('#dgDialog [data-dgdlg="ok"]').click()]);
+    await pwa.page.waitForFunction(() => typeof S !== 'undefined' && S.live && DGOffline.ready);
+    assert.equal(await pwa.page.evaluate(async id => (await DGOffline.list('draft')).some(d => d.id === id), draftId), true, 'the draft survived the update');
     assert.deepEqual(pwa.errors, []); await pwa.context.close();
-    console.log(JSON.stringify({ photoBack: 'keeps owning inspection', photoSave: 'one photo retained', keyboard: 'Tab/Shift+Tab/Escape and focus restore passed', offlineColdStart: 'registry + QR available, OCR incomplete correctly displayed', update: 'unsaved draft blocked activation', browserErrors: [] }, null, 2));
+    console.log(JSON.stringify({ photoBack: 'keeps owning inspection', photoSave: 'one photo retained', keyboard: 'Tab/Shift+Tab/Escape and focus restore passed', offlineColdStart: 'registry + QR available, OCR incomplete correctly displayed', update: 'kept draft named before activation; 나중에 keeps old version; 적용 reloads with the draft intact', browserErrors: [] }, null, 2));
   } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error.stack); server.close(); process.exitCode = 1; });

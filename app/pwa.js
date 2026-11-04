@@ -1,7 +1,7 @@
 /* Service-worker UI and provider selection. Only a deliberate, clean-page update may reload. */
 (function () {
   "use strict";
-  const state = { registration: null, waiting: null, requested: false, reloadReady: false, status: null, preparing: false, message: '' };
+  const state = { registration: null, waiting: null, requested: false, approved: false, reloadReady: false, status: null, preparing: false, message: '' };
   let options = {};
   const escape = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function provider() {
@@ -32,7 +32,7 @@
     if (prepare) prepare.disabled = state.preparing;
     if (!el) return;
     const s = state.status;
-    el.textContent = state.message || (s ? `필수 앱 자산: ${s.shell ? '준비됨' : '미완료'} · 대장: ${s.registry ? '준비됨' : '미완료'} · OCR 파일: ${s.ocr ? '준비됨' : '미완료'}${state.waiting ? ' · 새 버전 대기 중' : ''}` : state.waiting ? '새 버전이 있어요. 작성 중인 기록을 저장한 뒤 적용하세요.' : '준비 상태를 확인하려면 아래 버튼을 누르세요.');
+    el.textContent = state.message || (s ? `필수 앱 자산: ${s.shell ? '준비됨' : '미완료'} · 대장: ${s.registry ? '준비됨' : '미완료'} · OCR 파일: ${s.ocr ? '준비됨' : '미완료'}${state.waiting ? ' · 새 버전 대기 중' : ''}` : state.waiting ? '새 버전이 있어요. 「새 버전 적용」을 누르면 이 기기에 남는 기록과 먼저 마칠 일을 확인해 드려요.' : '준비 상태를 확인하려면 아래 버튼을 누르세요.');
   }
   function workerStatus() {
     return new Promise((resolve, reject) => {
@@ -66,7 +66,10 @@
   async function pending() { try { return !!(await options.hasPendingWork?.()); } catch (_) { return true; } }
   async function applyUpdate() {
     if (!state.waiting && !state.reloadReady) return false;
-    if (await pending()) { options.notice?.('작성 중인 기록과 전송 대기를 먼저 저장·동기화하고, 열린 화면을 닫은 뒤 새 버전을 적용하세요.'); return false; }
+    // The app explains exactly what is kept and what must be finished first, and says yes only when nothing would be lost
+    // (records already kept on this device survive the update). Without that hook, any pending work blocks the update.
+    if (options.prepareUpdate) { if (!(await options.prepareUpdate())) return false; state.approved = true; }
+    else if (await pending()) { options.notice?.('작성 중인 기록과 전송 대기를 먼저 저장·동기화하고, 열린 화면을 닫은 뒤 새 버전을 적용하세요.'); return false; }
     if (state.reloadReady) { location.reload(); return true; }
     state.requested = true; state.waiting.postMessage({ type: 'activate-update' });
     state.message = '새 버전을 적용하는 중…'; render(); return true;
@@ -79,15 +82,15 @@
       state.reloadReady = controlled; controlled = true; state.waiting = null;
       if (state.requested) {
         state.requested = false;
-        if (!(await pending())) { location.reload(); return; }
-        state.message = '업데이트가 준비됐어요. 작성 중인 기록을 저장한 뒤 앱을 다시 열어 주세요.';
+        if (state.approved || !(await pending())) { location.reload(); return; }
+        state.message = '새 버전이 준비됐어요. 화면 위의 「새 버전 적용」을 다시 누르면 남길 내용을 확인한 뒤 적용해요.';
       }
-      else if (state.reloadReady) state.message = '다른 화면에서 새 버전을 적용했어요. 작성 중인 기록을 마치고 새 버전 적용을 눌러 주세요.';
-      render();
+      else if (state.reloadReady) state.message = '다른 창에서 새 버전을 적용했어요. 이 창도 「새 버전 적용」을 누르면 남길 내용을 확인한 뒤 새로 열려요.';
+      render(); options.onChange?.();
     });
     const register = () => navigator.serviceWorker.register('sw.js').then(reg => {
       state.registration = reg;
-      const waiting = worker => { state.waiting = worker; state.message = ''; render(); };
+      const waiting = worker => { state.waiting = worker; state.message = ''; render(); options.onChange?.(); };
       if (reg.waiting) waiting(reg.waiting);
       const watch = w => w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) waiting(reg.waiting || w); });
       watch(reg.installing); reg.addEventListener('updatefound', () => watch(reg.installing));
@@ -95,5 +98,5 @@
     if (document.readyState === 'complete') register(); else window.addEventListener('load', register, { once: true });
     document.addEventListener('click', e => { const id = e.target.closest('button')?.id; if (id === 'offlineCheck') check(); else if (id === 'offlinePrepare') prepare(); });
   }
-  window.DongguPWA = { start, applyUpdate, check, panelHTML, render, provider, tileLayer };
+  window.DongguPWA = { start, applyUpdate, check, panelHTML, render, provider, tileLayer, updateReady: () => !!(state.waiting || state.reloadReady) };
 })();
