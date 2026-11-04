@@ -55,3 +55,4 @@ jobs:
           node scripts/security-browser-smoke.cjs
           node scripts/privacy-browser-smoke.cjs
           node scripts/status-integrity-browser-smoke.cjs
+          node scripts/patrol-field-browser-smoke.cjs
