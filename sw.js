@@ -2,15 +2,17 @@
    No API, report submission, auth response, POST, or user attachment is cached.
    OSM tiles use the browser HTTP cache (Cache-Control/Expires/ETag) unchanged; no prefetch. */
 importScripts('./app/map-config.js');
-const VERSION = 'v51-field-patrol';
+const VERSION = 'v52-foundation';
 const SHELL = 'dg-shell-' + VERSION, RUNTIME = 'dg-runtime-public-v2', META = 'dg-cache-metadata-v2', TILES = 'dg-provider-tiles-v2';
-const SHELL_FILES = ['./', './index.html', './manifest.webmanifest', './firebase-config.js', './security.js', './report/config.js', './report/', './report/index.html', './data/lights.json', './seed/manifest.json', './vendor/jsQR.js', './vendor/leaflet.js', './vendor/qrcode.js', './app/device.js', './app/field.js', './app/field-ui.js', './app/dialog.js', './app/patrol-history.js', './app/pwa.js', './app/map-config.js', './app/data.js', './app/restore.js', './app/integration.js', './app/legacy-bridge.js', './app/management.js', './app/offline.js', './app/operations-core.js', './app/reporting.js', './app/operations.css', './app/desktop.css', './app/operations.js', './app/workflows.js', './app/lighting-model.js', './app/lighting-commands.js', './app/lighting-workflow-core.js', './app/lighting-workflow-commands.js', './app/lighting-workflows.js', './app/lighting.js', './app/lighting-review.js', './app/lighting-area-core.js', './app/lighting-area-commands.js', './app/lighting-areas.js', './app/registry-commands.js', './app/work-commands.js', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png'];
+const SHELL_FILES = ['./', './index.html', './manifest.webmanifest', './firebase-config.js', './security.js', './report/config.js', './report/', './report/index.html', './data/lights.json', './seed/manifest.json', './vendor/jsQR.js', './vendor/leaflet.js', './vendor/qrcode.js', './app/device.js', './app/field.js', './app/field-ui.js', './app/dialog.js', './app/patrol-history.js', './app/pwa.js', './app/map-config.js', './app/data.js', './app/restore.js', './app/integration.js', './app/legacy-bridge.js', './app/management.js', './app/offline.js', './app/operations-core.js', './app/reporting.js', './app/operations.css', './app/desktop.css', './app/operations.js', './app/workflows.js', './app/lighting-model.js', './app/lighting-commands.js', './app/lighting-workflow-core.js', './app/lighting-workflow-commands.js', './app/lighting-workflows.js', './app/lighting.js', './app/lighting-review.js', './app/lighting-area-core.js', './app/lighting-area-commands.js', './app/lighting-areas.js', './app/registry-commands.js', './app/work-commands.js', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png'];
 // All modules used by this release are installed atomically with its shell.
 const PUBLIC_PATHS = new Set(SHELL_FILES.map(p => new URL(p, self.registration.scope).pathname));
 const RUNTIME_HOSTS = new Set(['cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com', 'www.gstatic.com', 'tessdata.projectnaptha.com']);
 const DAY = 86400000;
 
-self.addEventListener('install', event => { event.waitUntil(caches.open(SHELL).then(cache => cache.addAll(SHELL_FILES))); });
+// cache:'reload' skips the browser's HTTP cache (GitHub Pages sends max-age=600), so a release installed minutes after the
+// previous one stores its own files — never the previous index.html or data/lights.json under the new name.
+self.addEventListener('install', event => { event.waitUntil(caches.open(SHELL).then(cache => cache.addAll(SHELL_FILES.map(p => new Request(new URL(p, self.registration.scope), { cache: 'reload' }))))); });
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     // Keep one previous shell so a tab with an unsaved draft can finish its loaded version.

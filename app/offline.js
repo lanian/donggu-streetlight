@@ -160,6 +160,7 @@
         const offline = !connected() || /unavailable|network|deadline|offline/i.test(code + ' ' + errorText(error));
         job = { ...job, state: /conflict|aborted|already-exists/.test(code) ? 'conflict' : offline ? 'queued' : 'failed', error: errorText(error), updatedAt: Date.now() };
         await store.write(key, job); if (gen === generation) emit({ type: 'job', job: copy(job) });
+        if (job.state === 'queued') scheduleRetry();
       }
       return job;
     };
@@ -188,6 +189,17 @@
     clearTimeout(timer);
     return result || await store.read('job:' + id);
   }
+  /* A weak signal can fail a send while the browser still says it is online, so no 'online' event follows. Such jobs are
+     retried on a timer that backs off (15 s doubling to 5 min) and whenever the app comes back to the screen. */
+  let retryTimer = null, retryDelay = 15000;
+  function scheduleRetry() {
+    if (retryTimer || typeof root.setTimeout !== 'function') return;
+    retryTimer = root.setTimeout(() => {
+      retryTimer = null;
+      flush().then(async () => { if ((await jobs()).some(j => j.state === 'queued')) { retryDelay = Math.min(retryDelay * 2, 300000); scheduleRetry(); } else retryDelay = 15000; }).catch(() => {});
+    }, retryDelay);
+    if (retryTimer && typeof retryTimer.unref === 'function') retryTimer.unref();
+  }
   async function jobs() { return (await requireStore().list('job:')).sort((a, b) => b.createdAt - a.createdAt); }
   async function flush(options) {
     if (!storage || !connected()) return;
@@ -207,7 +219,8 @@
   }
   async function clear() { await requireStore().clear(); emit({ type: 'cleared' }); }
   function subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }
-  if (root.addEventListener) root.addEventListener('online', () => { flush().catch(error => emit({ type: 'error', error: errorText(error) })); });
+  if (root.addEventListener) root.addEventListener('online', () => { retryDelay = 15000; flush().catch(error => emit({ type: 'error', error: errorText(error) })); });
+  if (root.document && root.document.addEventListener) root.document.addEventListener('visibilitychange', () => { if (root.document.visibilityState === 'visible' && storage) flush().catch(() => {}); });
   return { configure, put, putIfCurrent, get, list, remove, removeIfCurrent, register, submit, flush, jobs, retry, discard, clear, subscribe, memoryStore,
     get ready() { return !!storage; }, get durable() { return durable; }, get namespace() { return namespace; } };
 });
