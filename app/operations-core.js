@@ -73,7 +73,7 @@
   }
   function inspectionState(light, days, now) {
     if (light.removed) return { key: 'removed', label: '철거', priority: 99 };
-    if (light.redoNote && light.status === '점검필요') return { key: 'redo', label: '재점검 요청', priority: 0 };
+    if (light.redoNote) return { key: 'redo', label: '재점검 요청', priority: 0 };
     if (!Number.isFinite(light.lastInspected) || light.lastInspected <= 0) return { key: 'never', label: '점검 기록 없음', priority: 2 };
     const elapsed = Math.floor(Math.max(0, now - light.lastInspected) / 86400000);
     return elapsed > days ? { key: 'overdue', label: '기한 ' + (elapsed - days) + '일 초과', priority: 1, overdueDays: elapsed - days } : { key: 'current', label: '기한 내 점검', priority: 3, remainingDays: days - elapsed };

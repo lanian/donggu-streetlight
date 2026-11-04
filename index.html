@@ -710,6 +710,9 @@ function dataChanged(key){
    The shared "lights" collection only holds what changes in the field — status, last inspection —
    keyed by the same id, plus any light registered by hand. Field values win over the registry. */
 let BASE=[],OV={},RAW_OV={},LIGHT_FIELDS=[],LIDX=null,ALL_LIGHTS=[],ALL_FROM=null;
+/* A light in service: not 철거, not a field registration that was 반려 (rejected), and not one merged into an existing
+   registry light (대장반영 + linkedId — its history lives on, but the registry light is the facility). */
+const inService=l=>!l.removed&&l.reg!=="반려"&&!(l.reg==="대장반영"&&l.linkedId);
 /* (S.allLights||S.lights): every light including 철거 ones (for id lookups, plates, history). If S.lights was replaced directly
    (tests, imports) the hidden list no longer matches it, so S.lights itself is the whole list. */
 Object.defineProperty(S,"allLights",{get:()=>ALL_FROM===S.lights?ALL_LIGHTS:S.lights,enumerable:false});
@@ -725,7 +728,7 @@ function mergeLights(){
   const seen=new Set();
   const out=BASE.map(b=>{seen.add(b.id);const o=OV[b.id];if(!o)return b;const m={...b,...o,id:b.id};if("pole"in o||"sw"in o||"removed"in o||"noPlate"in o||"posApprox"in o)m.address=addrOf(m);return m});
   for(const [id,o] of Object.entries(OV))if(!seen.has(id)&&o.code)out.push({...o,id});
-  ALL_LIGHTS=out.filter(l=>!l._deleted);S.lights=ALL_LIGHTS.filter(l=>!l.removed);ALL_FROM=S.lights; /* 철거 표시된 등은 목록·검색·지도·통계에서 숨기고, 이력·표찰 조회는 (S.allLights||S.lights)로 찾는다 */LIDX=null;LG=null;
+  ALL_LIGHTS=out.filter(l=>!l._deleted);S.lights=ALL_LIGHTS.filter(inService);ALL_FROM=S.lights; /* 철거 표시된 등은 목록·검색·지도·통계에서 숨기고, 이력·표찰 조회는 (S.allLights||S.lights)로 찾는다 */LIDX=null;LG=null;
   if(typeof invalidateLightingReview==="function")invalidateLightingReview("시설 대장 정보가 바뀌었어요.");
 }
 function onLights(snap){RAW_OV={};snap.docs.forEach(d=>{RAW_OV[d.id]=d.data()});OV=DGData.mergeLightFields(RAW_OV,LIGHT_FIELDS);mergeLights()}
@@ -998,8 +1001,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v49-privacy";
+const APP_VER="v50-status-order";
 const RELEASE_NOTES=[
+  {v:"v50-status-order",d:"2026-11-04",t:"늦게 도착한 점검이 수리 결과를 덮지 않아요 · 검수 대기 전체 집계 · 재점검 요청 보완"},
   {v:"v49-privacy",d:"2026-11-04",t:"신고자 정보 보호: 파기 범위 확대, 백업·점검자 CSV에서 제외, 완료 전 확인"},
   {v:"v48-security",d:"2026-11-04",t:"보안 강화: 신고 내용 표시 안전 처리, 외부 스크립트 제한, 라이브러리는 앱에 포함된 것부터 사용"},
   {v:"v47-seed-safe",d:"2026-11-04",t:"체험 자료를 새로 받아도 이 기기에 남긴 기록은 지우지 않아요"},
@@ -1111,7 +1115,7 @@ function lightRow(l){
   return `<button class="row st-${esc(l.status)}" data-light="${esc(l.id)}"><span class="pole"></span>${repThumb(l)?`<img class="rthumb" src="${esc(repThumb(l))}" alt="대표 사진" loading="lazy" data-repconf="${esc(l.id)}" data-ctx="list">`:""}
     <span class="body">${kindBadge(l.kind)}${l.reg?`<span class="reg ${l.reg==="대장반영"?"ok":""}">${esc(l.reg)}</span>`:l.noPlate&&!l.plateFixed?`<span class="reg np">표찰없음</span>`:""}<span class="code">${esc(l.code)}</span> <span class="muted">${esc(adongOf(l)||l.dong)}${l.lampType?` · ${esc(l.lampType)}`:""}</span>
     <span class="addr" style="display:block">${esc(l.address)}</span></span>
-    <span class="meta">${S.near&&S.pos&&typeof l.lat==="number"?`<span class="dist">${fmtDist(distM(S.pos,l))}</span>`:""}<span class="chip">${esc(l.status)}</span>${DRAFTS[l.id]?`<span class="due" style="color:var(--fix)">작성 중</span>`:l.redoNote&&l.status==="점검필요"?`<span class="due">재점검 요청</span>`:isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${l.lastInspected?fmtD(l.lastInspected):"점검 기록 없음"}</span>`}</span></button>`;
+    <span class="meta">${S.near&&S.pos&&typeof l.lat==="number"?`<span class="dist">${fmtDist(distM(S.pos,l))}</span>`:""}<span class="chip">${esc(l.status)}</span>${DRAFTS[l.id]?`<span class="due" style="color:var(--fix)">작성 중</span>`:l.redoNote?`<span class="due">재점검 요청</span>`:isDue(l)?`<span class="due">점검주기 경과</span>`:`<span class="muted" style="display:block;font-size:11px;margin-top:3px">${l.lastInspected?fmtD(l.lastInspected):"점검 기록 없음"}</span>`}</span></button>`;
 }
 function filtered(){
   const q=S.q.trim().toLowerCase();
@@ -1230,7 +1234,7 @@ const ADMIN_SECTIONS={
     <p class="muted" style="margin:10px 0 0">표찰 색과 같아요. 초록은 가로등(도로명+번호), 파랑은 보안등(동 이름+번호).</p></div>`},
   dong:{t:"동별 현황",d:"행정동 13곳 · 법정동",n:null,body:()=>`<div class="seg" style="margin:0 0 8px"><button type="button" data-dongv="a" aria-pressed="${!S.dongLegal}">행정동</button><button type="button" data-dongv="l" aria-pressed="${!!S.dongLegal}">법정동</button></div>${ADONG_IDX?"":`<p class="muted" style="margin:0 0 8px">계림·산수·지산은 1·2동 경계 데이터가 없어 묶어서 보여요. 밝기 검토의 "도로망 불러오기"를 하면 행정동 경계도 같이 받아 나뉘어요.</p>`}<div class="panel">${S.lights.length?dongBars(!!S.dongLegal):`<span class="muted">데이터 없음</span>`}</div>`},
   light:{t:"밝기 예측·보완 검토",d:"대장·외부 광원·현장 관찰 함께 검토",n:()=>S.review?rvList(S.review).length:null,body:()=>reviewSection()},
-  hist:{t:"점검 결과 확인",d:"검수·재점검 요청·CSV",n:()=>inspList().filter(i=>!i.reviewedAt).length||null,body:()=>inspReviewSection()},
+  hist:{t:"점검 결과 확인",d:"검수·재점검 요청·CSV",n:()=>{const b=reviewBacklog();return b.n?(b.capped?b.n+"+":b.n):null},body:()=>inspReviewSection()},
   reg:{t:"현장 등록",d:"대장에 없는 등 올리기",n:null,write:true,body:()=>`<details class="help"><summary>언제 쓰나요</summary><p>대장에 없는 등이나 표찰이 없는 등주를 발견하면 여기에 남겨요. 저장되면 '미등록'으로 표시되고, 미등록 관리에서 대장 반영 여부를 추적해요.</p></details>
   <div class="panel">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px">
@@ -1319,10 +1323,10 @@ function todayStrip(){
     ["inbox","미처리 신고",ADMIN_SECTIONS.inbox?.n?.()||0],
     ["works","보수 작업 기한 초과",shown(T.overdue),"bad"],
     ["works","오늘 기한 작업",shown(T.today)],
-    ["hist","검수 대기 점검",ADMIN_SECTIONS.hist?.n?.()||0],
+    ["hist","검수 대기 점검",ADMIN_SECTIONS.hist?.n?.()||0,"",'data-irunreviewed'],
     ["due","점검 필요 시설",needed],
     ["outbox","미전송",ADMIN_SECTIONS.outbox?.n?.()||0,"warn"]].filter(([k])=>ADMIN_SECTIONS[k]&&adminKeys().includes(k));
-  return `<h2 style="margin-top:6px">오늘 할 일</h2><div class="todaystrip">${items.map(([k,t,n,tone])=>`<button type="button" data-asec="${k}" class="${n==="!"?"":n?tone||"":"zero"}"${n==="!"?` title="불러오지 못했어요. 연결을 확인하세요."`:""}><b>${n==null?"…":n==="!"?"–":Number(n).toLocaleString()}</b><span>${esc(t)}</span></button>`).join("")}</div>`;
+  return `<h2 style="margin-top:6px">오늘 할 일</h2><div class="todaystrip">${items.map(([k,t,n,tone,attr])=>`<button type="button" data-asec="${k}" ${attr||""} class="${n==="!"?"":n?tone||"":"zero"}"${n==="!"?` title="불러오지 못했어요. 연결을 확인하세요."`:""}><b>${n==null?"…":n==="!"?"–":(typeof n==="number"?n.toLocaleString():n)}</b><span>${esc(t)}</span></button>`).join("")}</div>`;
 }
 function vAdmin(){
   const open=S.lights.filter(l=>l.status!=="정상").sort((a,b)=>({"고장":0,"수리중":1,"점검필요":2}[a.status]-{"고장":0,"수리중":1,"점검필요":2}[b.status]));
@@ -1595,10 +1599,10 @@ async function openLight(id){
     ${repBox(l)}
     ${posBox(l)}
     ${(()=>{const li=lightInfo(l);if(!li)return"";return `<div class="muted" style="margin:2px 0 6px">💡 예상 조명 반경 ${li.reach}m${li.on===0?" · 현재 꺼짐":li.on<1?" · 점검필요로 감쇠":""}${li.n1?` · 가장 가까운 등 ${esc(li.n1.code)} ${li.n1.d}m`:""}${li.gapNow?` · <span style="color:var(--warn)">이웃 등과 간격이 넓어요</span>`:""}${li.riskIfOut?` · <span style="color:var(--bad)">꺼지면 ${li.riskIfOut}개 구간이 어두워져요</span>`:""}</div>`})()}
-    ${l.redoNote&&l.status==="점검필요"?`<div class="notice slim"><b>재점검 요청</b> ${esc(l.redoNote)}</div>`:""}
+    ${l.redoNote?`<div class="notice slim"><b>재점검 요청</b> ${esc(l.redoNote)}</div>`:""}
     ${(()=>{const rs=S.reports.filter(r=>r.lightId===l.id&&r.status!=="완료");return rs.length?`<div class="notice slim"><b>신고 ${rs.length}건</b> ${esc(rs[0].issue)}${rs[0].desc?` · ${esc(rs[0].desc.slice(0,40))}`:""} <span class="muted">${fmtD(rs[0].createdAt)}</span><button class="btn ghost sm" data-asec="inbox" style="margin-left:auto">신고함</button></div>`:""})()}
     ${l.removed?`<div class="muted" style="margin:2px 0 6px;color:var(--bad)">철거된 등으로 기록돼 있어요${l.removedAt?` (${fmtD(l.removedAt)})`:""}.</div>`:""}${l.note?`<div class="muted" style="margin:2px 0 6px">📝 ${esc(l.note)}</div>`:""}
-    ${S.canWrite?`<div class="split" style="margin:6px 0 4px;align-items:center"><span class="muted">상태 바꾸기</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}</div>`:""}
+    ${S.canWrite&&can("admin")?`<div class="split" style="margin:6px 0 4px;align-items:center"><span class="muted" title="점검 기록 없이 상태만 바꿔요(관리자)">상태 바꾸기</span>${LSTAT.filter(s=>s!==l.status).map(s=>`<button class="btn ghost sm" data-lstat="${s}">${s}</button>`).join("")}</div>`:""}
     <div class="subnav" id="lightNav"><button type="button" data-sjump="shCheck">점검표</button><button type="button" data-sjump="shRes">결과·사진</button><button type="button" data-sjump="shHist">이력</button><button type="button" data-sjump="shGal">사진 이력</button><button type="button" data-dossier="${esc(l.id)}" style="margin-left:auto;border-style:dashed">이력서 인쇄</button>${l.edits&&l.edits.length?`<button type="button" data-sjump="shEdit">변경 이력</button>`:""}</div>
     <h2 id="shCheck">점검표</h2>
     <div class="panel" id="checks">${CHECKS.map(([k,t,s])=>`<div class="check"><div class="q">${t}<small>${s}</small></div><div class="pair" role="group" aria-label="${t}"><button class="g" data-ck="${k}" data-v="ok" aria-pressed="false">양호</button><button class="b" data-ck="${k}" data-v="bad" aria-pressed="false">불량</button></div></div>`).join("")}
@@ -1645,7 +1649,7 @@ function newInspectionJob(l,source){
 }
 async function inspectionOperations(job,server=false){
   let current;try{current=await lightState(job.rec.lightId,server)}catch(e){if(server)throw e;current=byId(job.rec.lightId)||{}}
-  const patch=DGData.latestPatch(current,{status:job.rec.result,lastInspected:job.rec.date,lastResult:job.rec.result,redoNote:null,updatedAt:job.rec.date});
+  const patch=DGData.latestPatch(current,{status:job.rec.result,statusAt:job.rec.date,lastInspected:job.rec.date,lastResult:job.rec.result,redoNote:null,updatedAt:job.rec.date});
   const currentSlots=repSlots(current),reps={...currentSlots},fill=[];
   for(const slot of job.fill||[]){const target=job.reps[slot];if(!currentSlots[slot]||currentSlots[slot].id===target.id){reps[slot]=target;fill.push(slot)}}
   if(fill.length){const pending=Object.fromEntries(job.photos.map(p=>[p.id,p.data]));Object.assign(patch,await repPatchFor(reps,pending,fill));patch.updatedAt=Math.max(job.rec.date,current.updatedAt||current.lastInspected||0)}
@@ -1731,7 +1735,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.rvmap!==undefined){openReviewMap(t.dataset.rvmap);return}
   if(t.dataset.rvreg){reviewToForm(t.dataset.rvreg);return}
   if(t.id==="csv4"){exportReviewCSV();return}
-  if(t.dataset.asec){openAdminSection(t.dataset.asec);return}
+  if(t.dataset.asec){if(t.dataset.irunreviewed!==undefined){IR.period=0;IR.only=true;IR.result="전체";IR.who="전체";if(!IR.more&&!IR.loading&&S.insp.length>=40)inspLoadMore()}openAdminSection(t.dataset.asec);return}
   if(t.id==="sync"){if(can("inspect")&&ADMIN_SECTIONS.outbox)openAdminSection("outbox");else toast(t.title||"동기화 상태");return}
   if(t.dataset.devmodeOpen!==undefined){devModeChoose();return}
   if(t.closest("[data-verinfo]")){openVersionInfo();return}
@@ -1773,7 +1777,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="tiltKeep"){keepTilt();return}
   if(t.id==="tiltZero"){zeroTilt();return}
   if(t.id==="tiltStop"){stopTilt();return}
-  if(t.dataset.lstat&&draft){if(!need("inspect"))return;const id=draft.lightId,to=t.dataset.lstat;if(await write(()=>patchLight(id,{status:to,updatedAt:Date.now()}),`${to}(으)로 변경했어요.`))closeSheet();return}
+  if(t.dataset.lstat&&draft){if(!need("admin"))return;const id=draft.lightId,to=t.dataset.lstat,now=Date.now();if(await write(()=>patchLight(id,{status:to,statusAt:now,updatedAt:now}),`${to}(으)로 변경했어요.`))closeSheet();return}
   if(t.dataset.issue){document.querySelectorAll("#issueSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
   if(t.id==="sendReport"){sendReport(t);return}
   if(t.dataset.rstat){if(!need("admin"))return;const to=t.dataset.to,r=S.reports.find(x=>x.id===t.dataset.rstat);
@@ -1781,7 +1785,7 @@ document.addEventListener("click",async e=>{
       const lines=[r.contact?"신고자 연락처를 지워요. 되돌릴 수 없어요(처리 결과를 먼저 안내했는지 확인하세요).":"",work?"연결된 보수 작업이 아직 끝나지 않았어요.":""].filter(Boolean);
       if(lines.length&&!await dgConfirm(lines.join("\n"),{title:"신고를 완료로 바꿀까요?",ok:"완료로 변경",cancel:"취소",danger:!!r.contact}))return}
     write(()=>db.doc("reports/"+t.dataset.rstat).update({status:to,updatedAt:Date.now(),...(to==="완료"?{contact:""}:{})}),`신고를 ${to}(으)로 변경했어요.`);return}
-  if(t.dataset.tofault){const r=S.reports.find(x=>x.id===t.dataset.tofault);if(!r)return;write(async()=>{await patchLight(r.lightId,{status:"고장",updatedAt:Date.now()});if(r.status==="접수")await db.doc("reports/"+r.id).update({status:"처리중",updatedAt:Date.now()})},"가로등을 고장으로 등록했어요.");return}
+  if(t.dataset.tofault){if(!need("admin"))return;const r=S.reports.find(x=>x.id===t.dataset.tofault);if(!r)return;write(async()=>{const now=Date.now();await patchLight(r.lightId,{status:"고장",statusAt:now,updatedAt:now});if(r.status==="접수")await db.doc("reports/"+r.id).update({status:"처리중",updatedAt:Date.now()})},"가로등을 고장으로 등록했어요.");return}
   if(t.id==="addLight"){if(need("inspect"))addLight();return}
   if(t.dataset.regset){if(!need("admin"))return;const to=t.dataset.to;write(()=>patchLight(t.dataset.regset,{reg:to,regAt:Date.now(),updatedAt:Date.now()}),`'${to}'(으)로 바꿨어요.`);return}
   if(t.dataset.reglink){if(need("admin"))regLink(t.dataset.reglink);return}
@@ -2000,7 +2004,7 @@ async function addLight(){
 }
 /* ---------- unregistered lights: field finds that are not in the registry yet ---------- */
 const REG_STATES=["미등록","대장반영","반려"];
-function pendingList(){return S.lights.filter(l=>l.reg).sort((a,b)=>(a.reg==="미등록"?0:1)-(b.reg==="미등록"?0:1)||(b.foundAt||0)-(a.foundAt||0))}
+function pendingList(){return (S.allLights||S.lights).filter(l=>l.reg&&!l.removed).sort((a,b)=>(a.reg==="미등록"?0:1)-(b.reg==="미등록"?0:1)||(b.foundAt||0)-(a.foundAt||0))}
 function pendingSection(){
   const ls=pendingList();
   if(!ls.length)return `<div class="empty">현장에서 저장한 미등록 등이 없어요. 표찰 스캔에서 '대장에 없는 번호'가 나오거나, 표찰 없는 등주를 발견하면 위 양식으로 남기세요.</div>`;
@@ -2033,10 +2037,13 @@ async function regLink(id){
   const p=parseCode(txt);const t=p&&lookup(p);
   if(!t||t.reg){toast("대장에서 그 번호를 찾지 못했어요.");return}
   if(!await dgConfirm(`${t.code} (${t.dong}) 에 연결하고, 이 미등록 항목은 '대장반영'으로 바꿔요.`,{title:"연결할까요?",ok:"연결"}))return;
-  await write(async()=>{await patchLight(id,{reg:"대장반영",linkedId:t.id,updatedAt:Date.now()});if(l.status&&l.status!=="정상")await patchLight(t.id,{status:l.status,updatedAt:Date.now()})},`${t.code}에 연결했어요.`);
+  await write(async()=>{await patchLight(id,{reg:"대장반영",linkedId:t.id,updatedAt:Date.now()});if(l.status&&l.status!=="정상"){const now=Date.now();await patchLight(t.id,{status:l.status,statusAt:now,updatedAt:now})}},`${t.code}에 연결했어요.`);
 }
 /* ---------- inspection review: the office checks what came back from the field, stamps it as seen, or sends it back ---------- */
 const IR={period:7,result:"전체",who:"전체",only:false,show:30,more:null,loading:false};
+/* Inspections waiting for review, whatever the review screen's filters are. Until the full list is loaded only the newest
+   40 are known, so the count then reads "40+" instead of pretending to be complete. */
+function reviewBacklog(){const base=IR.more||S.insp;return{n:base.filter(i=>!i.reviewedAt&&!i.redo).length,capped:!IR.more&&S.insp.length>=40}}
 function inspList(){const base=IR.more||S.insp;const cut=IR.period?Date.now()-IR.period*86400000:0;return base.filter(i=>(!cut||i.date>=cut)&&(IR.result==="전체"||i.result===IR.result)&&(IR.who==="전체"||i.inspector===IR.who)&&(!IR.only||!i.reviewedAt))}
 async function inspLoadMore(){
   if(IR.loading||!db)return;IR.loading=true;IR.pending=false;const revision=IR.revision||0;
@@ -2273,7 +2280,7 @@ function reportData(){
   const ins=all.filter(i=>i.date>=a&&i.date<=b);
   const open=lights.filter(l=>l.status!=="정상");
   const pats=(REP.data&&REP.data.patrols||S.patrols).filter(p=>p.start>=a&&p.start<=b&&(REP.dong==="전체"||p.dong===REP.dong||[...(p.passed||[]),...(p.marks||[]).map(m=>m.id)].some(id=>inD(byId(id)))));
-  const pend=S.lights.filter(l=>l.reg&&l.foundAt>=a&&l.foundAt<=b&&inD(l));
+  const pend=(S.allLights||S.lights).filter(l=>l.reg&&l.foundAt>=a&&l.foundAt<=b&&inD(l));
   const edits=(S.allLights||S.lights).flatMap(l=>(l.edits||[]).filter(e=>e.at>=a&&e.at<=b&&!e.undone&&inD(l)).map(e=>({l,e})));
   const aKeys=[...new Set(lights.map(adongOf).filter(Boolean))].sort((x,y)=>adongOrder(x)-adongOrder(y));
   const byDong=aKeys.map(d=>{const ls=lights.filter(l=>adongOf(l)===d),ii=ins.filter(i=>adongOf(byId(i.lightId)||{dong:i.dong})===d);return{d,n:ls.length,insp:ii.length,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length,open:ls.filter(l=>l.status!=="정상").length}}).sort((x,y)=>y.insp-x.insp||y.n-x.n);
@@ -2442,12 +2449,19 @@ function inspReviewSection(){
     ${inspectionThumbs(i).length?`<div class="pgrid">${inspectionThumbs(i).map(t=>`<button type="button" data-pview="${esc(t.id)}"><img src="${esc(safeImageSrc(t.t))}" alt="${esc(t.label||"")}" loading="lazy"><div class="lab">${esc(t.label||"")}</div></button>`).join("")}</div>`:i.photo?`<img class="thumb" src="${esc(safeImageSrc(i.photo))}" alt="" style="max-height:140px">`:""}
     <div class="split">${!validInspectionEvidence(i)?`<span class="muted">사진 형식 오류 · 원본을 확인한 뒤 복구해 주세요.</span>`:i.reviewedAt?`<span class="muted" style="align-self:center">✓ ${esc(S.names[i.reviewedBy]||"관리자")} 확인 ${fmtD(i.reviewedAt)}</span>`:can("admin")?`<button class="btn sm" data-ichk="${esc(i.id)}">확인</button>`:`<span class="muted" style="align-self:center">미확인</span>`}${can("admin")&&!i.redo&&!i.patrol?`<button class="btn ghost sm" data-iredo="${esc(i.id)}">재점검 요청</button>`:""}<button class="btn ghost sm" data-light="${esc(i.lightId)}">등 열기</button></div></div>`}).join("")}
     ${ls.length>IR.show?`<button class="btn ghost block" id="irMore">더 보기 · ${ls.length-IR.show}건 남음</button>`:""}</div>`:`<div class="empty">이 조건에 맞는 점검 기록이 없어요.</div>`}
-  <div class="split">${!IR.more?`<button class="btn ghost sm" id="irLoad" ${IR.loading?"disabled":""}>${IR.loading?"불러오는 중…":"전체 점검 기록 불러오기"}</button>`:`<span class="muted" style="align-self:center">전체 ${IR.more.length}건 · <button class="btn ghost sm" id="irLoad">새로고침</button></span>`}${dl?`<button class="btn ghost sm" id="csv">점검 이력 CSV 내려받기</button><button class="btn ghost sm" id="csv2">가로등 대장 CSV 내려받기</button>`:""}</div>`;
+  ${!IR.more&&S.insp.length>=40?`<p class="muted" style="margin:0 0 6px">최근 점검 40건만 불러와 있어요. 오래된 검수 대기까지 보려면 전체를 불러오세요.</p>`:""}<div class="split">${!IR.more?`<button class="btn ghost sm" id="irLoad" ${IR.loading?"disabled":""}>${IR.loading?"불러오는 중…":"전체 점검 기록 불러오기"}</button>`:`<span class="muted" style="align-self:center">전체 ${IR.more.length}건 · <button class="btn ghost sm" id="irLoad">새로고침</button></span>`}${dl?`<button class="btn ghost sm" id="csv">점검 이력 CSV 내려받기</button><button class="btn ghost sm" id="csv2">가로등 대장 CSV 내려받기</button>`:""}</div>`;
+}
+/* A redo request changes the light only when this inspection is the light's latest, and never lowers 고장/수리중 —
+   the request is still recorded (redoNote) so the light shows up as 재점검 요청. */
+function redoLightPatch(light,insp,reason,now){
+  if((Number(light&&light.lastInspected)||0)>(Number(insp.date)||0))return null;
+  return ["고장","수리중"].includes(light&&light.status)?{redoNote:reason,updatedAt:now}:{status:"점검필요",lastResult:"점검필요",redoNote:reason,statusAt:now,updatedAt:now};
 }
 async function inspReview(id,redo){
   if(!need("admin"))return;
   const i=(IR.more||S.insp).find(x=>x.id===id);if(!i)return;
-  let reason="";if(redo){const value=await dgPrompt(`${i.code} 재점검을 요청하는 이유 (점검자에게 보여요)`,{title:"재점검 요청",multiline:true,maxLength:200,ok:"요청"});if(value==null)return;reason=value.trim().slice(0,200)}
+  let reason="";if(redo){const value=await dgPrompt(`${i.code} 재점검을 요청하는 이유 (점검자에게 보여요)`,{title:"재점검 요청",multiline:true,maxLength:200,ok:"요청"});if(value==null)return;reason=value.trim().slice(0,200)||"재점검 요청"}
+  let lightNote="";
   const now=Date.now(),patch=redo?{redo:true,redoNote:reason,redoBy:S.me||null,redoAt:now}:{reviewedBy:S.me||null,reviewedAt:now};
   const ok=await write(async()=>{
     const inspectionRef=db.doc("inspections/"+id);
@@ -2455,14 +2469,19 @@ async function inspReview(id,redo){
       const snap=await tx.get(inspectionRef);if(!snap.exists)throw new Error("점검 기록이 없습니다.");const current=snap.data();
       if(!redo){if(!validInspectionEvidence(current))throw new Error("사진 형식이 올바르지 않습니다.");
         for(const thumb of inspectionThumbs(current)){const p=await tx.get(FB.fs.doc("photos/"+thumb.id));if(!p.exists||p.data().inspId!==id||p.data().lightId!==current.lightId||p.data().by!==current.inspector||!safeImageSrc(p.data().data))throw new Error("점검 원본 사진의 존재와 연결을 확인하세요.");}}
+      const lightRef=FB.fs.doc("lights/"+current.lightId),light=redo?await tx.get(lightRef):null;
       tx.update(inspectionRef,patch);
-      if(redo)tx.set(FB.fs.doc("lights/"+current.lightId),{status:"점검필요",lastResult:"점검필요",redoNote:reason,updatedAt:now},{merge:true});
+      const lp=redo?redoLightPatch(light&&light.exists?light.data():{},current,reason,now):null;if(redo&&!lp)lightNote=" 더 최근 점검이 있어 등 상태는 그대로 뒀어요.";
+      if(lp)tx.set(lightRef,lp,{merge:true});
     });}else{
       if(!redo){if(!validInspectionEvidence(i))throw new Error("사진 형식 오류");for(const thumb of inspectionThumbs(i)){const photo=await getPhoto(thumb.id);if(!photo||photo.inspId!==id||photo.lightId!==i.lightId||!safeImageSrc(photo.data))throw new Error("원본 사진 연결 오류");}}
-      const ops=[{path:"inspections/"+id,data:patch,merge:true}];if(redo)ops.push({path:"lights/"+i.lightId,data:{status:"점검필요",lastResult:"점검필요",redoNote:reason,updatedAt:now},merge:true});
-      if(typeof db.commitMany==="function")await db.commitMany(ops);else{await inspectionRef.update(patch);if(redo)await patchLight(i.lightId,ops[1].data)}
+      let lightNow={};if(redo){try{lightNow=await lightState(i.lightId,true)}catch(e){lightNow=byId(i.lightId)||{}}}
+      const lp=redo?redoLightPatch(lightNow,i,reason,now):null;if(redo&&!lp)lightNote=" 더 최근 점검이 있어 등 상태는 그대로 뒀어요.";
+      const ops=[{path:"inspections/"+id,data:patch,merge:true}];if(lp)ops.push({path:"lights/"+i.lightId,data:lp,merge:true});
+      if(typeof db.commitMany==="function")await db.commitMany(ops);else{await inspectionRef.update(patch);if(lp)await patchLight(i.lightId,lp)}
     }
-  },redo?`${i.code} 재점검을 요청했어요.`:`${i.code} 점검 결과를 확인했어요.`);
+  },redo?"":`${i.code} 점검 결과를 확인했어요.`);
+  if(ok&&redo)toast(`${i.code} 재점검을 요청했어요.${lightNote}`);
   if(ok&&IR.more){const j=IR.more.findIndex(x=>x.id===id);if(j>=0)IR.more[j]={...IR.more[j],...patch}}
   render();
 }
@@ -3516,7 +3535,7 @@ function preparePatrolJob(source=pt){
   const inspections=[],patches=[];
   for(const[mindex,m]of marks.entries()){const l=byId(m.id);if(!l)continue;
     inspections.push({id:id+"-i"+mindex,data:{lightId:l.id,code:l.code,dong:l.dong,date:m.at,checks:{},faults:m.result==="정상"?[]:[m.result==="고장"?"점등 상태":"깜빡임·조도"],result:m.result,memo:m.result==="정상"?"야간 차량 순찰 중 직접 점등 확인":"야간 차량 순찰 중 확인",patrol:true,patrolId:id,inspector:S.me||null}});
-    patches.push({id:l.id,data:{status:m.result,lastInspected:m.at,lastResult:m.result,updatedAt:m.at}});
+    patches.push({id:l.id,data:{status:m.result,statusAt:m.at,lastInspected:m.at,lastResult:m.result,redoNote:null,updatedAt:m.at}});
   }
   const job={id,sessionId:source.sessionId,key:patrolDraftKey(source),rec,inspections,patches};PATROL_JOBS.set(source.sessionId,job);return job;
 }

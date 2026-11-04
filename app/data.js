@@ -60,8 +60,15 @@
     }
     return{rows,nextCursor,hasMore,...emitMetadata(options,source||'unknown')};
   }
-  const statusKeys=['status','lastInspected','lastResult','redoNote'];
-  function latestPatch(current,patch){const next=clone(patch);if(typeof next.lastInspected==='number'&&typeof current?.lastInspected==='number'&&next.lastInspected<current.lastInspected){for(const key of statusKeys)delete next[key];delete next.updatedAt}return next}
+  const statusKeys=['status','statusAt','lastResult','redoNote'];
+  // The event that decided a light's status carries its time (statusAt; an inspection's date). A patch from an older
+  // event — an offline inspection sent after a repair sign-off, say — leaves the status alone; its newer
+  // lastInspected still counts. Lights from before statusAt existed fall back to lastInspected.
+  function statusTime(x){return Math.max(Number(x&&x.statusAt)||0,Number(x&&x.lastInspected)||0)}
+  function latestPatch(current,patch){const next=clone(patch),at=typeof next.statusAt==='number'?next.statusAt:typeof next.lastInspected==='number'?next.lastInspected:null;
+    const olderInspection=typeof next.lastInspected==='number'&&typeof current?.lastInspected==='number'&&next.lastInspected<current.lastInspected;
+    if(at!=null&&current&&at<statusTime(current)){for(const key of statusKeys)delete next[key];if(olderInspection)delete next.updatedAt;else if(typeof next.updatedAt==='number')next.updatedAt=Math.max(next.updatedAt,Number(current.updatedAt)||0)}
+    if(olderInspection)delete next.lastInspected;return next}
   function mergeLightFields(base,events){const out={};for(const[id,data]of Object.entries(base||{}))out[id]=clone(data);for(const e of [...events].sort((a,b)=>(a.at||0)-(b.at||0)||String(a.id).localeCompare(String(b.id)))){if(!e.lightId||!e.changes||typeof e.changes!=='object')continue;if((base[e.lightId]?.foundAt||0)>(e.at||0))continue;const current=out[e.lightId]||{};out[e.lightId]={...current,...latestPatch(current,e.changes)}}return out}
   function applyOps(data,ops){const result=[];for(const op of ops){const [col,id,...rest]=op.path.split('/');if(!col||!id||rest.length)throw error('invalid-path','문서 경로가 올바르지 않아요.');const bucket=data[col]||(data[col]={});const exists=Object.prototype.hasOwnProperty.call(bucket,id);
       if(op.ifAbsent&&exists){result.push({path:op.path,skipped:true});continue}if(op.delete){delete bucket[id];result.push({path:op.path});continue}

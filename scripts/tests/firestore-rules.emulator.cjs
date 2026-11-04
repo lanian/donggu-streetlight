@@ -86,7 +86,8 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
 
     test('staff can create the first registry status patch, plate record and own location suggestion', async () => {
       const db = staff();
-      await assertSucceeds(setDoc(doc(db, 'lights/p1'), { status: '고장', updatedAt: 1000 }));
+      await assertFails(setDoc(doc(db, 'lights/p1'), { status: '고장', updatedAt: 1000 }), 'a status needs the inspection that found it');
+      await assertSucceeds(setDoc(doc(db, 'lights/p1'), { status: '고장', lastInspected: 1000, statusAt: 1000, updatedAt: 1000 }));
       await assertSucceeds(updateDoc(doc(db, 'lights/p1'), { code: '산수동 1', plateFixed: true, plateFixedAt: 1000, num: '1' }));
       await assertSucceeds(updateDoc(doc(db, 'lights/p1'), { posSuggest: { lat: 35.15, lng: 126.92, by: 'inspector-a', at: 1000 } }));
       await assertFails(updateDoc(doc(db, 'lights/p1'), { posSuggest: { lat: 35.15, lng: 126.92, by: 'inspector-b' } }));
@@ -116,14 +117,16 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
         photo: 'data:image/jpeg;base64,dGVzdA=='
       } });
       const db = staff();
-      await assertSucceeds(updateDoc(doc(db, 'lights/p1'), { status: '고장', updatedAt: 1000, redoNote: null }));
+      await assertFails(updateDoc(doc(db, 'lights/p1'), { status: '고장', updatedAt: 1000, redoNote: null }), 'no status change without an inspection');
+      await assertSucceeds(updateDoc(doc(db, 'lights/p1'), { status: '고장', lastInspected: 1000, statusAt: 1000, updatedAt: 1000, redoNote: null }));
       await assertFails(updateDoc(doc(db, 'lights/p1'), { lat: 35.18 }));
       await assertFails(updateDoc(doc(db, 'lights/p1'), { removed: true }));
       await assertFails(updateDoc(doc(db, 'lights/p1'), { edits: [] }));
       await assertFails(setDoc(doc(db, 'lights/p1'), { status: '정상', updatedAt: 2000 }));
       await assertFails(deleteDoc(doc(db, 'lights/p1')));
       await assertSucceeds(updateDoc(doc(admin(), 'lights/p1'), { posSuggest: null }));
-      await assertSucceeds(updateDoc(doc(db, 'lights/p1'), { status: '수리중', updatedAt: 2000 }));
+      await assertFails(updateDoc(doc(db, 'lights/p1'), { status: '수리중', updatedAt: 2000 }));
+      await assertSucceeds(updateDoc(doc(db, 'lights/p1'), { status: '수리중', lastInspected: 2000, statusAt: 2000, lastResult: '수리중', updatedAt: 2000 }));
     });
 
     test('inspection creation requires its author and cannot carry review or redo authority', async () => {
@@ -538,6 +541,22 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       await assertFails(setDoc(doc(outsider, 'lights/p2'), { status: '고장', updatedAt: 1 }));
       await assertFails(setDoc(doc(outsider, 'roles/outsider'), { role: 'admin' }));
       await assertFails(setDoc(doc(staff(), 'roles/inspector-a'), { role: 'admin' }));
+    });
+
+    test('an older inspection cannot undo a newer status decision, and a fast phone clock is refused', async () => {
+      await seed({ 'lights/p9': { status: '정상', statusAt: 5000, lastInspected: 1000, updatedAt: 5000, lastRepairedAt: 5000 } });
+      const db = staff(), now = Date.now();
+      // an inspection made before the repair sign-off may move lastInspected, but not the status
+      await assertFails(updateDoc(doc(db, 'lights/p9'), { status: '고장', statusAt: 3000, lastInspected: 3000, lastResult: '고장', updatedAt: 3000 }));
+      await assertSucceeds(updateDoc(doc(db, 'lights/p9'), { lastInspected: 3000, updatedAt: 5000 }));
+      // an older client without statusAt: its inspection date counts
+      await assertFails(updateDoc(doc(db, 'lights/p9'), { status: '고장', lastInspected: 4000, lastResult: '고장', updatedAt: 4000 }));
+      await assertSucceeds(updateDoc(doc(db, 'lights/p9'), { status: '고장', lastInspected: 6000, lastResult: '고장', updatedAt: 6000 }));
+      // a phone a month ahead cannot freeze the light
+      await assertFails(updateDoc(doc(db, 'lights/p9'), { status: '정상', statusAt: now + 30 * 86400000, lastInspected: now + 30 * 86400000, updatedAt: now }));
+      await assertSucceeds(updateDoc(doc(db, 'lights/p9'), { status: '정상', statusAt: now, lastInspected: now, updatedAt: now }));
+      // administrators may still set a status directly (repair sign-off, corrections)
+      await assertSucceeds(updateDoc(doc(admin(), 'lights/p9'), { status: '수리중', statusAt: now + 1, updatedAt: now + 1 }));
     });
 
     test('the staff roster is readable by staff only; anyone signed in reads just their own role', async () => {
