@@ -2772,10 +2772,10 @@ function drawMapMarkers(){
   if(!gmap||!gmapLayer||gmap._dgClosing||!document.getElementById("mapKind"))return;gmapLayer.clearLayers();
   const pts=mapVisiblePts();const c=$("#mapCount");if(c)c.textContent=`${pts.length.toLocaleString()}개`;
   const z=gmap.getZoom(),bounds=gmap.getBounds().pad(.25);
-  const inView=pts.filter(l=>bounds.contains([l.lat,l.lng]));
-  const single=l=>{
+  const inView=pts.filter(l=>bounds.contains([l.lat,l.lng]));GM.singles=[];
+  const single=l=>{GM.singles.push(l);
     const sel=GM.sel===l.id,many=inView.length>800;
-    const m=L.circleMarker([l.lat,l.lng],{radius:sel?11:l.reg?9:l.status==="정상"?(many?4:6):8,color:sel?"#FFCE67":l.reg?"#E89A0C":KIND_COL[l.kind]||"#fff",weight:sel?4:l.reg?3:many&&l.status==="정상"?1.5:2.5,dashArray:l.reg?"3 3":null,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95});
+    const m=L.circleMarker([l.lat,l.lng],{radius:sel?11:l.reg?9:l.status==="정상"?(many?4:6):8,color:sel?"#FFCE67":l.reg?"#E89A0C":KIND_COL[l.kind]||"#fff",weight:sel?4:l.reg?3:many&&l.status==="정상"?1.5:2.5,dashArray:l.reg?"3 3":null,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95,bubblingMouseEvents:false});
     m.on("click",()=>showMapCard(l.id));m.addTo(gmapLayer);
     if(z>=GM.labelFrom&&(inView.length<=80||z>=GM.labelFrom+1)&&inView.length<=GM.labelMax)m.bindTooltip(esc(l.code),{permanent:true,direction:"right",offset:[8,0],className:"maplbl",interactive:false});
   };
@@ -2812,6 +2812,13 @@ function showMapCard(id){
   const l=byId(id),card=$("#mapCard");if(!l||!card)return;
   GM.sel=id;card.innerHTML=mapCardHtml(l);card.hidden=false;drawMapMarkers();
   const pt=gmap.latLngToContainerPoint([l.lat,l.lng]),h=gmap.getSize().y;if(pt.y>h-card.offsetHeight-24)gmap.panBy([0,pt.y-(h-card.offsetHeight)/2],{animate:true}); // keep the marker above the card
+}
+/* the drawn single marker nearest to a tap, within a finger's width (24 px); markers are 4–11 px circles */
+const MAP_TAP_PX=24;
+function mapNearestMarker(pt){
+  if(!gmap||!pt||!GM.singles)return null;let best=null,bd=MAP_TAP_PX;
+  for(const l of GM.singles){const q=gmap.latLngToContainerPoint([l.lat,l.lng]),d=Math.hypot(q.x-pt.x,q.y-pt.y);if(d<=bd){bd=d;best=l.id}}
+  return best;
 }
 function hideMapCard(){const card=$("#mapCard");if(card){card.hidden=true;card.innerHTML=""}if(GM.sel){GM.sel=null;drawMapMarkers()}}
 /* 길찾기: hand the light's position to the map app the person prefers */
@@ -2869,6 +2876,8 @@ function openMap(scope,one){
   else if(pts.length)gmap.fitBounds(L.latLngBounds(pts.map(l=>[l.lat,l.lng])).pad(.15),{maxZoom:17});
   else gmap.setView([35.146,126.923],13);
   drawMapMarkers();drawGu(gmap);
+  // a tap that just misses a small marker; taps on the card, buttons and controls inside the map box are not map taps
+  gmap.on("click",e=>{const t=e.originalEvent&&e.originalEvent.target;if(t&&t.closest&&t.closest(".mapcard,.locbtn,.leaflet-control,button,a,input"))return;const id=mapNearestMarker(e.containerPoint);if(id)showMapCard(id)});
   gmap.on("moveend zoomend",()=>{if(gmap&&!gmap._dgClosing&&$("#gmap"))drawMapMarkers()});
   if(GM.sel&&byId(GM.sel))showMapCard(GM.sel);
   meStop();setTimeout(()=>{if(gmap)meStart(false)},300);

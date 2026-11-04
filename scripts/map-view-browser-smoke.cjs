@@ -70,6 +70,24 @@ const server = http.createServer((req, res) => {
     assert.ok(await count() < seeded.total, 'the kind chip still filters');
     await page.locator('#mapKind [data-kind="전체"]').click(); await page.waitForTimeout(200);
 
+    // 3b. a tap that misses a small marker by a finger's width still selects the nearest one; a tap far from any does nothing
+    checks.push('near-miss tap selects the nearest marker');
+    const view = await page.evaluate(() => ({ c: gmap.getCenter(), z: gmap.getZoom() }));
+    const near = await page.evaluate(() => {
+      hideMapCard(); gmap.setView([35.1530952, 126.9217072], 19, { animate: false }); drawMapMarkers();
+      const box = document.getElementById('gmap').getBoundingClientRect(), size = gmap.getSize();
+      const pick = GM.singles.map(l => ({ l, q: gmap.latLngToContainerPoint([l.lat, l.lng]) })).filter(({ l, q }) => q.x > 60 && q.x < size.x - 60 && q.y > 60 && q.y < size.y - 160
+        && GM.singles.every(o => o === l || gmap.latLngToContainerPoint([o.lat, o.lng]).distanceTo(q) > 80))[0];
+      return pick && { id: pick.l.id, x: box.left + pick.q.x, y: box.top + pick.q.y };
+    });
+    assert.ok(near, 'an isolated marker to tap');
+    await page.mouse.click(near.x + 11, near.y + 6); await page.waitForTimeout(150);
+    assert.equal(await page.evaluate(() => GM.sel), near.id, '12 px off the centre still picks it');
+    await page.evaluate(() => hideMapCard());
+    await page.mouse.click(near.x + 30, near.y + 26); await page.waitForTimeout(150);
+    assert.equal(await page.evaluate(() => GM.sel), null, 'a tap 40 px away selects nothing');
+    await page.evaluate(v => { gmap.setView(v.c, v.z, { animate: false }); drawMapMarkers(); }, view);
+
     // 4. the card: tap a marker → card with the code, 점검하기 and 길찾기; 길찾기 offers map apps with the coordinates
     checks.push('info card and 길찾기');
     await page.evaluate(id => { gmapLayer.getLayers().find(l => l instanceof L.CircleMarker && l.getLatLng().lat === byId(id).lat && l.getLatLng().lng === byId(id).lng).fire('click'); }, seeded.first.id);
