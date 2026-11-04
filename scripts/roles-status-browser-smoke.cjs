@@ -67,6 +67,15 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.locator('#sheet .role-table thead th.mine').textContent().then(t => /관리자/.test(t)), true);
     await page.evaluate(() => closeSheet('all'));
 
+    // 2b. no staff role (signed out, or signed in without approval): the resident's report entry, no staff data
+    checks.push('people without a staff role get the resident entry');
+    await page.evaluate(() => { S.fbSignedOut = true; render(); });
+    assert.equal(await page.locator('#view .resident a.btn').first().getAttribute('href'), await page.evaluate(() => REPORT_URL));
+    assert.equal(await page.locator('#fbSignIn').count(), 1);
+    assert.equal(await page.locator('#view .row[data-light]').count(), 0, 'no light list without a role');
+    await page.evaluate(() => { S.fbSignedOut = false; render(); });
+    assert.match(await page.evaluate(() => vNoAccess()), /직원 승인 전이에요[\s\S]*가로등 고장 신고하기/);
+
     // 3. resident report page: send → code shown and remembered → status lookup shows only the stage
     checks.push('citizen sees a check code and the stage');
     await page.goto(origin + '/report/?c=' + encodeURIComponent('산수동 642'));

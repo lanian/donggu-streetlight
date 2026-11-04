@@ -143,6 +143,7 @@ header p{margin:0;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:
 .deskmenu>summary small{display:block;font-weight:400;color:var(--ink-2);font-size:12px;margin-top:2px}.deskmenu .menu{padding-bottom:10px}
 button svg,button svg *{pointer-events:none}
 .devnote,.devmode{font-size:12px;margin:8px 2px 4px}.devmode{text-align:center;margin-top:18px}
+a.btn.linkbtn-block{display:block;width:100%;text-align:center;text-decoration:none;margin-top:8px;box-sizing:border-box}
 .myrole{text-align:center;font-size:12px;margin:14px 2px 0}
 .role-table-wrap{overflow-x:auto;margin:10px 0}.role-table{width:100%;border-collapse:collapse;font-size:13px;background:var(--card);border-radius:10px;overflow:hidden}
 .role-table th,.role-table td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:center;vertical-align:middle}.role-table tbody th{text-align:left;font-weight:400}
@@ -793,7 +794,16 @@ async function fbSignOut(){
   if(!window.DG_DEVICE_TRUSTED){try{await FB.fs.terminate();await FB.fs.clearPersistence()}catch(e){await dgAlert("임시 자료 정리에 실패했어요. 다른 앱 탭을 닫고 브라우저 사이트 데이터를 지워 주세요.",{title:"정리 실패"})}}
   location.reload();
 }
-function vSignIn(){return `<div class="panel" style="margin-top:12px"><h3>직원 로그인</h3><p class="muted">구청 Google 계정으로 로그인하면 점검·순찰 기록이 공유 저장소에 저장돼요. 역할(관리자·점검자)은 관리자가 지정해요.</p><button class="btn sodium block" id="fbSignIn">Google로 로그인</button></div>${DGSecurity.devicePanel()}`}
+/* Someone without a staff role — not signed in, or signed in but not approved — gets what a resident can do: report a
+   fault (no login) and, when the server lookup is on, check a report's progress. Staff records stay behind the login
+   and the server rules; nothing here reads them. */
+function residentPanel(){
+  const c=window.REPORT_CONFIG||{},status=c.backend==="gateway"&&/^https:\/\//.test(c.statusUrl||"");
+  return `<div class="panel resident" style="margin-top:12px"><h3>주민이세요?</h3><p class="muted">가로등이 꺼졌거나 고장 났으면 로그인 없이 바로 신고할 수 있어요. 기둥의 QR을 찍어도 같은 신고 화면이 열려요.</p>
+    <a class="btn ghost block linkbtn-block" href="${esc(REPORT_URL)}">가로등 고장 신고하기</a>${status?`<a class="btn ghost block linkbtn-block" href="${esc(REPORT_URL)}?status=1">내 신고 처리 상태 보기</a>`:""}
+    <p class="muted" style="font-size:12px;margin:8px 0 0">신고 내용과 연락처는 담당 부서만 봐요. 점검 기록은 직원으로 로그인해야 보여요.</p></div>`;
+}
+function vSignIn(){return `<div class="panel" style="margin-top:12px"><h3>직원 로그인</h3><p class="muted">구청 Google 계정으로 로그인하면 점검·순찰 기록이 공유 저장소에 저장돼요. 역할(관리자·점검자)은 관리자가 지정해요.</p><button class="btn sodium block" id="fbSignIn">Google로 로그인</button></div>${residentPanel()}${DGSecurity.devicePanel()}`}
 function vConnectionError(){return `<div class="panel" style="margin-top:12px"><h3>공유 저장소에 연결하지 못했어요</h3><p class="muted">인터넷 연결을 확인한 뒤 다시 열어 주세요. 문제가 계속되면 관리자에게 연결 설정을 확인해 달라고 하세요.</p><button class="btn sodium block" id="fbRetry">다시 연결</button></div>`}
 async function boot(){
   await loadRegistry();
@@ -1005,8 +1015,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v53-shared-mode";
+const APP_VER="v54-resident-entry";
 const RELEASE_NOTES=[
+  {v:"v54-resident-entry",d:"2026-11-04",t:"로그인 전·직원 승인 전에도 주민 고장 신고로 바로 갈 수 있어요"},
   {v:"v53-shared-mode",d:"2026-11-04",t:"공유 운영 모드: 구청 Google 계정으로 로그인하고 모든 직원이 같은 기록을 써요"},
   {v:"v52-foundation",d:"2026-11-04",t:"새 버전 설치 때 예전 파일이 섞이지 않아요 · 대장 교체에 주소 열 반영 · 전송 자동 재시도"},
   {v:"v51-field-patrol",d:"2026-11-04",t:"순찰: 끝내기 전 확인·이어가기·되돌리기 순서 · 아이콘 탭 · 표찰 스캔·주변 찾기 빨라짐"},
@@ -1108,8 +1119,8 @@ function render(){
   DongguPWA.render();
 }
 function vNoAccess(){
-  return `<div class="panel" style="margin-top:12px"><h3>점검자·관리자용 화면이에요</h3><p class="muted">이 계정에는 아직 역할이 없어요. 관리자에게 아래 사용자 ID를 알려 주고 점검자로 등록해 달라고 하세요. 등록되면 화면을 새로 고치면 돼요.</p>
-    <p>내 사용자 ID: <code>${esc(S.me||"")}</code></p>${!FB&&!S.canWrite?`<p class="muted">공유 설정에서 "참여자" 권한도 필요해요.</p>`:""}${FB?`<button class="btn ghost sm" id="fbSignOut">다른 계정으로 로그인</button>`:""}</div>${FB?DGSecurity.joinPanel():""}`;
+  return `<div class="panel" style="margin-top:12px"><h3>직원 승인 전이에요</h3><p class="muted">이 계정은 아직 점검자·관리자로 등록되지 않아 주민과 같은 기능만 쓸 수 있어요. 직원이라면 아래에서 접근 신청을 보내거나 관리자에게 사용자 ID를 알려 주세요. 승인되면 화면을 새로 고치면 돼요.</p>
+    <p>내 사용자 ID: <code>${esc(S.me||"")}</code></p>${!FB&&!S.canWrite?`<p class="muted">공유 설정에서 "참여자" 권한도 필요해요.</p>`:""}${FB?`<button class="btn ghost sm" id="fbSignOut">다른 계정으로 로그인</button>`:""}</div>${residentPanel()}${FB?DGSecurity.joinPanel():""}`;
 }
 function tally(clickable){
   const n=s=>S.lights.filter(l=>l.status===s).length;const tot=S.lights.length||1;const open=LSTAT.slice(1).reduce((a,s)=>a+n(s),0);
