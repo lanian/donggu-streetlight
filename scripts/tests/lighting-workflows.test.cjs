@@ -1,3 +1,4 @@
+require('./browser-env.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const C = require('../../app/lighting-workflow-core.js');

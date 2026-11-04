@@ -261,6 +261,11 @@ test('real registry normalization retains all facility IDs and coordinates witho
   const idColumn = original.cols.indexOf('id'), latColumn = original.cols.indexOf('lat'), lngColumn = original.cols.indexOf('lng');
   values.forEach((row, i) => { assert.equal(row.id, original.rows[i][idColumn]); assert.equal(row.lat, original.rows[i][latColumn]); assert.equal(row.lng, original.rows[i][lngColumn]); });
   const same = C.registryDiff(values, values, {}); assert.equal(same.unchanged, values.length); assert.equal(same.changed.length, 0);
+  // the public-data columns survive normalization and their changes are detected
+  const withAddr = values.find(row => row.addr && row.mgmt), approx = values.find(row => row.posApprox);
+  assert.ok(withAddr && withAddr.jibun !== undefined, 'addr/jibun/mgmt kept'); assert.equal(approx && approx.posApprox, true, 'posApprox kept');
+  const moved = values.map(row => row.id === withAddr.id ? { ...row, addr: row.addr + ' (변경)' } : row);
+  assert.deepEqual(Object.keys(C.registryDiff(values, moved, {}).changed[0].changes), ['addr']);
   assert.equal(JSON.stringify(original), frozen);
   assert.throws(() => C.normalizeRegistry({ ...original, count: original.count + 1 }));
   assert.throws(() => C.normalizeRegistry([{ id: 'p', code: 'P', lat: '', lng: 126 }]));

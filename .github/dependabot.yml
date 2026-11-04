@@ -1,0 +1,14 @@
+# Weekly update proposals for the pinned workflow actions and the Cloud Functions packages. Updates arrive as pull
+# requests and go through the same checks; nothing is merged automatically.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+  - package-ecosystem: npm
+    directory: /functions
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

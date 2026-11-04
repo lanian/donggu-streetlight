@@ -7,7 +7,9 @@
   const STATES = { draft: '배정 대기', assigned: '배정됨', in_progress: '작업 중', completed: '검수 대기', verified: '완료', cancelled: '취소' };
   const PRIORITIES = ['긴급', '높음', '보통', '낮음'];
   const TYPES = ['수리', '재점검', '신설검토', '철거', '기타'];
-  const FIELDS = ['lampId', 'label', 'code', 'kind', 'dong', 'num', 'road', 'main', 'sub', 'lat', 'lng', 'lampType', 'pole', 'sw', 'removed', 'noPlate', 'dongGuess'];
+  // the registry's columns (data/lights.json); addr/jibun/mgmt/posApprox came with the 2026-09-10 public-data merge
+  const FIELDS = ['lampId', 'label', 'code', 'kind', 'dong', 'num', 'road', 'main', 'sub', 'lat', 'lng', 'lampType', 'pole', 'sw', 'removed', 'noPlate', 'dongGuess', 'addr', 'jibun', 'mgmt', 'posApprox'];
+  const FLAGS = ['removed', 'noPlate', 'dongGuess', 'posApprox'];
   const text = (value, max) => String(value == null ? '' : value).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, max);
   const list = (values, max) => [...new Set((Array.isArray(values) ? values : []).filter(x => typeof x === 'string' && x && x.length <= 180))].slice(0, max);
   const clone = value => JSON.parse(JSON.stringify(value));
@@ -201,7 +203,7 @@
       ids.add(id);
       if (row.lat === '' || row.lat == null || row.lng === '' || row.lng == null) fail('시설 좌표가 비어 있어요: ' + id);
       const out = { id, lat: finite(row.lat, -90, 90, '위도'), lng: finite(row.lng, -180, 180, '경도') };
-      for (const field of FIELDS) if (field !== 'lat' && field !== 'lng' && row[field] != null) out[field] = ['removed', 'noPlate', 'dongGuess'].includes(field) ? !!row[field] : text(row[field], 200);
+      for (const field of FIELDS) if (field !== 'lat' && field !== 'lng' && row[field] != null) out[field] = FLAGS.includes(field) ? !!row[field] : text(row[field], 200);
       if (!out.code) fail('시설 표찰/이름이 비어 있어요: ' + id);
       return out;
     });
@@ -213,7 +215,7 @@
       if (!previous) { added.push(row); continue; }
       const changes = {}, conflicts = [];
       for (const field of FIELDS) {
-        const scalar = value => value == null ? null : ['removed', 'noPlate', 'dongGuess'].includes(field) ? !!value : value;
+        const scalar = value => value == null ? null : FLAGS.includes(field) ? !!value : value;
         const a = scalar(previous[field]), b = scalar(row[field]);
         if (a !== b) {
           changes[field] = b;

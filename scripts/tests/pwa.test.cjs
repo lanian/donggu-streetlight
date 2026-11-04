@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '../..');
 const scope = 'https://example.test/app/';
+const addAllModes = [];
 function swContext() {
   const listeners = {}, stores = new Map();
   const key = x => x.url || new URL(String(x), scope).href;
@@ -14,7 +15,7 @@ function swContext() {
     const c = { data, async match(k) { return data.get(key(k))?.clone(); },
       async put(k, v) { data.set(key(k), v.clone()); }, async delete(k) { return data.delete(key(k)); },
       async keys() { return [...data.keys()].map(url => new Request(url)); },
-      async addAll(paths) { for (const p of paths) data.set(key(p), new Response('public static file')); }
+      async addAll(paths) { for (const p of paths) { if (p && typeof p === 'object') addAllModes.push(p.cache); data.set(key(p), new Response('public static file')); } }
     }; stores.set(name, c); return c;
   };
   const counts = { skip: 0, claim: 0, network: 0 };
@@ -143,4 +144,11 @@ test('the version shown in the app is the service-worker release, and its releas
   const first = /const RELEASE_NOTES=\[\s*\{v:"([^"]+)",d:"(\d{4}-\d{2}-\d{2})"/.exec(html);
   assert.ok(first, 'RELEASE_NOTES starts with {v, d:"YYYY-MM-DD", t}');
   assert.equal(first[1], sw, 'add a RELEASE_NOTES line for the new version');
+});
+
+test('a release installs its shell from the network, not the browser HTTP cache', async () => {
+  addAllModes.length = 0;
+  const { listeners } = swContext();
+  let task; listeners.install({ waitUntil(p) { task = p; } }); await task;
+  assert.ok(addAllModes.length > 10); assert.ok(addAllModes.every(m => m === 'reload'));
 });

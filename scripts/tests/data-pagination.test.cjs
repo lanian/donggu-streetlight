@@ -1,3 +1,4 @@
+require('./browser-env.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const D = require('../../app/data.js');

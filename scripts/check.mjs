@@ -24,6 +24,18 @@ for (const file of ['index.html', 'report/index.html']) {
     assert.ok(existsSync(resolve(root, dirname(file), match[1].split('?')[0])), `Missing local asset: ${file} → ${match[1]}`);
   }
 }
+// The staff app's classic scripts share one global scope: a name declared twice at the top level would silently replace
+// the first (function) or stop the whole app with a SyntaxError (let/const). Declarations must be unique across files.
+{
+  const html = read('index.html'), seen = new Map(), dupes = [];
+  const files = [...html.matchAll(/<script src="((?:app\/|security|firebase-config|report\/config)[^"]*)"/g)].map(m => [m[1], read(m[1])]);
+  [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)].filter(m => !/\bsrc\s*=/.test(m[1])).forEach((m, i) => files.push(['index.html inline ' + (i + 1), m[2]]));
+  for (const [file, code] of files) for (const m of code.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(|^(?:const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm)) {
+    const name = m[1] || m[2];
+    if (seen.has(name)) dupes.push(`${name}: ${seen.get(name)} and ${file}`); else seen.set(name, file);
+  }
+  assert.deepEqual(dupes, [], 'Top-level names declared twice in the staff app');
+}
 const manifest = JSON.parse(read('manifest.webmanifest'));
 JSON.parse(read('seed/manifest.json'));
 for (const icon of manifest.icons) assert.ok(existsSync(resolve(root, icon.src)), `Missing icon: ${icon.src}`);
