@@ -18,6 +18,8 @@ async function poll(page, predicate, arg, label) {
   throw new Error('Timed out: ' + label);
 }
 const server = http.createServer((req, res) => {
+  // Browser checks always run the device (체험) mode: the deployed firebase-config.js points at the real project.
+  if (req.url.split('?')[0].endsWith('/firebase-config.js')) { res.setHeader('Content-Type', 'text/javascript'); return res.end('window.FIREBASE_CONFIG = null;'); }
   let pathname; try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch (_) { return res.writeHead(400).end(); }
   const file = path.resolve(root, '.' + pathname + (pathname.endsWith('/') ? 'index.html' : ''));
   if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return res.writeHead(404).end();
@@ -38,7 +40,8 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => DGIntegration.whenReady()), true); assert.equal(await page.evaluate(() => FIREBASE_CONFIG), null); assert.equal(await page.evaluate(() => S.me), 'local');
     await poll(page, () => DGLighting.state.loaded, null, 'lighting records ready');
     await page.evaluate(() => { window.__workflowDownloads = []; dl = { save: async options => window.__workflowDownloads.push(options) }; });
-    const close = async () => { if (await page.locator('#sheet.open').count()) { await page.evaluate(() => closeSheet('all')); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); } };
+    // a leftover dialog or a sheet still closing can cover the tab bar on a slow runner: settle both before moving on
+    const close = async () => { await page.evaluate(() => { if (window.DGDialog && DGDialog.isOpen()) DGDialog.cancel(); }); if (await page.locator('#sheet.open').count()) { await page.evaluate(() => closeSheet('all')); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); } await page.waitForFunction(() => !NAV.stack.length && !(window.DGDialog && DGDialog.isOpen())); };
     const section = async key => { await close(); await page.locator('[data-tab="admin"]').click(); await page.locator('[data-asec="' + key + '"]').first().click(); };
     const minute = await page.evaluate(() => DGLightingModel.minuteOfKst(Date.now())), time = String(Math.floor(minute / 60)).padStart(2, '0') + ':' + String(minute % 60).padStart(2, '0');
     const review = async () => { await section('light'); await page.locator('[data-rvmode="pairs"]').click(); await page.locator('#rvTime').fill(time); await page.locator('#rvRun').click(); await poll(page, () => S.review?.historyState === 'synced', null, 'complete review archive'); };

@@ -20,6 +20,8 @@ async function poll(page, predicate, arg, label = 'asynchronous browser state') 
 const results = [], defects = [];
 function expect(name, actual, expected) { try { assert.deepEqual(actual, expected); results.push({name, pass:true}); } catch (e) { defects.push({name, actual, expected}); } }
 const server = http.createServer((req,res) => {
+  // Browser checks always run the device (체험) mode: the deployed firebase-config.js points at the real project.
+  if (req.url.split('?')[0].endsWith('/firebase-config.js')) { res.setHeader('Content-Type', 'text/javascript'); return res.end('window.FIREBASE_CONFIG = null;'); }
   const url = new URL(req.url, 'http://localhost');
   const file = path.resolve(root, '.'+decodeURIComponent(url.pathname)+(url.pathname.endsWith('/')?'index.html':''));
   if(!file.startsWith(root+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile())return res.writeHead(404).end();

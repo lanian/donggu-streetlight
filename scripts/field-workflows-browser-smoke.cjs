@@ -11,6 +11,8 @@ async function poll(page, predicate, arg, label = 'workflow state') {
   throw new Error('Timed out: ' + label);
 }
 const server = http.createServer((req, res) => {
+  // Browser checks always run the device (체험) mode: the deployed firebase-config.js points at the real project.
+  if (req.url.split('?')[0].endsWith('/firebase-config.js')) { res.setHeader('Content-Type', 'text/javascript'); return res.end('window.FIREBASE_CONFIG = null;'); }
   const pathname = new URL(req.url, 'http://localhost').pathname;
   const file = path.resolve(root, '.' + decodeURIComponent(pathname) + (pathname.endsWith('/') ? 'index.html' : ''));
   if (!file.startsWith(root + path.sep) || !fs.existsSync(file)) return res.writeHead(404).end();

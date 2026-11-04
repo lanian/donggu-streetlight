@@ -8,6 +8,8 @@ const { chromium } = require(process.env.DONGGU_PLAYWRIGHT_MODULE || 'playwright
 const root = process.env.DG_OPERATIONS_ROOT || path.resolve(__dirname, '..');
 let down = false; // "network gone": the server drops every connection, so only the service worker's cache can answer
 const server = http.createServer((req, res) => {
+  // Browser checks always run the device (체험) mode: the deployed firebase-config.js points at the real project.
+  if (req.url.split('?')[0].endsWith('/firebase-config.js')) { res.setHeader('Content-Type', 'text/javascript'); return res.end('window.FIREBASE_CONFIG = null;'); }
   if (down) { req.socket.destroy(); return; }
   const pathname = new URL(req.url, 'http://localhost').pathname;
   const file = path.resolve(root, '.' + decodeURIComponent(pathname) + (pathname.endsWith('/') ? 'index.html' : ''));

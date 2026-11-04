@@ -1,6 +1,14 @@
 /* 직원 앱 Firebase 설정. 값을 채우면 GitHub Pages에서도 공유 저장·로그인·역할 강제가 켜져요.
    비워 두면(null) 체험 모드(이 기기에만 저장)로 동작해요. 아티팩트(claude.ai) 안에서는 무시돼요. */
-window.FIREBASE_CONFIG = null;
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCi3DSZSxPcbIjPzJLmJ7ZYhYoLi3eJqeI",
+  authDomain: "donggu-light.firebaseapp.com",
+  projectId: "donggu-light",
+  appId: "1:764961412270:web:f417d44a03ca3b38bf493f",
+  functionsEnabled: false, // 무료(Spark): 서버 함수 없음. Blaze로 함수를 배포한 뒤 true
+  functionsRegion: "asia-northeast3",
+  appCheckSiteKey: ""
+};
 /* 예:
 window.FIREBASE_CONFIG = {
   apiKey: "AIza...",
