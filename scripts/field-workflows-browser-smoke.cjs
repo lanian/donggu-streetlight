@@ -66,10 +66,12 @@ const server = http.createServer((req, res) => {
     results.push('unlinked report gained a facility with reason/history while preserving its original content');
 
     await page.evaluate(async id => { const at = Date.now(); await db.doc('reports/field-ui-duplicate').set({ lightId: id, issue: '꺼짐', desc: '같은 시설의 추가 신고', status: '접수', createdAt: at }); }, location.id);
-    // on a slow runner the link screen may still be settling; open the work screen once it has and retry if it was absorbed
-    for (let i = 0; i < 20 && !(await page.locator('[data-fw-report="field-ui-report"]').count()); i++) {
-      await page.evaluate(() => { if (!document.querySelector('#dgReportLink button[type="submit"]:disabled')) DGWorkflows.openReportWork('field-ui-report'); });
-      await page.waitForTimeout(250);
+    // Saving the link may still be finishing (it closes its own screen when done). On a slow runner that close can land
+    // after the next screen opened and take it down, so open the work screen once no Back is pending, and again if it was.
+    for (let i = 0; i < 3 && !(await page.locator('[data-fw-report="field-ui-report"]').count()); i++) {
+      await page.waitForFunction(() => !NAV.leaving);
+      await page.evaluate(() => DGWorkflows.openReportWork('field-ui-report'));
+      await page.locator('[data-fw-report="field-ui-report"]').waitFor({ timeout: 8000 }).catch(() => {});
     }
     assert.equal(await page.locator('[data-fw-report="field-ui-report"]').isChecked(), true);
     assert.equal(await page.locator('[data-fw-report="field-ui-duplicate"]').isChecked(), false);
