@@ -34,6 +34,12 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
 .done{text-align:center;padding:30px 10px}.done .big{font-size:44px}.done .rc{font-size:22px;font-weight:800;margin:6px 0 2px;font-variant-numeric:tabular-nums}
 .foot{margin-top:24px;font-size:12px;color:var(--ink-2)}
 :focus-visible{outline:3px solid var(--sodium);outline-offset:2px}
+.toplink{margin-left:auto;font:inherit;font-size:13px;font-weight:700;background:none;border:1px solid var(--line);border-radius:99px;padding:8px 12px;color:var(--ink);min-height:40px;cursor:pointer}
+.steps{list-style:none;margin:12px 0 4px;padding:0;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;counter-reset:s}
+.steps li{text-align:center;font-size:12px;color:var(--ink-2);padding-top:28px;position:relative}.steps li::before{counter-increment:s;content:counter(s);position:absolute;top:0;left:50%;transform:translateX(-50%);width:24px;height:24px;border-radius:50%;border:2px solid var(--line);background:var(--card);line-height:20px;font-weight:700;font-size:12px}
+.steps li.on,.steps li.now{color:var(--ink);font-weight:700}.steps li.on::before{background:var(--ok);border-color:var(--ok);color:#fff;content:"✓"}.steps li.now::before{background:var(--sodium);border-color:var(--sodium);color:#1B1300;content:counter(s)}
+.saved{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}.saved button{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:8px 10px;min-height:44px;font-variant-numeric:tabular-nums;cursor:pointer}
+.kcode{font-size:20px;font-weight:800;letter-spacing:.12em;font-variant-numeric:tabular-nums}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -42,6 +48,7 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
   <header>
     <svg viewBox="0 0 46 58" aria-hidden="true"><path d="M8 58V14c0-6 4-10 10-10h14" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><path d="M26 2h16a3 3 0 0 1 3 3v3H23V5a3 3 0 0 1 3-3z" fill="currentColor"/><path d="M24 9h20l-3 6H27z" fill="var(--sodium)"/><path d="M34 15l-9 30h18z" fill="var(--sodium)" opacity=".18"/></svg>
     <div><h1>가로등 고장 신고</h1><p id="orgLine"></p></div>
+    <button type="button" class="toplink" id="statusOpen" hidden>처리 상태 보기</button>
   </header>
 
   <main id="form">
@@ -75,13 +82,28 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
     <div id="err" class="err" hidden></div>
     <div style="margin-top:18px"><button type="button" class="btn sodium block" id="send">신고 보내기</button></div>
     <div id="alt" class="row" style="margin-top:10px;flex-wrap:wrap" hidden></div>
-    <p class="foot">이 페이지는 신고만 받아요. 접수 상태 확인은 <span id="phoneLine"></span>로 문의해 주세요. 신고 내용·사진·위치는 가로등 고장 처리 목적으로만 쓰이고, 연락처는 처리 안내 후 지워요.</p>
+    <p class="foot"><span id="footLead">이 페이지는 신고만 받아요. 접수 상태 확인은 </span><span id="phoneLine"></span>로 문의해 주세요. 신고 내용·사진·위치는 가로등 고장 처리 목적으로만 쓰이고, 연락처는 처리 안내 후 지워요.</p>
   </main>
+
+  <section id="statusView" hidden>
+    <h2>내 신고 처리 상태</h2>
+    <div class="panel">
+      <label class="muted" for="stReceipt">접수번호</label><input class="f-in" id="stReceipt" placeholder="R261104-1A2B3C4D" autocomplete="off" autocapitalize="characters" style="margin:4px 0 10px">
+      <label class="muted" for="stCode">확인 코드 (6자리)</label><input class="f-in" id="stCode" placeholder="예: K7P2QM" autocomplete="off" autocapitalize="characters" maxlength="8" style="margin-top:4px">
+      <div id="stSaved" hidden><p class="muted" style="margin:10px 0 0">이 기기에서 보낸 신고</p><div class="saved" id="stSavedList"></div></div>
+      <div id="stErr" class="err" hidden></div>
+      <button type="button" class="btn sodium block" id="stCheck" style="margin-top:12px">확인하기</button>
+    </div>
+    <div class="panel" id="stResult" hidden style="margin-top:12px" role="status" aria-live="polite"></div>
+    <p class="foot">접수번호와 확인 코드는 신고를 보낸 뒤 화면에 나와요. 처리 단계만 보여 주고, 신고 내용·사진·연락처는 보여 주지 않아요.</p>
+    <button type="button" class="btn ghost block" id="stBack">새로 신고하기</button>
+  </section>
 
   <section id="done" class="done" hidden>
     <div class="big" id="doneIcon"></div>
     <div id="doneTitle"></div>
     <div class="rc" id="receipt"></div>
+    <div id="doneCode" hidden><p class="muted" style="margin:10px 0 2px">처리 상태 확인 코드</p><div class="kcode" id="doneCodeText"></div><p class="muted">접수번호와 이 코드로 처리 상태를 볼 수 있어요. 이 기기에도 기억해 둘게요.</p><button type="button" class="btn ghost" id="doneStatus">처리 상태 보기</button></div>
     <p class="muted" id="doneMsg"></p>
     <div id="doneCopy" hidden><p class="muted">문자·이메일 앱이 열리지 않으면 아래 내용을 복사해서 보내 주세요.</p><textarea class="f-in" id="copyText" readonly style="min-height:120px"></textarea><button type="button" class="btn ghost" id="copyBtn" style="margin-top:8px">내용 복사</button></div>
     <p class="foot" id="doneFoot"></p>
@@ -89,7 +111,7 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
 </div>
 <script src="config.js"></script>
 <script>
-const C=Object.assign({org:"",dept:"",phone:"",sms:"",mail:"",backend:null,firestore:{},gatewayUrl:"",appCheckSiteKey:"",allowLocalGateway:false,privacyDays:90,maxPhotoKB:150},window.REPORT_CONFIG||{});
+const C=Object.assign({org:"",dept:"",phone:"",sms:"",mail:"",backend:null,firestore:{},gatewayUrl:"",statusUrl:"",appCheckSiteKey:"",allowLocalGateway:false,privacyDays:90,maxPhotoKB:150},window.REPORT_CONFIG||{});
 if(!Number.isInteger(C.privacyDays)||C.privacyDays<1||C.privacyDays>3650)C.privacyDays=90;
 const ISSUES=["불이 꺼져 있어요","깜빡거려요","낮에도 켜져 있어요","등이 파손됐어요","기둥이 기울었어요","전선이 노출됐어요","기타"];
 const $=s=>document.querySelector(s);
@@ -132,13 +154,17 @@ function receiptNo(){const d=new Date();const r=Math.random().toString(36).slice
 function buildText(rec){return `[가로등 고장 신고 ${rec.receipt}]\n등 번호: ${rec.code||"(모름)"}\n문제: ${rec.issue}\n내용: ${rec.desc||"-"}\n위치: ${rec.lat?`${rec.lat}, ${rec.lng} (±${rec.acc}m)`:"-"}\n연락처: ${rec.contact||"-"}\n시각: ${new Date(rec.at).toLocaleString("ko-KR")}`}
 const REPORT_SCRIPTS=new Map();
 function loadReportScript(src){if(REPORT_SCRIPTS.has(src))return REPORT_SCRIPTS.get(src);const promise=new Promise((resolve,reject)=>{const script=document.createElement("script");script.src=src;script.onload=resolve;script.onerror=()=>{REPORT_SCRIPTS.delete(src);script.remove();reject(new Error("접수 기능을 불러오지 못했어요."))};document.head.appendChild(script)});REPORT_SCRIPTS.set(src,promise);return promise;}
+function localUrl(u){return C.allowLocalGateway===true&&/^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(u||"")}
+async function serverHeaders(url){
+  const headers={"Content-Type":"application/json"};if(localUrl(url))return headers;
+  for(const component of ["app","app-check"])await loadReportScript(`https://www.gstatic.com/firebasejs/10.12.2/firebase-${component}-compat.js`);
+  if(!firebase.apps.length)firebase.initializeApp(C.firestore);if(!st.appCheck){firebase.appCheck().activate(C.appCheckSiteKey,true);st.appCheck=true;}
+  headers["X-Firebase-AppCheck"]=(await firebase.appCheck().getToken(false)).token;return headers;
+}
 async function sendGateway(rec){
   const payload={code:rec.code,lightId:rec.lightId||"",issue:rec.issue,desc:rec.desc,lat:rec.lat,lng:rec.lng,acc:rec.acc,photo:rec.photo||"",contact:rec.contact||"",consent:rec.consent,consentDays:C.privacyDays};
   const key=JSON.stringify(payload);if(!st.submitJob||st.submitJob.key!==key)st.submitJob={key,requestId:crypto.randomUUID()};
-  const headers={"Content-Type":"application/json"};
-  const local=C.allowLocalGateway===true&&/^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(C.gatewayUrl||"");
-  if(!local){for(const component of ["app","app-check"])await loadReportScript(`https://www.gstatic.com/firebasejs/10.12.2/firebase-${component}-compat.js`);
-    if(!firebase.apps.length)firebase.initializeApp(C.firestore);if(!st.appCheck){firebase.appCheck().activate(C.appCheckSiteKey,true);st.appCheck=true;}headers["X-Firebase-AppCheck"]=(await firebase.appCheck().getToken(false)).token;}
+  const headers=await serverHeaders(C.gatewayUrl);
   const response=await fetch(C.gatewayUrl,{method:"POST",headers,body:JSON.stringify({...payload,requestId:st.submitJob.requestId}),cache:"no-store"});
   const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"접수 서버에 연결하지 못했어요.");
   if(typeof result.receipt!=="string"||!result.receipt)throw new Error("접수 확인을 받지 못했어요. 같은 내용으로 다시 시도해 주세요.");
@@ -154,7 +180,7 @@ $("#send").onclick=async()=>{
   if(!rec.code&&!rec.lightId&&!rec.desc&&rec.lat==null){showErr("등 번호, 위치 설명 또는 현재 위치 중 하나는 알려 주세요.");return}
   const btn=$("#send");btn.disabled=true;btn.textContent="보내는 중…";
   try{
-    if(mode==="gateway"){const result=await sendGateway(rec);rec.receipt=result.receipt;finish(rec,"담당 부서에 바로 전달됐어요.")}
+    if(mode==="gateway"){const result=await sendGateway(rec);rec.receipt=result.receipt;rec.statusCode=typeof result.statusCode==="string"?result.statusCode:"";if(rec.statusCode)remember(rec.receipt,rec.statusCode);finish(rec,"담당 부서에 바로 전달됐어요.")}
     else{
       const text=buildText(rec);const hasPhoto=!!rec.photo;
       finish(rec,`아직 접수되지 않았어요. 아래 버튼으로 문자·이메일 앱을 열고 직접 보내 주세요.${hasPhoto?" 사진은 메시지에 직접 첨부해 주세요.":""}`,text);
@@ -166,7 +192,47 @@ $("#send").onclick=async()=>{
     }
   }catch(e){configureDelivery();showErr((e&&e.message?e.message+" ":"")+"보내지 못했어요. 잠시 후 같은 내용으로 다시 시도하거나 "+(contactPhone||"담당 부서의 공식 연락처")+"로 문의해 주세요.")}
 };
-function finish(rec,msg,copy){const sent=!copy;$("#form").hidden=true;$("#done").hidden=false;$("#doneIcon").textContent=sent?"✓":"→";$("#doneTitle").textContent=sent?"접수됐어요":"신고 내용을 준비했어요 · 전송 전";$("#receipt").hidden=!sent;$("#receipt").textContent=sent?rec.receipt:"";$("#doneMsg").textContent=msg;$("#doneFoot").textContent=sent?"감사합니다. 같은 등을 여러 번 신고하지 않으셔도 돼요.":"문자·이메일 앱에서 보내기를 눌러 신고를 마쳐 주세요.";$("#doneCopy").hidden=sent;if(copy){$("#copyText").value=copy;$("#copyBtn").onclick=async()=>{try{await navigator.clipboard.writeText(copy);$("#copyBtn").textContent="복사했어요"}catch(e){$("#copyText").select()}}}window.scrollTo(0,0)}
+function finish(rec,msg,copy){const sent=!copy;$("#doneCode").hidden=!(sent&&rec.statusCode&&statusEnabled());$("#doneCodeText").textContent=rec.statusCode||"";$("#form").hidden=true;$("#done").hidden=false;$("#doneIcon").textContent=sent?"✓":"→";$("#doneTitle").textContent=sent?"접수됐어요":"신고 내용을 준비했어요 · 전송 전";$("#receipt").hidden=!sent;$("#receipt").textContent=sent?rec.receipt:"";$("#doneMsg").textContent=msg;$("#doneFoot").textContent=sent?"감사합니다. 같은 등을 여러 번 신고하지 않으셔도 돼요.":"문자·이메일 앱에서 보내기를 눌러 신고를 마쳐 주세요.";$("#doneCopy").hidden=sent;if(copy){$("#copyText").value=copy;$("#copyBtn").onclick=async()=>{try{await navigator.clipboard.writeText(copy);$("#copyBtn").textContent="복사했어요"}catch(e){$("#copyText").select()}}}window.scrollTo(0,0)}
+// ---------- 처리 상태 확인 (게이트웨이와 statusUrl이 설정됐을 때만) ----------
+function statusEnabled(){return deliveryMode()==="gateway"&&(localUrl(C.statusUrl)||/^https:\/\//.test(C.statusUrl||""))}
+const SAVED_KEY="dg-report-receipts";
+function savedReceipts(){try{const v=JSON.parse(localStorage.getItem(SAVED_KEY)||"[]");return Array.isArray(v)?v.filter(x=>x&&typeof x.r==="string"&&typeof x.k==="string").slice(0,10):[]}catch(e){return []}}
+function remember(r,k){try{localStorage.setItem(SAVED_KEY,JSON.stringify([{r,k,at:Date.now()},...savedReceipts().filter(x=>x.r!==r)].slice(0,10)))}catch(e){}}
+const STAGES=[["received","접수"],["reviewing","담당자 확인"],["in-progress","처리 중"],["done","완료"]];
+function showStatus(r,k){
+  $("#form").hidden=true;$("#done").hidden=true;$("#statusView").hidden=false;$("#statusOpen").hidden=true;
+  if(r)$("#stReceipt").value=r;if(k)$("#stCode").value=k;
+  const saved=savedReceipts();$("#stSaved").hidden=!saved.length;$("#stSavedList").replaceChildren(...saved.map(x=>{const b=document.createElement("button");b.type="button";b.textContent=x.r;b.dataset.r=x.r;b.dataset.k=x.k;return b}));
+  if(r&&k)checkStatus();else $("#stReceipt").focus();
+}
+async function checkStatus(){
+  const err=$("#stErr"),out=$("#stResult"),btn=$("#stCheck");err.hidden=true;
+  const receipt=$("#stReceipt").value.trim().toUpperCase().replace(/\s+/g,""),code=$("#stCode").value.trim().toUpperCase().replace(/[\s-]+/g,"");
+  if(!/^R\d{6}-[0-9A-F]{8}$/.test(receipt)){err.textContent="접수번호를 확인해 주세요. 예: R261104-1A2B3C4D";err.hidden=false;return}
+  if(!/^[2-9A-HJ-NP-Z]{6}$/.test(code)){err.textContent="확인 코드 6자리를 확인해 주세요.";err.hidden=false;return}
+  btn.disabled=true;btn.textContent="확인하는 중…";
+  try{
+    const response=await fetch(C.statusUrl,{method:"POST",headers:await serverHeaders(C.statusUrl),body:JSON.stringify({receipt,code}),cache:"no-store"});
+    const result=await response.json().catch(()=>({}));if(!response.ok)throw new Error(result.error||"지금은 조회할 수 없어요.");
+    const at=STAGES.findIndex(x=>x[0]===result.stage);if(at<0)throw new Error("처리 상태를 읽지 못했어요.");
+    remember(receipt,code);
+    const ol=document.createElement("ol");ol.className="steps";STAGES.forEach(([,label],i)=>{const li=document.createElement("li");li.textContent=label;if(i<at||(i===at&&result.stage==="done"))li.className="on";else if(i===at)li.className="now";ol.appendChild(li)});
+    const h=document.createElement("div");h.style.cssText="font-size:18px;font-weight:800";h.textContent=result.label;
+    const p=document.createElement("p");p.className="muted";p.style.margin="4px 0 0";p.textContent=`${result.detail}${result.updatedOn?` · ${result.updatedOn} 기준`:""}`;
+    const rc=document.createElement("p");rc.className="muted";rc.style.margin="8px 0 0";rc.textContent="접수번호 "+result.receipt;
+    out.replaceChildren(h,ol,p,rc);out.hidden=false;
+  }catch(e){out.hidden=true;err.textContent=(e&&e.message)||"지금은 조회할 수 없어요.";err.hidden=false}
+  finally{btn.disabled=false;btn.textContent="확인하기"}
+}
+if(statusEnabled()){
+  $("#statusOpen").hidden=false;
+  $("#footLead").textContent="이 페이지는 신고를 받고, 오른쪽 위 「처리 상태 보기」에서 접수번호로 처리 단계를 확인할 수 있어요. 그 밖의 문의는 ";
+  $("#statusOpen").onclick=()=>showStatus();$("#doneStatus").onclick=()=>showStatus($("#receipt").textContent,$("#doneCodeText").textContent);
+  $("#stCheck").onclick=checkStatus;$("#stSavedList").addEventListener("click",e=>{const b=e.target.closest("button");if(b){$("#stReceipt").value=b.dataset.r;$("#stCode").value=b.dataset.k;checkStatus()}});
+  for(const id of ["stReceipt","stCode"])$("#"+id).addEventListener("keydown",e=>{if(e.key==="Enter")checkStatus()});
+  $("#stBack").onclick=()=>{$("#statusView").hidden=true;$("#form").hidden=false;$("#statusOpen").hidden=false;$("#done").hidden=true};
+  if(params.has("status"))showStatus(params.get("r")||"");
+}
 </script>
 </body>
 </html>

@@ -136,6 +136,12 @@ header p{margin:0;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:
 .deskmenu>summary{cursor:pointer;padding:12px 2px;font-weight:700;list-style:none;min-height:44px}.deskmenu>summary::-webkit-details-marker{display:none}.deskmenu>summary::before{content:"▸ ";color:var(--ink-2)}.deskmenu[open]>summary::before{content:"▾ "}
 .deskmenu>summary small{display:block;font-weight:400;color:var(--ink-2);font-size:12px;margin-top:2px}.deskmenu .menu{padding-bottom:10px}
 .devnote,.devmode{font-size:12px;margin:8px 2px 4px}.devmode{text-align:center;margin-top:18px}
+.myrole{text-align:center;font-size:12px;margin:14px 2px 0}
+.role-table-wrap{overflow-x:auto;margin:10px 0}.role-table{width:100%;border-collapse:collapse;font-size:13px;background:var(--card);border-radius:10px;overflow:hidden}
+.role-table th,.role-table td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:center;vertical-align:middle}.role-table tbody th{text-align:left;font-weight:400}
+.role-table thead th{font-size:12px;color:var(--ink-2);white-space:nowrap}.role-table thead th small{display:block;font-size:10px;color:var(--fix)}
+.role-table tr.grp th{text-align:left;font-weight:700;font-size:12px;color:var(--ink-2);background:var(--bg)}.role-table .mine{background:color-mix(in srgb,var(--fix) 10%,transparent)}
+.role-table .ok{color:var(--fix);font-weight:700}.role-table .no{color:var(--ink-2)}
 .ver-foot{text-align:center;font-size:12px;margin:14px 0 4px}.ver-foot .linkbtn{color:var(--ink-2);font-size:12px}.ver-foot b{color:var(--fix)}
 .ver-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}.ver-row:last-child{border-bottom:0}.ver-row .k{flex:0 0 92px;color:var(--ink-2);font-size:13px}.ver-row .v{flex:1;min-width:0;overflow-wrap:anywhere}.ver-row .v small{display:block;color:var(--ink-2);font-size:12px;margin-top:2px}.ver-row .btn{margin-left:6px;vertical-align:middle}
 .ver-notes{margin:0 0 12px;padding-left:20px;font-size:13px}.ver-notes li{margin:0 0 8px}.ver-notes li.cur b{color:var(--sodium,var(--fix))}
@@ -677,7 +683,7 @@ const byId=id=>{if(!LIDX){LIDX=new Map();(S.allLights||S.lights).forEach(l=>LIDX
 function dgConfirm(m,o){return window.DGDialog?DGDialog.confirm(m,o):Promise.resolve(confirm(m))}
 function dgPrompt(m,o){return window.DGDialog?DGDialog.prompt(m,o):Promise.resolve(prompt(m,o&&o.value||""))}
 function dgAlert(m,o){return window.DGDialog?DGDialog.alert(m,o):Promise.resolve(alert(m))}
-function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("show"),2600)}
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("show"),String(m).length>40?4500:2600)}
 
 /* ---------- data ---------- */
 /* Local fallback store (GitHub Pages / plain hosting): same API surface as the shared db,
@@ -850,7 +856,44 @@ const ROLE_LABEL={admin:"관리자",inspector:"점검자",resident:"주민(열�
 function rolesReady(){return S.roles.some(r=>r.role==="admin")}
 function myRole(){if(S.me==="local")return S.demoRole||"admin";if(!rolesReady())return FB?"resident":"admin";const r=S.roles.find(r=>r.id===S.me);return r?r.role:"resident"}
 function can(p){if(S.fbError)return false;const r=myRole();if(p==="admin")return r==="admin";if(p==="inspect")return r==="admin"||r==="inspector";return true}
-function need(p){if(can(p))return true;toast(p==="admin"?"관리자만 할 수 있어요.":"점검자 이상만 할 수 있어요.");return false}
+/* 역할별로 할 수 있는 일. firestore.rules·need() 호출과 같은 기준으로 적는다(화면 설명용; 실제 제한은 can()과 서버 규칙). */
+const ROLE_CAPS=[
+  {g:"보기",t:"등 목록·지도·현황·보고서 보기",r:["admin","inspector"]},
+  {g:"보기",t:"밝기 예측·보완 검토 보기",r:["admin","inspector"]},
+  {g:"현장",t:"점검 기록 남기기(결과·사진·메모)",r:["admin","inspector"]},
+  {g:"현장",t:"야간 순찰 기록",r:["admin","inspector"]},
+  {g:"현장",t:"대장에 없는 등 현장 등록 · 표찰 번호 기록",r:["admin","inspector"]},
+  {g:"현장",t:"위치 보정 제안 · 대표 사진 지정",r:["admin","inspector"]},
+  {g:"현장",t:"전화·문자 신고 받아 적기 · QR 신고 가져오기",r:["admin","inspector"]},
+  {g:"현장",t:"맡은 보수 작업 진행 기록",r:["admin","inspector"]},
+  {g:"관리",t:"점검 결과 검수 · 재점검 요청",r:["admin"]},
+  {g:"관리",t:"등 정보 수정 · 철거 표시 · 위치 보정 반영",r:["admin"]},
+  {g:"관리",t:"미등록 등 대장 반영 · 반려",r:["admin"]},
+  {g:"관리",t:"신고 처리 상태 바꾸기(접수→처리중→완료) · 등 연결",r:["admin"]},
+  {g:"관리",t:"보수 작업 지시·배정 · 자재 관리",r:["admin"]},
+  {g:"관리",t:"대장 교체 · QR 라벨 · 백업·복원",r:["admin"]},
+  {g:"관리",t:"사용자 역할·담당 동 지정 · 접근 신청 승인",r:["admin"]},
+  {g:"주민",t:"신고 페이지에서 고장 신고(QR·주소)",r:["admin","inspector","resident"]},
+  {g:"주민",t:"접수번호와 확인 코드로 처리 상태 확인",r:["admin","inspector","resident"]}];
+const ROLE_ORDER=["admin","inspector","resident"],ROLE_SHORT={admin:"관리자",inspector:"점검자",resident:"주민"};
+function roleTable(mine){
+  const head=ROLE_ORDER.map(r=>`<th scope="col"${r===mine?' class="mine"':""}>${ROLE_SHORT[r]}${r===mine?"<small>나</small>":""}</th>`).join("");
+  let g="";const rows=ROLE_CAPS.map(c=>{const gh=c.g!==g?`<tr class="grp"><th colspan="4" scope="rowgroup">${esc(c.g)}</th></tr>`:"";g=c.g;
+    return gh+`<tr><th scope="row">${esc(c.t)}</th>${ROLE_ORDER.map(r=>`<td${r===mine?' class="mine"':""}>${c.r.includes(r)?'<span class="ok" aria-label="가능">✓</span>':'<span class="no" aria-label="불가">–</span>'}</td>`).join("")}</tr>`}).join("");
+  return `<div class="role-table-wrap"><table class="role-table"><thead><tr><th scope="col">할 수 있는 일</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function myRoleLine(){const r=myRole(),ds=myDongs();if(S.fbError)return "";
+  return `<p class="muted myrole">내 역할: <b>${esc(ROLE_SHORT[r]||r)}</b>${r!=="resident"?` · 담당 ${ds.length?esc(ds.join("·")):"전체"}`:""} <button type="button" class="linkbtn" data-myrole>할 수 있는 일</button></p>`}
+function openMyRole(){
+  const r=myRole(),ds=myDongs(),admins=S.roles.filter(x=>x.role==="admin").map(x=>S.names[x.id]||x.name).filter(Boolean);
+  navRoute("myrole",()=>openMyRole());
+  openSheet(`<div class="sheet-head"><div><h3>내 권한</h3><div class="muted">${esc(ROLE_LABEL[r]||r)}${S.me==="local"?" · 체험 모드":""}</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+    <div class="panel"><p style="margin:0">${r==="admin"?"모든 기능을 쓸 수 있어요. 역할과 담당 동은 관리 현황 › 사용자·권한에서 바꿔요.":r==="inspector"?"현장 점검·순찰·등록·신고 접수를 할 수 있어요. 검수·정보 수정·신고 상태 변경·사용자 관리는 관리자만 할 수 있어요.":"직원 앱의 기록은 볼 수 없어요. 고장 신고와 처리 상태 확인은 신고 페이지에서 할 수 있어요."}</p>
+    ${r!=="resident"?`<p class="muted" style="margin:8px 0 0">담당 동: ${ds.length?esc(ds.join(" · ")):"지정 안 됨(전체)"} — 담당 동은 현장 점검 목록을 좁혀 줄 뿐, 다른 동의 점검을 막지는 않아요.</p>`:""}
+    ${r!=="admin"?`<p class="muted" style="margin:8px 0 0">권한이 더 필요하면 관리자${admins.length?`(${esc(admins.slice(0,3).join(", "))})`:""}에게 요청하세요.</p>`:""}</div>
+    ${roleTable(r)}<p class="muted" style="font-size:12px">${FB?"이 제한은 서버 규칙으로도 지켜져요.":"이 공유 환경에서는 화면에서 구분해요."}</p>`);
+}
+function need(p){if(can(p))return true;const r=myRole();toast((p==="admin"?"관리자만 할 수 있어요.":"점검자 이상만 할 수 있어요.")+` 내 역할: ${ROLE_SHORT[r]||r} — 관리 현황의 '할 수 있는 일'에서 확인해요.`);return false}
 function myDongs(){const r=S.roles.find(x=>x.id===S.me);return (r&&Array.isArray(r.dongs)?r.dongs:[])}
 function inMyDongs(l){const ds=myDongs();if(!ds.length)return true;const a=adongOf(l);return ds.some(d=>a===d||(a.endsWith("(1·2)")&&adongGroup(a)===adongGroup(d)))}
 function roleDongChips(r){const ds=Array.isArray(r.dongs)?r.dongs:[];return `<div class="chips" style="margin-top:6px;gap:5px">${ADONGS.map(a=>`<button type="button" class="chip-t" data-rdtoggle="${esc(r.id)}" data-v="${a}" aria-pressed="${ds.includes(a)}">${a}</button>`).join("")}<button type="button" class="chip-t" data-rdtoggle="${esc(r.id)}" data-v="*" aria-pressed="false">전체 해제</button></div>`}
@@ -863,7 +906,7 @@ function roleSection(){
   const nm=id=>esc(S.names[id]||(rows.find(r=>r.id===id)||{}).name||id.slice(0,10)+"…");
   const sel=(id,cur)=>`<select data-rolesel="${esc(id)}" aria-label="역할">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${cur===k?"selected":""}>${v}</option>`).join("")}</select>`;
   const admins=rows.filter(r=>r.role==="admin").length;
-  return `<div class="panel roles">${rows.map(r=>`<div class="row" style="flex-direction:column;align-items:stretch"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${nm(r.id)}</b>${r.id===me?`<span class="muted">(나)</span>`:""}<span style="margin-left:auto"></span>${sel(r.id,r.role)}<button class="btn ghost sm" data-roledel="${esc(r.id)}" ${r.role==="admin"&&admins<=1?"disabled title=\"마지막 관리자는 뺄 수 없어요\"":""}>빼기</button></div>
+  return `<details class="help" style="margin-bottom:10px"><summary>역할별로 할 수 있는 일</summary>${roleTable(myRole())}<p class="muted" style="font-size:12px;margin:0">주민 역할은 직원 앱 기록을 볼 수 없어요. 신고는 QR 신고 페이지로 받아요.</p></details><div class="panel roles">${rows.map(r=>`<div class="row" style="flex-direction:column;align-items:stretch"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${nm(r.id)}</b>${r.id===me?`<span class="muted">(나)</span>`:""}<span style="margin-left:auto"></span>${sel(r.id,r.role)}<button class="btn ghost sm" data-roledel="${esc(r.id)}" ${r.role==="admin"&&admins<=1?"disabled title=\"마지막 관리자는 뺄 수 없어요\"":""}>빼기</button></div>
     ${r.role!=="resident"?`<div style="display:flex;gap:8px;align-items:center;margin-top:4px"><span class="muted" style="font-size:12px">담당 ${Array.isArray(r.dongs)&&r.dongs.length?esc(r.dongs.join(" · ")):"전체(미지정)"}</span><button type="button" class="btn ghost sm" data-roledong="${esc(r.id)}" style="margin-left:auto">${S.roleDongEdit===r.id?"닫기":"담당 동"}</button></div>${S.roleDongEdit===r.id?roleDongChips(r):""}`:""}</div>`).join("")}</div>
   ${seen.size?`<h3 style="margin-top:14px">최근 활동했지만 역할이 없는 사용자 <span class="muted">${seen.size}</span></h3><p class="muted" style="margin:-4px 0 8px">역할이 없으면 아무것도 쓸 수 없어요. 점검자로 올리고 "담당 동"을 지정하면 그 점검자의 현장 점검 목록이 담당 행정동으로 좁혀져요.</p><div class="panel roles">${[...seen].map(([id,what])=>`<div class="row"><b>${nm(id)}</b><span class="muted">${what}</span><span style="margin-left:auto"></span>${sel(id,"resident")}</div>`).join("")}</div>`:""}
   <p class="muted" style="margin:10px 0 0">내 사용자 ID: <code>${esc(me||"")}</code> · ${FB?"새 직원은 로그인 화면에서 접근 신청을 남길 수 있어요. 아래 신청 목록을 확인해 승인하세요.":'새 사용자는 공유 설정에서 "참여자"로 초대해야 저장이 돼요.'}</p>
@@ -949,8 +992,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v45-version-info";
+const APP_VER="v46-roles-status";
 const RELEASE_NOTES=[
+  {v:"v46-roles-status",d:"2026-11-04",t:"역할별로 할 수 있는 일(내 권한) 화면 · 주민 신고 처리 상태 조회"},
   {v:"v45-version-info",d:"2026-11-04",t:"버전 정보 화면을 새로 만들고, 철거된 등은 목록·검색·지도에서 숨겨요"},
   {v:"v44-streetlights-20260910",d:"2026-11-04",t:"가로등 대장을 공공데이터(동구 가로등 현황, 2026-09-10 기준)로 바꿨어요"},
   {v:"v43-kakao-waypoints",d:"2026-11-04",t:"방문 계획: 카카오맵에서도 경유지를 넣어 여러 곳 경로를 열어요"},
@@ -1281,7 +1325,7 @@ function vAdmin(){
   ${DEV.field?openList:todayStrip()}
   ${adminMenu(keys)}
   ${DEV.field?"":openList}
-  <p class="muted devmode">화면 방식: <b>${DongguDevice.label(DEV.kind)}</b>${DEV.mode==="auto"?" (자동)":""} <button type="button" class="linkbtn" data-devmode-open>바꾸기</button></p>${verFoot()}${FB&&!can("admin")?DGSecurity.devicePanel()+`<button class="btn ghost sm" id="fbSignOut">로그아웃</button>`:""}`;
+  ${myRoleLine()}<p class="muted devmode">화면 방식: <b>${DongguDevice.label(DEV.kind)}</b>${DEV.mode==="auto"?" (자동)":""} <button type="button" class="linkbtn" data-devmode-open>바꾸기</button></p>${verFoot()}${FB&&!can("admin")?DGSecurity.devicePanel()+`<button class="btn ghost sm" id="fbSignOut">로그아웃</button>`:""}`;
 }
 function vReport(){
   const mine=S.me?S.reports.filter(r=>r.reporterId===S.me):[];
@@ -1682,6 +1726,7 @@ document.addEventListener("click",async e=>{
   if(t.id==="sync"){if(can("inspect")&&ADMIN_SECTIONS.outbox)openAdminSection("outbox");else toast(t.title||"동기화 상태");return}
   if(t.dataset.devmodeOpen!==undefined){devModeChoose();return}
   if(t.closest("[data-verinfo]")){openVersionInfo();return}
+  if(t.closest("[data-myrole]")){openMyRole();return}
   if(t.closest("[data-vercheck]")){verCheck();return}
   if(t.closest("[data-vercopy]")){(async()=>{const txt=verText();try{await navigator.clipboard.writeText(txt);toast("버전 정보를 복사했어요")}catch(e){await dgPrompt("아래 내용을 길게 눌러 복사해 주세요.",{title:"버전 정보",value:txt,multiline:true})}})();return}
   if(t.dataset.camstart!==undefined){startCam();return}

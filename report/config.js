@@ -9,6 +9,7 @@ window.REPORT_CONFIG = {
   mail: "",                          // 이메일 접수 주소. 비우면 이메일 버튼이 숨겨져요
   backend: null,                     // null | "gateway"
   gatewayUrl: "",                   // 배포한 submitCitizenReport HTTPS URL
+  statusUrl: "",                    // 배포한 citizenReportStatus HTTPS URL. 채우면 주민이 접수번호+확인 코드로 처리 단계를 볼 수 있어요
   appCheckSiteKey: "",              // Firebase App Check reCAPTCHA 사이트 키
   allowLocalGateway: false,          // 로컬 에뮬레이터 검사에서만 true
   firestore: { projectId: "", apiKey: "", appId: "", collection: "citizen_reports" },   // 직원 앱의 "QR 신고 가져오기"도 이 값을 써요 (Google 로그인 필요)

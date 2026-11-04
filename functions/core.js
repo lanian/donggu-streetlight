@@ -44,10 +44,35 @@ function consumeLimit(previous, now, max=10, windowMs=3600000) {
   if(current.count>=max)throw new InputError('접수가 잠시 많습니다. 나중에 다시 시도하세요.','resource-exhausted');
   return {start:current.start,count:current.count+1,expiresAt:now+windowMs*2};
 }
+// 주민 처리 상태 조회: 접수번호 + 확인 코드(서버 비밀값으로 만든 6자리). 코드는 저장하지 않고 다시 계산하므로
+// 같은 요청을 다시 보내도 같은 코드가 나오고, 문서가 유출돼도 코드를 알 수 없다.
+const STATUS_ALPHABET='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+function statusCode(secret, id) {
+  const mac=crypto.createHmac('sha256',String(secret)).update('citizen-status:'+id).digest();
+  let out='';for(let i=0;i<6;i++)out+=STATUS_ALPHABET[mac[i]&31];return out;
+}
+function sameCode(a, b) { const x=Buffer.from(String(a)),y=Buffer.from(String(b));return x.length===y.length&&crypto.timingSafeEqual(x,y); }
+function normalizeStatusQuery(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new InputError('접수번호와 확인 코드를 넣어 주세요.');
+  if (Object.keys(input).some(k=>!['receipt','code'].includes(k))) throw new InputError('허용되지 않은 조회 항목입니다.');
+  const receipt=String(input.receipt??'').trim().toUpperCase().replace(/\s+/g,''),code=String(input.code??'').trim().toUpperCase().replace(/[\s-]+/g,'');
+  if(!/^R\d{6}-[0-9A-F]{8}$/.test(receipt))throw new InputError('접수번호 형식을 확인해 주세요. 예: R261104-1A2B3C4D');
+  if(!new RegExp('^['+STATUS_ALPHABET+']{6}$').test(code))throw new InputError('확인 코드 6자리를 확인해 주세요.');
+  return {receipt,code};
+}
+const kstDate=ms=>Number.isFinite(ms)?new Date(ms+9*3600000).toISOString().slice(0,10):'';
+// Only the stage leaves the server: no description, place, photo, contact, staff name or note.
+function publicStatus(citizen, report) {
+  const status=report&&report.status,receipt=citizen.receipt;
+  if(!citizen.imported)return {receipt,stage:'received',label:'접수됐어요',detail:'담당자가 확인하기 전이에요.',updatedOn:kstDate(citizen.at)};
+  if(status==='완료')return {receipt,stage:'done',label:'처리가 끝났어요',detail:'다시 고장 나면 새로 신고해 주세요.',updatedOn:kstDate(report.resolvedAt||report.updatedAt||citizen.importedAt)};
+  if(status==='처리중')return {receipt,stage:'in-progress',label:'처리 중이에요',detail:'현장 확인이나 보수를 진행하고 있어요.',updatedOn:kstDate(report.updatedAt||citizen.importedAt)};
+  return {receipt,stage:'reviewing',label:'담당자가 확인했어요',detail:'처리 순서를 정하고 있어요.',updatedOn:kstDate((report&&report.updatedAt)||citizen.importedAt)};
+}
 const PRIVATE_FIELDS=['contact','photo','lat','lng','acc','ua'];
 function auditSummary(before, after) {
   const changed=[...new Set([...Object.keys(before||{}),...Object.keys(after||{})])].filter(k=>JSON.stringify(before&&before[k])!==JSON.stringify(after&&after[k])).sort();
   const snapshot=value=>value?Object.fromEntries(['role','status','result','lightId','reviewedAt','reviewedBy','assignedTo','revision','imported','privacyPurgedAt'].filter(k=>value[k]!==undefined).map(k=>[k,value[k]])):null;
   return {action:!before?'create':!after?'delete':'update',changedFields:changed,before:snapshot(before),after:snapshot(after)};
 }
-module.exports={InputError,hash,text,identity,days,normalizeReport,normalizePhoto,consumeLimit,PRIVATE_FIELDS,auditSummary};
+module.exports={InputError,hash,text,identity,days,normalizeReport,normalizePhoto,consumeLimit,PRIVATE_FIELDS,auditSummary,STATUS_ALPHABET,statusCode,sameCode,normalizeStatusQuery,publicStatus};
