@@ -1015,8 +1015,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v54-resident-entry";
+const APP_VER="v55-direct-report";
 const RELEASE_NOTES=[
+  {v:"v55-direct-report",d:"2026-11-05",t:"주민 고장 신고가 신고 페이지에서 바로 접수돼요(신고함 › QR 신고 가져오기)"},
   {v:"v54-resident-entry",d:"2026-11-04",t:"로그인 전·직원 승인 전에도 주민 고장 신고로 바로 갈 수 있어요"},
   {v:"v53-shared-mode",d:"2026-11-04",t:"공유 운영 모드: 구청 Google 계정으로 로그인하고 모든 직원이 같은 기록을 써요"},
   {v:"v52-foundation",d:"2026-11-04",t:"새 버전 설치 때 예전 파일이 섞이지 않아요 · 대장 교체에 주소 열 반영 · 전송 자동 재시도"},
