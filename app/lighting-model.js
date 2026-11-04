@@ -9,8 +9,12 @@
   'use strict';
   const DAY = 86400000, EARTH = 6371000, RAD = Math.PI / 180;
   const STRENGTH = Object.freeze({ low: .6, medium: 1, high: 1.4 });
+  /* 가림·가설물 (kind 'obstruction'): within its radius the managed lights' relative index is cut by this share.
+     Overlapping obstructions do not stack; the strongest one applies. Supplemental sources are not reduced. */
+  const OBSTRUCTION = Object.freeze({ low: .25, medium: .5, high: .75 });
+  const OBSTRUCTION_CATEGORIES = Object.freeze(['construction', 'tree', 'sign', 'structure']);
   const ENUMS = Object.freeze({
-    kind: ['source', 'observation'], category: ['other_public', 'private', 'shop', 'building', 'unknown', 'field'],
+    kind: ['source', 'observation', 'obstruction'], category: ['other_public', 'private', 'shop', 'building', 'unknown', 'field', ...OBSTRUCTION_CATEGORIES],
     strength: Object.keys(STRENGTH), status: ['on', 'off', 'unknown'],
     level: ['bright', 'adequate', 'dark', 'unknown'], schedule: ['always', 'hours', 'unknown']
   });
@@ -45,8 +49,9 @@
   // Only domain fields are returned. The command layer supplies IDs, revisions and authors.
   function normalizeRecord(input, options = {}) {
     if (!object(input)) fail('조명 근거 기록을 확인해 주세요.');
-    const now = nowValue(options), kind = member(input.kind, 'kind');
-    const schedule = member(input.schedule, 'schedule', 'unknown');
+    const now = nowValue(options), kind = member(input.kind, 'kind'), obstruction = kind === 'obstruction';
+    // an obstruction is there day and night until it is removed: no lighting schedule, status or brightness level
+    const schedule = obstruction ? 'always' : member(input.schedule, 'schedule', 'unknown');
     const startMinute = number(input.startMinute === undefined ? 1080 : input.startMinute, 0, 1439, '시작 시각', true);
     const endMinute = number(input.endMinute === undefined ? 360 : input.endMinute, 0, 1439, '종료 시각', true);
     if (schedule === 'hours' && startMinute === endMinute) fail('시간 범위의 시작과 종료를 다르게 선택해 주세요.');
@@ -57,18 +62,20 @@
     const emptyLux = input.lux == null || (typeof input.lux === 'string' && !input.lux.trim());
     const record = {
       kind, label: text(input.label, 100, '이름', true),
-      category: member(input.category, 'category', kind === 'observation' ? 'field' : 'unknown'),
+      category: member(input.category, 'category', kind === 'observation' ? 'field' : obstruction ? 'structure' : 'unknown'),
       operator: text(input.operator, 100, '관리 주체'),
       lat: number(input.lat, -90, 90, '위도'), lng: number(input.lng, -180, 180, '경도'),
-      radius: number(input.radius, 5, kind === 'source' ? 80 : 30, '영향 범위'),
-      strength: member(input.strength, 'strength', 'medium'), status: member(input.status, 'status', 'unknown'),
-      level: member(input.level, 'level', 'unknown'), schedule, startMinute, endMinute, observedAt,
-      validDays: number(input.validDays === undefined ? (kind === 'source' ? 90 : 30) : input.validDays, 1, 365, '유효 기간', true),
+      radius: number(input.radius, 5, kind === 'observation' ? 30 : 80, '영향 범위'),
+      strength: member(input.strength, 'strength', 'medium'), status: obstruction ? 'unknown' : member(input.status, 'status', 'unknown'),
+      level: obstruction ? 'unknown' : member(input.level, 'level', 'unknown'), schedule, startMinute, endMinute, observedAt,
+      validDays: number(input.validDays === undefined ? (kind === 'source' ? 90 : obstruction ? 180 : 30) : input.validDays, 1, 365, '유효 기간', true),
       nightConfirmed: bool(input.nightConfirmed, '야간 현장'),
       lux: emptyLux ? null : number(input.lux, 0, 200000, '실측 조도'),
       instrument: text(input.instrument, 100, '측정 장비', !emptyLux), note: text(input.note, 1000, '메모'),
       linkedLightId, distinct: bool(input.distinct, '별개 광원'), removed: bool(input.removed, '보관')
     };
+    if (obstruction !== OBSTRUCTION_CATEGORIES.includes(record.category)) fail(obstruction ? '가림·가설물 종류를 선택해 주세요.' : '광원·관찰에는 가림·가설물 종류를 쓸 수 없어요.');
+    if (obstruction && (record.lux !== null || record.linkedLightId || record.distinct)) fail('가림·가설물에는 실측 조도나 대장 연결을 넣지 않아요.');
     const provenanceKeys = ['sourceAgency', 'sourceRecordId', 'sourceDataset', 'sourceUpdatedAt', 'importedAt', 'importBatchId'];
     if (provenanceKeys.some(key => Object.prototype.hasOwnProperty.call(input, key))) {
       if (kind !== 'source' || !provenanceKeys.every(key => Object.prototype.hasOwnProperty.call(input, key))) fail('외부 자료의 출처 항목을 모두 확인해 주세요.');
@@ -109,6 +116,7 @@
     if (record.removed) reason = 'removed';
     else if (future) reason = 'future';
     else if (stale) reason = 'stale';
+    else if (record.kind === 'obstruction') reason = ''; // present at any hour; only removal, a future date or the review deadline matter
     else if (!record.nightConfirmed) reason = 'not_night_confirmed';
     else if (record.schedule === 'unknown') reason = 'unknown_schedule';
     else if (!inSchedule) reason = 'outside_schedule';
@@ -227,6 +235,7 @@
       records: Object.freeze(entries.filter(e => e.record.kind).map(e => e.record)),
       sourceCount: sources.length, activeSourceCount: sources.filter(e => !e.excluded && e.state.active).length,
       observationCount: entries.filter(e => e.record.kind === 'observation').length,
+      obstructionCount: entries.filter(e => e.record.kind === 'obstruction').length,
       invalidRecords: Object.freeze(invalidRecords.map(Object.freeze)), invalidCount: invalidRecords.length,
       duplicateCount: sources.filter(e => e.excluded === 'duplicate_source').length
     });
@@ -240,8 +249,8 @@
     if (!validPoint(point)) fail('검토 지점의 좌표를 확인해 주세요.');
     if (!Number.isFinite(baseIndex) || baseIndex < 0) fail('기존 상대 모델 지수를 확인해 주세요.');
     if (options.registryNearby !== undefined && typeof options.registryNearby !== 'boolean') fail('주변 대장 여부를 확인해 주세요.');
-    const sources = [], hints = [], observations = [];
-    let external = 0, staleCount = 0;
+    const sources = [], hints = [], observations = [], obstructions = [];
+    let external = 0, staleCount = 0, reduction = 0;
     for (const { entry, d } of internal.spatial.near(position(point), internal.maxRadius)) {
       const record = entry.record, state = entry.state;
       if (d > record.radius + 1e-7) continue;
@@ -249,20 +258,36 @@
       const reason = entry.excluded || state.reason;
       if (reason) { hints.push({ id: record.id, label: record.label, reason }); continue; }
       if (record.kind === 'observation') { observations.push(record); continue; }
+      if (record.kind === 'obstruction') { const share = OBSTRUCTION[record.strength]; reduction = Math.max(reduction, share); obstructions.push({ id: record.id, label: record.label, category: record.category, reduction: share }); continue; }
       const contribution = STRENGTH[record.strength] / (1 + (d / (.6 * record.radius)) ** 2);
       external += contribution;
       sources.push({ id: record.id, label: record.label, operator: record.operator, category: record.category, contribution });
     }
     const dark = observations.some(o => o.level === 'dark'), bright = observations.some(o => o.level === 'bright'), adequate = observations.some(o => o.level === 'adequate');
     const fieldLevel = dark && (bright || adequate) ? 'conflict' : dark ? 'dark' : bright ? 'bright' : adequate ? 'adequate' : null;
-    const adjusted = baseIndex + external;
+    // base is the registry index after obstructions; registryBase keeps the unobstructed value for the record
+    const base = baseIndex * (1 - reduction), adjusted = base + external;
     const classification = fieldLevel === 'conflict' ? 'conflict' : fieldLevel === 'dark' ? 'observed_dark' : fieldLevel ? 'observed_bright'
-      : baseIndex < context.weak && adjusted >= context.weak && external > 0 ? 'external_supported'
-        : adjusted >= context.weak ? 'model_lit' : options.registryNearby === false ? 'data_gap' : 'model_weak';
+      : base < context.weak && adjusted >= context.weak && external > 0 ? 'external_supported'
+        : adjusted >= context.weak ? 'model_lit' : reduction > 0 && baseIndex >= context.weak ? 'obstructed' : options.registryNearby === false ? 'data_gap' : 'model_weak';
     sources.sort((a, b) => b.contribution - a.contribution || compareText(a.id, b.id) || compareText(a.label, b.label));
     hints.sort((a, b) => compareText(a.reason, b.reason) || compareText(a.id, b.id) || compareText(a.label, b.label));
     observations.sort((a, b) => b.observedAt - a.observedAt || compareText(a.id, b.id));
-    return { base: baseIndex, external, adjusted, sources, hints, observations, fieldLevel, classification, staleCount, unit: 'relative_index' };
+    obstructions.sort((a, b) => b.reduction - a.reduction || compareText(a.id, b.id));
+    return { base, registryBase: baseIndex, reduction, external, adjusted, sources, hints, observations, obstructions, fieldLevel, classification, staleCount, unit: 'relative_index' };
+  }
+  /* the strongest active obstruction share at a point (0 when none), for callers that screen before evaluating */
+  function obstructionAt(context, point) {
+    const internal = contexts.get(context);
+    if (!internal) fail('이 모델에서 생성한 검토 문맥이 필요해요.');
+    if (!validPoint(point)) return 0;
+    let reduction = 0;
+    for (const { entry, d } of internal.spatial.near(position(point), internal.maxRadius)) {
+      const record = entry.record;
+      if (record.kind !== 'obstruction' || d > record.radius + 1e-7 || entry.excluded || entry.state.reason) continue;
+      reduction = Math.max(reduction, OBSTRUCTION[record.strength]);
+    }
+    return reduction;
   }
 
   // Split one straight road fragment at every nearby evidence-circle boundary. Callers
@@ -324,5 +349,5 @@
       return { start: toPoint(start), end: toPoint(end), point: toPoint((start + end) / 2), fraction: end - start };
     });
   }
-  return Object.freeze({ normalizeRecord, normalize: normalizeRecord, createContext, evaluate, splitSegment, recordState, minuteOfKst, STRENGTH });
+  return Object.freeze({ normalizeRecord, normalize: normalizeRecord, createContext, evaluate, obstructionAt, splitSegment, recordState, minuteOfKst, STRENGTH, OBSTRUCTION, OBSTRUCTION_CATEGORIES });
 });

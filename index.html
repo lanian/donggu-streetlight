@@ -2695,37 +2695,42 @@ async function roadsLoad(onStatus){
   const say=t=>onStatus&&onStatus(t);
   const cached=await idbGet("roads");if(cached&&cached.ver===ROADS_VER&&cached.ways&&cached.ways.length){ROADS=cached;adongIndex();return ROADS}
   if(db&&S.me!=="local"){say("공유 저장소에서 도로망을 읽는 중…");try{const snap=await db.collection("roads").get();const meta=snap.docs.find(d=>d.id==="meta");const md=meta?meta.data():null;
-    if(md&&md.ver===ROADS_VER){const parts=snap.docs.filter(d=>d.id.startsWith("part-")&&+d.id.slice(5)<(md.parts||0)).sort((a,b)=>+a.id.slice(5)-+b.id.slice(5));const ways=[],areas=[];let bounds=[],gu=null;for(const d of parts){const x=d.data();ways.push(...(x.ways||[]));areas.push(...(x.areas||[]));if(x.bounds)bounds=x.bounds;if(x.gu)gu=x.gu}
-      if(ways.length){ROADS={ver:ROADS_VER,ways,areas,bounds,gu,at:md.at||0,src:"db"};idbSet("roads",ROADS);adongIndex();return ROADS}}}catch(e){}}
+    if(md&&md.ver===ROADS_VER){const parts=snap.docs.filter(d=>d.id.startsWith("part-")&&+d.id.slice(5)<(md.parts||0)).sort((a,b)=>+a.id.slice(5)-+b.id.slice(5));const ways=[],areas=[],pois=[];let bounds=[],gu=null;for(const d of parts){const x=d.data();ways.push(...(x.ways||[]));areas.push(...(x.areas||[]));pois.push(...(x.pois||[]));if(x.bounds)bounds=x.bounds;if(x.gu)gu=x.gu}
+      if(ways.length){ROADS={ver:ROADS_VER,ways,areas,bounds,gu,pois:md.pois!=null?pois:undefined,at:md.at||0,src:"db"};idbSet("roads",ROADS);adongIndex();return ROADS}}}catch(e){}}
   say("OpenStreetMap에서 동구 도로망을 받는 중… (휴대폰 데이터 약 4MB, 수 초에서 1분)");
   const bb=ROAD_BBOX.join(",");
   const q=`[out:json][timeout:120];(way["highway"~"^(${ROAD_TYPES})$"](${bb});
     way["landuse"="residential"]["residential"="apartments"](${bb});way["landuse"="residential"]["name"~"아파트"](${bb});relation["landuse"="residential"]["residential"="apartments"](${bb});
     way["amenity"~"^(school|university|college|hospital)$"](${bb});relation["amenity"~"^(school|university|college|hospital)$"](${bb});
     way["natural"~"^(wood|scrub)$"](${bb});way["landuse"~"^(forest|cemetery)$"](${bb});relation["natural"="wood"](${bb});relation["landuse"="forest"](${bb});relation["boundary"="national_park"](${bb});
-    relation["boundary"="administrative"]["admin_level"~"^(6|7|8|9|10)$"](${bb}););out geom;`;
+    relation["boundary"="administrative"]["admin_level"~"^(6|7|8|9|10)$"](${bb});
+    node["highway"~"^(crossing|bus_stop)$"](${bb});node["amenity"~"^(school|kindergarten|childcare)$"](${bb});node["public_transport"="platform"]["bus"="yes"](${bb}););out geom;`;
   let data=null,err=null;
   for(const ep of ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"]){
     try{const r=await fetch(ep,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"}});if(r.ok){data=await r.json();break}err=new Error("HTTP "+r.status)}catch(e){err=e}
   }
   if(!data)throw err||new Error("overpass");
-  const ways=[],areas=[],bounds=[];let gu=null,geometryWarnings=0;
+  const ways=[],areas=[],bounds=[],pois=[];let gu=null,geometryWarnings=0;
+  // 횡단보도·버스정류장·학교·어린이 시설: candidates near them are checked first (the brightness index is unchanged)
+  const poiKind=t=>t.highway==="crossing"?"crossing":t.highway==="bus_stop"||t.public_transport==="platform"&&t.bus==="yes"?"bus":/^(school|kindergarten|childcare)$/.test(t.amenity||"")?"school":"";
+  const poiArea=(t,polys)=>{const k=poiKind(t);if(k!=="school")return;for(const p of polys){const o=p.outer||[];if(o.length<3)continue;let la=0,lo=0;for(const [a,b] of o){la+=a;lo+=b}la/=o.length;lo/=o.length;let r=0;for(const [a,b] of o)r=Math.max(r,distM({lat:la,lng:lo},{lat:a,lng:b}));pois.push({t:k,name:t["name:ko"]||t.name||"",lat:+la.toFixed(6),lng:+lo.toFixed(6),r:Math.round(r)})}};
   const areaKind=t=>!t?"":(t.natural||t.landuse==="forest"||t.landuse==="cemetery"||t.boundary==="national_park")?"forest":(t.landuse==="residential"||t.amenity)?"apt":"";
   for(const el of (data.elements||[])){const t=el.tags||{};
+    if(el.type==="node"){const k=poiKind(t);if(k&&Number.isFinite(el.lat)&&Number.isFinite(el.lon))pois.push({t:k,name:t["name:ko"]||t.name||"",lat:+el.lat.toFixed(6),lng:+el.lon.toFixed(6)});continue}
     if(el.type==="way"&&el.geometry&&el.geometry.length>1){
       if(t.highway){const w={id:el.id,name:t["name:ko"]||t.name||"",type:t.highway,pts:el.geometry.map(g=>[+g.lat.toFixed(6),+g.lon.toFixed(6)])};if(t.service)w.sv=t.service;if(t.access==="private")w.priv=1;ways.push(w)}
-      else{const k=areaKind(t);if(k){const g=DongguField.relationPolygons([{type:"way",role:"outer",geometry:el.geometry}]);if(g.incomplete){geometryWarnings++;continue}for(const p of g.polygons)areas.push({t:k,name:t.name||"",pts:p.outer,holes:p.holes})}}
+      else{const k=areaKind(t);if(k){const g=DongguField.relationPolygons([{type:"way",role:"outer",geometry:el.geometry}]);if(g.incomplete){geometryWarnings++;continue}for(const p of g.polygons)areas.push({t:k,name:t.name||"",pts:p.outer,holes:p.holes});poiArea(t,g.polygons)}}
     }else if(el.type==="relation"&&el.members){
       const g=DongguField.relationPolygons(el.members);if(g.incomplete){geometryWarnings++;continue}if(!g.polygons.length)continue;
       if(t.boundary==="administrative"){const nm=(t["name:ko"]||t.name||"").trim();if(ADONGS.includes(nm))bounds.push({name:nm,polygons:g.polygons});else if(/^동구$/.test(nm)&&!gu)gu={name:nm,polygons:g.polygons}}
-      else{const k=areaKind(t);if(k)for(const p of g.polygons)areas.push({t:k,name:t.name||"",pts:p.outer,holes:p.holes})}
+      else{const k=areaKind(t);if(k)for(const p of g.polygons)areas.push({t:k,name:t.name||"",pts:p.outer,holes:p.holes});poiArea(t,g.polygons)}
     }
   }
   if(!ways.length)throw new Error("empty");
-  ROADS={ver:ROADS_VER,ways,areas,bounds,gu,geometryWarnings,at:Date.now(),src:"osm"};idbSet("roads",ROADS);adongIndex();
-  if(db&&S.canWrite&&S.me!=="local"){say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");try{const chunks=[];let cur={ways:[],areas:[]},size=0;const push=(key,x)=>{const s=JSON.stringify(x).length+1;if(size+s>190000){chunks.push(cur);cur={ways:[],areas:[]};size=0}cur[key].push(x);size+=s};
-    for(const w of ways)push("ways",w);for(const a of areas)push("areas",a);if(cur.ways.length||cur.areas.length)chunks.push(cur);chunks[0].bounds=bounds;chunks[0].gu=gu;
-    for(let i=0;i<chunks.length;i++)await db.doc("roads/part-"+i).set(chunks[i]);await db.doc("roads/meta").set({ver:ROADS_VER,at:ROADS.at,parts:chunks.length,count:ways.length,areas:areas.length,attribution:"© OpenStreetMap contributors (ODbL)"})}catch(e){}}
+  ROADS={ver:ROADS_VER,ways,areas,bounds,gu,pois,geometryWarnings,at:Date.now(),src:"osm"};idbSet("roads",ROADS);adongIndex();
+  if(db&&S.canWrite&&S.me!=="local"){say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");try{const chunks=[];let cur={ways:[],areas:[],pois:[]},size=0;const push=(key,x)=>{const s=JSON.stringify(x).length+1;if(size+s>190000){chunks.push(cur);cur={ways:[],areas:[],pois:[]};size=0}cur[key].push(x);size+=s};
+    for(const w of ways)push("ways",w);for(const a of areas)push("areas",a);for(const p of pois)push("pois",p);if(cur.ways.length||cur.areas.length||cur.pois.length)chunks.push(cur);chunks[0].bounds=bounds;chunks[0].gu=gu;
+    for(let i=0;i<chunks.length;i++)await db.doc("roads/part-"+i).set(chunks[i]);await db.doc("roads/meta").set({ver:ROADS_VER,at:ROADS.at,parts:chunks.length,count:ways.length,areas:areas.length,pois:pois.length,attribution:"© OpenStreetMap contributors (ODbL)"})}catch(e){}}
   return ROADS;
 }
 /* assign every light its 행정동 from the boundary polygons that came with the road network */

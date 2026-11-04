@@ -288,15 +288,18 @@ service cloud.firestore {
       d.keys().hasAll(['originKind','originId','originPointId','positionAccuracy']) && d.kind=='observation'
       && d.originKind in ['patrol','task'] && lightingText(d.originId,180) && d.originId.size()>0
       && lightingText(d.originPointId,180) && d.positionAccuracy is number && d.positionAccuracy>=0 && d.positionAccuracy<=10000);}
+    // 가림·가설물 (kind obstruction) uses only its own categories and is always present: no schedule, status, level, lux or registry link
     function validLighting(data){
       return data.keys().hasOnly(['schemaVersion','kind','label','category','operator','lat','lng','radius','strength','status','level',
         'schedule','startMinute','endMinute','observedAt','validDays','nightConfirmed','lux','instrument','note','linkedLightId','distinct','removed',
         'createdAt','createdBy','updatedAt','updatedBy','revision','operationId','sourceAgency','sourceRecordId','sourceDataset','sourceUpdatedAt','importedAt','importBatchId','originKind','originId','originPointId','positionAccuracy'])
-        && data.schemaVersion==1 && data.kind in ['source','observation']
+        && data.schemaVersion==1 && data.kind in ['source','observation','obstruction']
         && lightingText(data.label,100) && data.label.size()>0 && lightingText(data.operator,100)
-        && data.category in ['other_public','private','shop','building','unknown','field']
+        && data.category in ['other_public','private','shop','building','unknown','field','construction','tree','sign','structure']
+        && ((data.kind=='obstruction')==(data.category in ['construction','tree','sign','structure']))
+        && (data.kind!='obstruction' || (data.schedule=='always' && data.status=='unknown' && data.level=='unknown' && data.lux==null && data.linkedLightId=='' && data.distinct==false))
         && data.lat is number && data.lat>=-90 && data.lat<=90 && data.lng is number && data.lng>=-180 && data.lng<=180
-        && data.radius is number && data.radius>=5 && data.radius<=(data.kind=='source'?80:30)
+        && data.radius is number && data.radius>=5 && data.radius<=(data.kind=='observation'?30:80)
         && data.strength in ['low','medium','high'] && data.status in ['on','off','unknown']
         && data.level in ['bright','adequate','dark','unknown'] && data.schedule in ['always','hours','unknown']
         && data.startMinute is int && data.startMinute>=0 && data.startMinute<=1439

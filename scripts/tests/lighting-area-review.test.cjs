@@ -221,7 +221,33 @@ test('roads outside the 동구 boundary are not predicted and their length is re
   assert.equal(g.roadsReview().length, 0);
   const h = fixture({ ways: [], records: [observation(xy(-150))] }); h.roads.gu = gu;
   assert.equal(h.roadsReview().length, 1, 'the same observation inside 동구 is kept');
-  // without any boundary the 동구 행정동 boundaries are used together
-  const k = fixture({ ways: [road('inside', -100), road('outside', 120)], bounds: [{ name: '학동', polygons: gu.polygons }] });
+  // without the 동구 boundary all 13 행정동 boundaries together stand in for it
+  const thirteen = Array.from({ length: 13 }, (_, i) => ({ name: '시험' + i + '동', polygons: i ? [] : gu.polygons }));
+  const k = fixture({ ways: [road('inside', -100), road('outside', 120)], bounds: thirteen });
   assert.deepEqual([...new Set(k.roadsReview().map(c => c.wayId))], ['inside']); assert.equal(k.roadsReview().skip.guSource, 'dongs');
+  // with only some 행정동 boundaries nothing is cut by them (the 300 m registry rule applies instead)
+  const partial = fixture({ lights: [light('near', 120)], ways: [road('inside', -100), road('outside', 120)], bounds: thirteen.slice(0, 5) });
+  assert.equal(partial.roadsReview().skip.guSource, 'registry');
+  assert.ok(partial.roadsReview().some(c => c.wayId === 'outside'), 'a road beside a registered light is kept without a full boundary');
+});
+
+test('a 가림·가설물 turns a lit stretch and a well-spaced pair into checked candidates; nearby crossings raise priority', () => {
+  const lights = [-54, -18, 18, 54].map((x, i) => light('lit-' + i, x));
+  const block = (extra = {}) => ({ id: 'scaffold', kind: 'obstruction', label: '신축 공사 가림막', category: 'construction', operator: '', ...xy(0), radius: 20, strength: 'high', observedAt: NOW - 1000, validDays: 180, note: '', removed: false, revision: 1, ...extra });
+  assert.equal(fixture({ lights }).roadsReview().length, 0, 'well lit without the obstruction');
+  const roads = fixture({ lights, records: [block()] }).roadsReview();
+  assert.equal(roads.length, 1); assert.equal(roads[0].context.classification, 'obstructed');
+  assert.ok(roads[0].len >= 24 && roads[0].len <= 41, 'only the obstructed span: ' + roads[0].len);
+  assert.deepEqual(copy(roads[0].context.obstructions.map(o => o.id)), ['scaffold']); assert.ok(roads[0].context.registryBase > roads[0].context.base);
+  const pairsBefore = fixture({ lights, ways: [] }).pairsReview();
+  assert.equal(pairsBefore.length, 0);
+  const pairs = fixture({ lights, ways: [], records: [block()] }).pairsReview();
+  assert.ok(pairs.length >= 1 && pairs.every(c => c.context.obstructions.length), 'pairs whose midpoint is blocked are reviewed despite their spacing');
+  // the same candidate next to a crossing gets the crossing listed and a higher score; the brightness index stays the same
+  const plain = fixture({ lights, records: [block()] }).roadsReview()[0];
+  const near = fixture({ lights, records: [block()] }); near.roads.pois = [{ t: 'crossing', name: '', ...xy(5, 3) }, { t: 'bus', name: '동구청', ...xy(200) }];
+  const withPoi = near.roadsReview()[0];
+  assert.deepEqual(copy(withPoi.pois).map(p => p.t), ['crossing']); assert.ok(withPoi.pois[0].d <= 30);
+  assert.equal(withPoi.score, plain.score + 25); assert.equal(withPoi.context.base, plain.context.base);
+  assert.deepEqual(copy(plain.pois), [], 'no POI data means no bonus');
 });

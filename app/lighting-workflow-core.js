@@ -74,7 +74,7 @@
   }
   /* One archived candidate. Values are rounded and empty fields left out so a whole-district review fits
      the 300,000-character archive (about 190 characters a row instead of 350). A missing length,
-     sourceIds, observationIds or scopeException means none; zero coverage figures are left out too. */
+     sourceIds, observationIds, obstructionIds, pois or scopeException means none; zero coverage figures are left out too. */
   const round = (value, digits) => { const f = 10 ** digits; return Math.round(value * f) / f; };
   function archiveCandidate(c) {
     const e = c.context, base = round(e.base, 4), adjusted = Math.max(base, round(e.adjusted, 4)), coverage = {};
@@ -84,6 +84,8 @@
     Object.assign(row, { classification: e.classification, base, adjusted, coverage });
     const sources = (e.sources || []).map(x => x.id), observations = (e.observations || []).map(x => x.id);
     if (sources.length) row.sourceIds = sources; if (observations.length) row.observationIds = observations; if (c.scopeException?.length) row.scopeException = c.scopeException;
+    const obstructions = (e.obstructions || []).map(x => x.id); if (obstructions.length) { row.obstructionIds = obstructions; row.registryBase = Math.max(base, round(e.registryBase ?? e.base, 4)); }
+    if (c.pois?.length) row.pois = c.pois.map(p => p.t + ':' + p.d);
     return row;
   }
   /* When one archive cannot hold a whole-district review, it is kept as one archive per 법정동 instead:
