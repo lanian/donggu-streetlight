@@ -130,6 +130,19 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
     assert.equal(routeUrl.searchParams.get('waypoints'), ahead.slice(0, 5).map(s => s.lat + ',' + s.lng).join('|'), 'the five before it are waypoints in order');
     assert.equal(routeUrl.searchParams.get('travelmode'), 'walking');
     assert.match(await page.locator('.dg-plan p').first().textContent(), /남은 8곳 약 [\d.]+k?m\(내 위치부터\)/);
+    // 카카오맵 app: my position as the start (sp), the first five open stops as vp, vp2 … vp5, the sixth as ep, in order
+    await page.evaluate(() => { window.__opened = []; });
+    await page.locator('[data-dg="plan-route-ahead"]').click();
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#dgDialog [data-dgdlg-choice]')].map(b => b.firstChild.textContent.trim())), ['네이버 지도 · 차량', '카카오맵 · 차량', '카카오맵 · 도보', '구글 지도 · 차량', '구글 지도 · 도보']);
+    assert.match(await page.locator('#dgDialog [data-dgdlg-choice]', { hasText: '카카오맵 · 차량' }).textContent(), /내 위치에서 출발 · 경유지 5곳/);
+    await page.locator('#dgDialog [data-dgdlg-choice]', { hasText: '카카오맵 · 차량' }).click();
+    const kakao = (await page.evaluate(() => window.__opened))[0];
+    assert.ok(kakao.startsWith('kakaomap://route?'), kakao);
+    const kq = new URLSearchParams(kakao.split('?')[1]);
+    const pos = await page.evaluate(() => DGOperations.state.pos);
+    assert.equal(kq.get('sp'), pos.lat + ',' + pos.lng, 'the route starts at my position');
+    assert.deepEqual(['vp', 'vp2', 'vp3', 'vp4', 'vp5'].map(k => kq.get(k)), ahead.slice(0, 5).map(s => s.lat + ',' + s.lng), 'five waypoints in plan order');
+    assert.equal(kq.get('ep'), ahead[5].lat + ',' + ahead[5].lng); assert.equal(kq.get('by'), 'car'); assert.equal(kq.get('vp6'), null);
 
     // 7. the plan survives a reload, including the auto-completion rule
     checks.push('plan persists');

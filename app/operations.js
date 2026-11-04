@@ -364,7 +364,7 @@
   // a stop counts as done when it was ticked, or when the light was inspected after the plan was made
   const stopDone = (plan, s) => !!s.visited || (Number(api.byId(s.id)?.lastInspected) || 0) >= (plan.createdAt || 0);
   function relegs(plan) { C.planLegs(plan); if (plan.origin && plan.stops[0]) plan.startDistance = Math.round(C.distance(plan.origin, plan.stops[0])); return plan; }
-  const ROUTE_STOPS = 6; // stops handed to a map app at once (네이버 지도 takes 5 waypoints + the destination)
+  const ROUTE_STOPS = 6; // stops handed to a map app at once (네이버 지도 and 카카오맵 each take 5 waypoints + the destination)
   /* the open stops still ahead, in plan order, and their straight-line length (from my position when known) */
   function remaining(plan, done) {
     const open = plan.stops.filter((s, i) => !done[i]);
@@ -379,8 +379,17 @@
     const dest = ahead[ahead.length - 1], via = ahead.slice(0, -1), name = s => encodeURIComponent(s.code || '방문지'), ll = s => s.lat + ',' + s.lng;
     const naver = mode => 'nmap://route/' + mode + '?dlat=' + dest.lat + '&dlng=' + dest.lng + '&dname=' + name(dest) + via.map((s, i) => '&v' + (i + 1) + 'lat=' + s.lat + '&v' + (i + 1) + 'lng=' + s.lng + '&v' + (i + 1) + 'name=' + name(s)).join('') + '&appname=lanian.github.io';
     const google = mode => 'https://www.google.com/maps/dir/?api=1&destination=' + ll(dest) + (via.length ? '&waypoints=' + encodeURIComponent(via.map(ll).join('|')) : '') + '&travelmode=' + mode;
-    const options = [{ value: naver('car'), label: '네이버 지도 · 차량', hint: '앱이 설치된 경우 · 경유지 ' + via.length + '곳' }, { value: google('driving'), label: '구글 지도 · 차량' }, { value: google('walking'), label: '구글 지도 · 도보' }];
-    const url = root.DGDialog ? await root.DGDialog.choose(ahead.map(s => s.code).join(' → '), { title: '다음 ' + ahead.length + '곳을 한 경로로 열까요?', options }) : options[1].value;
+    // 카카오맵 app route: sp (start) is required and takes coordinates only, waypoints vp, vp2 … vp5 (none for public transit).
+    // The start is my position when known; otherwise the first stop becomes the start and the rest stay waypoints.
+    const field = !root.DEV || root.DEV.field;
+    if (field && !state.pos) await locate();
+    const start = state.pos || null, kVia = start ? via : via.slice(1), kStart = start || ahead[0];
+    const kakao = mode => 'kakaomap://route?sp=' + ll(kStart) + kVia.map((s, i) => '&vp' + (i ? i + 1 : '') + '=' + ll(s)).join('') + '&ep=' + ll(dest) + '&by=' + mode;
+    const kakaoHint = (start ? '내 위치에서 출발' : ahead.length > 1 ? '위치를 몰라 ' + (ahead[0].code || '첫 방문지') + '에서 출발' : '') + ' · 경유지 ' + kVia.length + '곳';
+    // phone/tablet: navigation apps (app links only work where the app is installed); PC: web maps only
+    const options = field ? [{ value: naver('car'), label: '네이버 지도 · 차량', hint: '앱이 설치된 경우 · 경유지 ' + via.length + '곳' }, ...(ahead.length > 1 ? [{ value: kakao('car'), label: '카카오맵 · 차량', hint: '앱이 설치된 경우 · ' + kakaoHint }, { value: kakao('foot'), label: '카카오맵 · 도보', hint: '앱이 설치된 경우 · ' + kakaoHint }] : []), { value: google('driving'), label: '구글 지도 · 차량' }, { value: google('walking'), label: '구글 지도 · 도보' }]
+      : [{ value: google('driving'), label: '구글 지도 (웹) · 차량', hint: '경유지 ' + via.length + '곳 · 네이버·카카오 경유지 경로는 휴대폰 앱에서 열려요' }, { value: google('walking'), label: '구글 지도 (웹) · 도보' }];
+    const url = root.DGDialog ? await root.DGDialog.choose(ahead.map(s => s.code).join(' → '), { title: '다음 ' + ahead.length + '곳을 한 경로로 열까요?', options }) : options.find(o => o.value.startsWith('https:')).value;
     if (url) root.open(url, '_blank', 'noopener');
   }
   function dueView() {
