@@ -225,7 +225,7 @@
       let jobs = review.historyJobs || (review.historyJob ? [review.historyJob] : null);
       if (!jobs) {
         const grid = api.lightingGrid(), configuration = api.lightingModel();
-        const inputs = { lights: copy(api.state().lights), records: copy(root.DGLighting.state.records), roads: copy(api.lightingRoads() || null), model: copy(configuration.model), calibration: copy(configuration.calibration), baseAt: point => { const p = grid.toXY(point); return grid.lightAt(p.x, p.y); } };
+        const inputs = { lights: copy(api.state().lights.filter(l => !l.posApprox)), /* distribution-box positions are not sources */ records: copy(root.DGLighting.state.records), roads: copy(api.lightingRoads() || null), model: copy(configuration.model), calibration: copy(configuration.calibration), baseAt: point => { const p = grid.toXY(point); return grid.lightAt(p.x, p.y); } };
         const whole = copy(review); let runs;
         try { runs = [await C.buildRun({ ...inputs, review: whole })]; } catch (error) {
           // a whole-district review that does not fit one archive is kept as one archive per 법정동 (all of them or none)

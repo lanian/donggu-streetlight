@@ -39,7 +39,8 @@
     });
     return loading;
   }
-  function context(options = {}) { return root.DGLightingModel.createContext(state.records, api.state().lights, options); }
+  // lights placed at their distribution box (posApprox) would pile dozens of sources on one point: not used for prediction
+  function context(options = {}) { return root.DGLightingModel.createContext(state.records, api.state().lights.filter(l => !l.posApprox), options); }
   function heading(title) { return '<div class="sheet-head"><div><h3>' + E(title) + '</h3><p class="muted">관리 대장과 별도로 기록해 밝기 검토에 사용해요.</p></div><button class="x" data-close aria-label="닫기">×</button></div>'; }
   function option(values, selected) { return Object.entries(values).map(([value, label]) => '<option value="' + E(value) + '"' + (value === selected ? ' selected' : '') + '>' + E(label) + '</option>').join(''); }
   function field(id, label, value, attributes = '') { return '<label class="f" for="' + id + '">' + label + '</label><input class="f-in" id="' + id + '" value="' + E(value) + '" ' + attributes + '>'; }
