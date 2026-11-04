@@ -695,7 +695,7 @@ function dataChanged(key){
    The shared "lights" collection only holds what changes in the field — status, last inspection —
    keyed by the same id, plus any light registered by hand. Field values win over the registry. */
 let BASE=[],OV={},RAW_OV={},LIGHT_FIELDS=[],LIDX=null;
-const addrOf=o=>[o.pole,o.sw?`점멸 ${o.sw}`:"",o.removed?"철거":"",o.noPlate?"표찰 없음":"",o.dongGuess?"동은 위치로 추정":""].filter(Boolean).join(" · ");
+const addrOf=o=>[o.addr||o.jibun||"",o.pole,o.sw?`점멸 ${o.sw}`:"",o.removed?"철거":"",o.noPlate?"표찰 없음":"",o.dongGuess?"동은 위치로 추정":"",o.posApprox?"위치는 분전함 기준(추정)":""].filter(Boolean).join(" · ");
 async function loadRegistry(){
   try{
     const j=await (await fetch("data/lights.json",{cache:"no-cache"})).json();
@@ -705,7 +705,7 @@ async function loadRegistry(){
 }
 function mergeLights(){
   const seen=new Set();
-  const out=BASE.map(b=>{seen.add(b.id);const o=OV[b.id];if(!o)return b;const m={...b,...o,id:b.id};if("pole"in o||"sw"in o||"removed"in o||"noPlate"in o)m.address=addrOf(m);return m});
+  const out=BASE.map(b=>{seen.add(b.id);const o=OV[b.id];if(!o)return b;const m={...b,...o,id:b.id};if("pole"in o||"sw"in o||"removed"in o||"noPlate"in o||"posApprox"in o)m.address=addrOf(m);return m});
   for(const [id,o] of Object.entries(OV))if(!seen.has(id)&&o.code)out.push({...o,id});
   S.lights=out.filter(l=>!l._deleted);LIDX=null;LG=null;
   if(typeof invalidateLightingReview==="function")invalidateLightingReview("시설 대장 정보가 바뀌었어요.");
@@ -2484,6 +2484,7 @@ function posDraw(){
     d.textContent="";d.className="d";if(fx)fx.hidden=true;if(PK.map)posMapDraw();return}
   if(draft&&draft.lightId===l.id){draft.pos=pos;draft.posDist=dist==null?null:Math.round(dist)}
   if(!has){t.textContent=`등록 좌표가 없어요 · 현재 위치 ±${pos.acc}m`;d.textContent="";if(fx){fx.hidden=false;fx.textContent=can("admin")?"현재 위치로 좌표 등록":"현재 위치를 좌표로 제안"}return}
+  if(l.posApprox){d.textContent=`${Math.round(dist)}m`;d.className="d far";t.textContent=`등록 좌표는 분전함 위치(추정)예요 · 지금 ${Math.round(dist)}m 떨어져 있어요 (GPS ±${pos.acc}m). 이 등 바로 옆이면 현재 위치로 좌표를 바로잡아 주세요.`;if(fx){fx.hidden=false;fx.textContent=can("admin")?"현재 위치로 좌표 보정":"현재 위치를 좌표로 제안"}if(PK.map)posMapDraw();return}
   const cls=dist<=POS_OK+pos.acc*.5?"ok":dist<=POS_FAR+pos.acc?"far":"bad";
   d.textContent=`${Math.round(dist)}m`;d.className="d "+cls;
   t.textContent=cls==="ok"?`등록 좌표와 맞아요 (GPS ±${pos.acc}m)`:cls==="far"?`등록 좌표에서 조금 떨어져 있어요 (GPS ±${pos.acc}m) — 등 바로 옆이면 좌표를 바로잡으세요`:`등록 좌표에서 많이 떨어져 있어요 (GPS ±${pos.acc}m) — 다른 등이거나 좌표 오류일 수 있어요`;
@@ -2509,7 +2510,7 @@ async function posFix(){
     if(!await dgConfirm(`${l.code}의 좌표를 현재 위치(±${pos.acc}m)로 ${has?"바로잡아요. "+dist+"m 옮겨요.":"등록해요."} 변경 이력에 남아요.`,{title:has?"좌표를 바로잡을까요?":"좌표를 등록할까요?",ok:has?"바로잡기":"등록"}))return;
     const changes=[{f:"lat",from:has?l.lat:null,to:+pos.lat.toFixed(6)},{f:"lng",from:has?l.lng:null,to:+pos.lng.toFixed(6)}];
     const entry={at:Date.now(),by:S.me||null,changes,note:`점검 중 위치 확인(GPS ±${pos.acc}m)`};
-    const ok=await write(()=>patchLight(l.id,{lat:changes[0].to,lng:changes[1].to,acc:pos.acc,posSuggest:null,edits:[...(l.edits||[]).slice(-29),entry],updatedAt:entry.at}),`${l.code} 좌표를 현재 위치로 ${has?"바로잡았어요":"등록했어요"}.`);
+    const ok=await write(()=>patchLight(l.id,{lat:changes[0].to,lng:changes[1].to,acc:pos.acc,posSuggest:null,posApprox:null,edits:[...(l.edits||[]).slice(-29),entry],updatedAt:entry.at}),`${l.code} 좌표를 현재 위치로 ${has?"바로잡았어요":"등록했어요"}.`);
     if(ok)setTimeout(()=>posDraw(),80);
   }else{
     if(!await dgConfirm(`현재 위치(±${pos.acc}m)를 ${l.code}의 좌표로 제안해요. 관리자가 확인한 뒤 적용해요.`,{title:"좌표를 제안할까요?",ok:"제안"}))return;
@@ -2521,7 +2522,7 @@ async function posApplySuggest(id){
   const l=byId(id),sg=l&&l.posSuggest;if(!sg)return;const has=typeof l.lat==="number";
   if(!await dgConfirm(`${l.code}의 좌표를 제안 좌표(${fmtD(sg.at)} ${S.names[sg.by]||"점검자"}, ±${sg.acc}m)로 바꿔요.`,{title:"제안 좌표를 적용할까요?",ok:"적용"}))return;
   const changes=[{f:"lat",from:has?l.lat:null,to:sg.lat},{f:"lng",from:has?l.lng:null,to:sg.lng}];const entry={at:Date.now(),by:S.me||null,changes,note:"점검자 좌표 제안 적용"};
-  const ok=await write(()=>patchLight(l.id,{lat:sg.lat,lng:sg.lng,acc:sg.acc,posSuggest:null,edits:[...(l.edits||[]).slice(-29),entry],updatedAt:entry.at}),`${l.code} 좌표를 제안대로 바꿨어요.`);
+  const ok=await write(()=>patchLight(l.id,{lat:sg.lat,lng:sg.lng,acc:sg.acc,posSuggest:null,posApprox:null,edits:[...(l.edits||[]).slice(-29),entry],updatedAt:entry.at}),`${l.code} 좌표를 제안대로 바꿨어요.`);
   if(ok){if($("#leSave"))openLightEdit(id);else openLight(id)}
 }
 const posChip=i=>typeof i.posDist==="number"?`<span class="pos ${i.posDist>POS_FAR?"far":""}">📍 ${i.posDist>POS_FAR?"등록 좌표에서 "+i.posDist+"m 떨어진 곳에서 점검":"위치 확인 "+i.posDist+"m"}</span>`:"";
@@ -2696,6 +2697,7 @@ async function saveLightEdit(id,btn){
   }
   if(!changes.length){toast("바뀐 내용이 없어요.");return}
   if(patch.removed===true)patch.removedAt=Date.now();
+  if(("lat" in patch||"lng" in patch)&&l.posApprox)patch.posApprox=null; // a coordinate set by hand replaces the distribution-box estimate
   const entry={at:Date.now(),by:S.me||null,changes};
   patch.edits=[...(l.edits||[]).slice(-29),entry];patch.updatedAt=entry.at;
   btn.disabled=true;btn.textContent="저장 중…";
@@ -2812,7 +2814,9 @@ const onOf=l=>l.removed?0:(LIGHT_MODEL.status[l.status]??1);
 let LG=null; // metric grid of lights for neighbour queries
 function lightGrid(){
   if(LG&&LG.n===S.lights.length)return LG;
-  const pts=S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
+  // lights placed at their distribution box (posApprox) would stack dozens of lights on one point: kept out of
+  // brightness prediction, patrol passing, nearest-light lookups and 주변 찾기 until their position is corrected
+  const pts=S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number"&&!l.posApprox);
   const lat0=35.14,lng0=126.93,kx=111320*Math.cos(lat0*Math.PI/180),ky=110540,cell=30,cells=new Map();
   const items=pts.map(l=>{const x=(l.lng-lng0)*kx,y=(l.lat-lat0)*ky;const it={l,x,y,r:0,on:onOf(l)};const k=`${Math.floor(x/cell)},${Math.floor(y/cell)}`;(cells.get(k)||cells.set(k,[]).get(k)).push(it);return it});
   const near=(x,y,R)=>{const out=[];const c0=Math.floor((x-R)/cell),c1=Math.floor((x+R)/cell),r0=Math.floor((y-R)/cell),r1=Math.floor((y+R)/cell);
@@ -2931,7 +2935,7 @@ function drawMapMarkers(){
   const inView=pts.filter(l=>bounds.contains([l.lat,l.lng]));GM.singles=[];
   const single=l=>{GM.singles.push(l);
     const sel=GM.sel===l.id,many=inView.length>800;
-    const m=L.circleMarker([l.lat,l.lng],{radius:sel?11:l.reg?9:l.status==="정상"?(many?4:6):8,color:sel?"#FFCE67":l.reg?"#E89A0C":KIND_COL[l.kind]||"#fff",weight:sel?4:l.reg?3:many&&l.status==="정상"?1.5:2.5,dashArray:l.reg?"3 3":null,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95,bubblingMouseEvents:false});
+    const m=L.circleMarker([l.lat,l.lng],{radius:sel?11:l.reg?9:l.status==="정상"?(many?4:6):8,color:sel?"#FFCE67":l.reg?"#E89A0C":KIND_COL[l.kind]||"#fff",weight:sel?4:l.reg?3:many&&l.status==="정상"?1.5:2.5,dashArray:l.reg||l.posApprox?"3 3":null,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95,bubblingMouseEvents:false});
     m.on("click",()=>showMapCard(l.id));m.addTo(gmapLayer);
     if(z>=GM.labelFrom&&(inView.length<=80||z>=GM.labelFrom+1)&&inView.length<=GM.labelMax)m.bindTooltip(esc(l.code),{permanent:true,direction:"right",offset:[8,0],className:"maplbl",interactive:false});
   };
@@ -3520,7 +3524,7 @@ function onPosition(p){
 }
 function arNear(){
   if(!ar.pos)return[];
-  return S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number"&&(!ar.onlyOpen||l.status!=="정상")&&(ar.kind==="전체"||(l.kind||"가로등")===ar.kind)).map(l=>({l,d:distM(ar.pos,l),b:bearing(ar.pos,l)})).filter(x=>x.d<=ar.range).sort((x,y)=>x.d-y.d);
+  return S.lights.filter(l=>typeof l.lat==="number"&&typeof l.lng==="number"&&!l.posApprox&&(!ar.onlyOpen||l.status!=="정상")&&(ar.kind==="전체"||(l.kind||"가로등")===ar.kind)).map(l=>({l,d:distM(ar.pos,l),b:bearing(ar.pos,l)})).filter(x=>x.d<=ar.range).sort((x,y)=>x.d-y.d);
 }
 /* the list below the camera: rebuilt only when the set of lights changes; arrows and distances update in place */
 function arList(force){
