@@ -116,7 +116,7 @@
   function settingsView() {
     const s = root.DGOperations.state.settings;
     if (!root.DGOperations.state.loaded && !root.DGOperations.state.error) setTimeout(() => root.DGOperations.load(), 0);
-    return '<div class="panel"><h3>업무 기준</h3><label class="f" for="dgInspectionDays">정기 점검 주기 (일)</label><input class="f-in" id="dgInspectionDays" type="number" min="1" max="3650" value="' + Number(s.inspectionDays) + '"><label class="f" for="dgPrivacyDays">신고 연락처 보관 기간 (일)</label><input class="f-in" id="dgPrivacyDays" type="number" min="1" max="3650" value="' + Number(s.privacyDays) + '"><p class="muted">점검 주기는 미점검·기한 초과 목록에 반영돼요. 연락처 자동 파기는 Firebase 예약 함수를 배포한 환경에서 실행돼요. 로컬 체험에는 수동 파기 기능을 사용할 수 있어요.</p><button class="btn sodium" data-mgmt="settings-save">기준 저장</button><button class="btn ghost" data-mgmt="privacy-purge">보관 기간 지난 연락처 파기</button></div><div class="panel"><h3>기기 저장과 계정</h3><p>' + (root.DGOffline.durable ? '이 기기는 초안과 저장 대기 작업을 보관해요.' : '공유 기기 모드로 현재 창에서만 초안을 보관해요.') + '</p><button class="btn ghost" data-asec="roles">사용자·권한 / 기기 모드</button></div>';
+    return '<div class="panel"><h3>업무 기준</h3><label class="f" for="dgInspectionDays">정기 점검 주기 (일)</label><input class="f-in" id="dgInspectionDays" type="number" min="1" max="3650" value="' + Number(s.inspectionDays) + '"><label class="f" for="dgPrivacyDays">신고 연락처 보관 기간 (일)</label><input class="f-in" id="dgPrivacyDays" type="number" min="1" max="3650" value="' + Number(s.privacyDays) + '"><p class="muted">점검 주기는 미점검·기한 초과 목록에 반영돼요. 연락처 자동 파기는 Firebase 예약 함수를 배포한 환경에서 실행돼요. 로컬 체험에는 수동 파기 기능을 사용할 수 있어요.</p><button class="btn sodium" data-mgmt="settings-save">기준 저장</button><button class="btn ghost" data-mgmt="privacy-purge">보관 기간 지난 신고자 정보 파기</button></div><div class="panel"><h3>기기 저장과 계정</h3><p>' + (root.DGOffline.durable ? '이 기기는 초안과 저장 대기 작업을 보관해요.' : '공유 기기 모드로 현재 창에서만 초안을 보관해요.') + '</p><button class="btn ghost" data-asec="roles">사용자·권한 / 기기 모드</button></div>';
   }
   async function saveSettings() {
     if (!api.can('admin')) return;
@@ -125,13 +125,17 @@
     const value = { schemaVersion: 1, inspectionDays, privacyDays, updatedAt: Date.now(), updatedBy: api.state().me };
     await api.database().doc('settings/operations').set(value); Object.assign(root.DGOperations.state.settings, value); api.toast('업무 기준을 저장했어요.'); notify();
   }
+  // What a citizen gave us that identifies them or where they were: contact, photo, GPS position, and the position text
+  // an imported QR report carries (`ext`). Same list as the server's expiry job (functions/core.js PRIVATE_FIELDS).
+  function privateLeft(r) { return !!(r.contact || r.photo || typeof r.lat === 'number' || typeof r.lng === 'number' || (r.ext && r.location)); }
+  function privatePatch(r) { return { contact: '', photo: null, lat: null, lng: null, acc: null, ...(r.ext ? { location: '' } : {}) }; }
   async function purgeContacts() {
     if (!api.can('admin')) return;
     const days = root.DGOperations.state.settings.privacyDays || 90, cut = Date.now() - days * 86400000;
     const rows = await api.readAll('reports', { requireServer: !!api.firebase() });
-    const values = rows.filter(r => r.contact && r.createdAt < cut);
-    if (!values.length) return api.toast('보관 기간이 지난 연락처가 없어요.');
-    if (!await ask('보관 기간 ' + days + '일이 지난 연락처 ' + values.length + '건을 파기해요. 신고 내용과 처리 이력은 유지돼요.', { title: '연락처를 파기할까요?', ok: '파기', danger: true })) return;
+    const values = rows.filter(r => r.createdAt < cut && privateLeft(r));
+    if (!values.length) return api.toast('보관 기간이 지난 신고자 정보가 없어요.');
+    if (!await ask('보관 기간 ' + days + '일이 지난 신고 ' + values.length + '건의 연락처·사진·신고 위치를 파기해요. 신고 내용과 처리 이력은 유지돼요.', { title: '신고자 정보를 파기할까요?', ok: '파기', danger: true })) return;
     const job = { id: root.DGOperations.uuid('privacy'), actor: api.state().me, at: Date.now(), ids: values.map(r => r.id), cut };
     const result = await root.DGOffline.submit('privacy', job, { id: job.id, summary: '연락처 보관 기간 만료 · ' + values.length + '건' });
     api.toast(result.state === 'synced' ? '기한이 지난 연락처를 파기했어요.' : result.error || '저장 대기함에서 처리를 이어가요.');
@@ -214,12 +218,12 @@
       if (!api.can('admin') || job.actor !== api.state().me) throw new Error('처리한 관리자 계정으로 로그인해 주세요.');
       for (const id of job.ids) {
         const ref = api.database().doc('reports/' + id), snap = await ref.get(), row = snap && snap.exists !== false && snap.data();
-        if (row && row.contact && row.createdAt < job.cut) await ref.update({ contact: '', privacyPurgedAt: job.at, privacyPurgedBy: job.actor });
+        if (row && row.createdAt < job.cut && privateLeft(row)) await ref.update({ ...privatePatch(row), privacyPurgedAt: job.at, privacyPurgedBy: job.actor });
       }
     });
     if (attached) return; attached = true;
     document.addEventListener('click', e => { const b = e.target.closest('[data-mgmt]'); if (b) Promise.resolve().then(() => handle(b)).catch(error => api.toast(error.message || '처리하지 못했어요.')); });
     document.addEventListener('change', e => { if (e.target.id === 'dgDashFrom' || e.target.id === 'dgDashTo') { state[e.target.id === 'dgDashFrom' ? 'from' : 'to'] = e.target.value; notify(); } if (e.target.id === 'dgRegistryFile' && e.target.files[0]) registryFile(e.target.files[0]); });
   }
-  root.DGManagement = { attach, dashboard, registryView, inventoryView, settingsView, auditView, healthView, state };
+  root.DGManagement = { privateLeft, privatePatch, attach, dashboard, registryView, inventoryView, settingsView, auditView, healthView, state };
 })(globalThis);

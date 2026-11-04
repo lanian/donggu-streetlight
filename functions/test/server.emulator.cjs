@@ -86,8 +86,12 @@ if(!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||'')){
     await handlers.recordAudit.run(event);await handlers.recordAudit.run(event);
     const logs=await db.collection('auditEvents').get();assert.equal(logs.size,1);assert.doesNotMatch(JSON.stringify(logs.docs[0].data()),/secret|private-photo/);
     await db.doc('citizen_reports/raw').set({contact:'secret',photo:'private',lat:35,lng:126,privacyExpiresAt:1});
+    await db.doc('reports/imported').set({status:'완료',ext:'raw',location:'35.1, 126.9 (±5m)',lat:35.1,lng:126.9,privacyExpiresAt:1});
+    await db.doc('reports/typed').set({status:'완료',location:'마트 앞',contact:'secret',privacyExpiresAt:1});
     await db.doc('staffInvites/expired').set({email:'expired@example.invalid',expiresAt:1});
     await handlers.purgeExpiredPersonalData.run({});
+    assert.equal((await db.doc('reports/imported').get()).data().location,undefined,'an imported report keeps no position text');
+    assert.equal((await db.doc('reports/typed').get()).data().location,'마트 앞','a staff-typed place description stays');
     for(const key of ['reports/private','citizen_reports/raw']){const value=(await db.doc(key).get()).data();assert.equal(value.contact,undefined);assert.equal(value.photo,undefined);assert.equal(value.lat,undefined);assert.ok(value.privacyPurgedAt);}
     assert.equal((await db.doc('staffInvites/expired').get()).exists,false);
   });
