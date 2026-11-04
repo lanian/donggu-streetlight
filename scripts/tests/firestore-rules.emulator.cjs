@@ -203,8 +203,16 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       }
     });
 
-    test('anonymous direct reports are blocked so gateway validation cannot be bypassed', async () => {
-      const db=anonymous();
+    test('a resident may file a well-formed report directly, create-only, and can never read or change one', async () => {
+      const db=anonymous(),now=Date.now(),id='qr-'+'a'.repeat(24);
+      const good={schemaVersion:1,receipt:'R261105-1A2B3C4D',code:'산수동 642',lightId:'',issue:'불이 꺼져 있어요',desc:'마트 앞',lat:35.146,lng:126.923,acc:12,photo:'data:image/jpeg;base64,dGVzdA==',contact:'010-0000-0000',consent:true,consentDays:90,imported:false,at:now,privacyExpiresAt:now+90*86400000};
+      await assertSucceeds(setDoc(doc(db,'citizen_reports/'+id),good));
+      await assertFails(setDoc(doc(db,'citizen_reports/'+id),good),'the same report cannot be written twice');
+      await assertFails(getDoc(doc(db,'citizen_reports/'+id)));
+      const bad=[{imported:true},{issue:'<b>아무거나</b>'},{lat:37.5,lng:127},{photo:'https://tracker.example/x.gif'},{photo:'data:image/jpeg;base64,'+'A'.repeat(230000)},{desc:'x'.repeat(501)},{contact:'010',consent:false},{at:now-3600000},{privacyExpiresAt:now+20*365*86400000},{role:'admin'},{receipt:'anything'}];
+      for(const [i,extra] of bad.entries())await assertFails(setDoc(doc(db,'citizen_reports/qr-'+String(i).padStart(24,'b')),{...good,...extra}),JSON.stringify(extra).slice(0,60));
+      await assertFails(setDoc(doc(db,'citizen_reports/direct'),good),'document ID shape is fixed');
+      const {code,lightId,desc,lat,lng,acc,...nothingToFind}=good;await assertFails(setDoc(doc(db,'citizen_reports/qr-'+'c'.repeat(24)),nothingToFind),'some way to find the light is required');
       await assertFails(setDoc(doc(db,'citizen_reports/direct'),citizen({lightId:'p1'})));
       await seed({'citizen_reports/received':citizen({contact:'01012345678',consent:true})});
       await assertFails(getDoc(doc(db,'citizen_reports/received')));
