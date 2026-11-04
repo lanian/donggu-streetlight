@@ -37,7 +37,7 @@
     const snap = await api.database().doc(collection + '/' + id).get(options().requireServer ? { source: 'server' } : undefined);
     return snap?.exists !== false && snap?.data() ? { ...snap.data(), id } : null;
   }
-  function lookup(value) { return api.state().lights.find(l => l.id === value || l.code + ' [' + l.id + ']' === value); }
+  function lookup(value) { return (api.state().allLights || api.state().lights).find(l => l.id === value || l.code + ' [' + l.id + ']' === value); }
   function choices(query) {
     const q = String(query || '').toLowerCase();
     return api.state().lights.filter(l => !l.removed && (!q || (l.id + ' ' + l.code + ' ' + (l.address || '')).toLowerCase().includes(q))).slice(0, 60).map(l => '<option value="' + E(l.code + ' [' + l.id + ']') + '">' + E(l.address || l.dong) + '</option>').join('');
