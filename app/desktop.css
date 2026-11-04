@@ -101,6 +101,13 @@
   .sheet-head{margin-left:-22px;margin-right:-22px;padding-left:18px;padding-right:18px}
   .sheet-foot{margin-left:-22px;margin-right:-22px;padding-left:22px;padding-right:22px}
   .gmap{height:min(72vh,760px);min-height:460px}
+  /* desk screens and maps on a PC: the whole workspace right of the menu (see sheetWide in index.html) */
+  .sheet.wide{width:calc(100vw - var(--dg-desktop-rail) - 24px)}
+  .sheet.wide .gmap{height:calc(100vh - 300px);min-height:460px;max-height:none}
+  .sheet.wide .grid2{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+  .sheet.wide #asecBody .list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;align-items:start}
+  .sheet.wide #asecBody .list>:is(.empty,.block,button.btn,h2,h3,.notice){grid-column:1/-1}
+  .sheet.wide .mapcard{max-width:440px;left:auto;right:12px;bottom:12px}
   .toast{bottom:28px;left:calc(50% + var(--dg-desktop-rail)/2);max-width:min(720px,calc(100vw - var(--dg-desktop-rail) - 40px))}
   body:has(nav.tabs[hidden]) .wrap{width:min(1100px,calc(100% - 56px));margin-left:auto;margin-right:auto}
   @media (hover:hover){
