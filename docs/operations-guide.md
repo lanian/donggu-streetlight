@@ -404,3 +404,7 @@ Firebase의 **보수·재고·신고 연결 이력·재확인 업무·검토 실
 - **정보 수정 이력:** 덮어쓰지 않고 덧붙여요(Firebase는 `arrayUnion`, 그 밖에는 최근 200건). 좌표 수정·철거 해제 때 함께 바뀐 위치 추정 표시·철거 일시도 되돌리기로 돌아와요.
 - **검사:** 직원 앱 전역 이름이 두 번 선언되면 `check.mjs`가 실패해요. Node 22에서도 테스트가 모두 통과해요(Web Locks 대체). 실제 서비스 워커로 오프라인 재실행을 확인하는 스모크(`offline-reload-browser-smoke.cjs`)를 추가했어요.
 - **CI:** 액션을 커밋 SHA로 고정하고(주석에 버전), 작업 시간 제한, Pages 배포는 진행 중에 끊지 않아요. Dependabot이 액션·functions 패키지 업데이트를 주마다 제안해요.
+
+## 설정 파일을 바꿀 때는 버전도 올려요 (v53-shared-mode)
+
+`firebase-config.js`·`report/config.js`·`app/map-config.js`도 오프라인용 앱 파일에 함께 저장돼요. 이 파일만 바꾸고 `sw.js`의 `VERSION`(과 `APP_VER`, `RELEASE_NOTES`)을 올리지 않으면, 이미 설치된 기기는 예전 설정을 계속 써요. 공유 모드 전환(v52 → v53)이 그 예예요.
