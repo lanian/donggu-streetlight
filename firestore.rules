@@ -105,7 +105,9 @@ service cloud.firestore {
 
     // 최초 관리자는 scripts/admin-setup.cjs에서 승인된 UID로 역할과 잠금을 원자적으로 생성한다.
     match /roles/{uid} {
-      allow read: if signedIn();
+      // 본인 역할만 읽고, 직원 명단(이름·역할·담당 동) 목록은 직원만 읽는다.
+      allow get: if signedIn() && (uid == request.auth.uid || isStaff());
+      allow list: if isStaff();
       allow create: if isAdmin();
       allow update, delete: if isAdmin();
     }
@@ -171,8 +173,9 @@ service cloud.firestore {
     match /reports/{id} {
       allow read: if isStaff();
       allow create: if isStaff() && !request.resource.data.keys().hasAny(['linkRevision','linkEventId','linkUpdatedBy'])
-        && (!request.resource.data.keys().hasAny(['workId']) || (isAdmin() && reportWorkMatches(id,request.resource.data)));
-      allow update: if isAdmin()
+        && (!request.resource.data.keys().hasAny(['workId']) || (isAdmin() && reportWorkMatches(id,request.resource.data)))
+        && (isAdmin() || staffReportCreate(request.resource.data));
+      allow update: if isAdmin() && reportExpiryKept(request.resource.data,resource.data)
         && (request.resource.data.diff(resource.data).affectedKeys().hasAny(reportLinkKeys())
           ? reportRelink(id,request.resource.data,resource.data)
           : (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['workId'])
@@ -215,6 +218,19 @@ service cloud.firestore {
     }
     match /roads/{id} { allow read: if isStaff(); allow write: if isAdmin(); }
 
+    // 점검자가 받아 적거나 가져오는 신고: 정해진 항목만, 처음 상태는 '접수', 보관 만료일은 원본 주민 신고와 같을 때만.
+    function staffReportCreate(d){
+      return d.keys().hasOnly(['issue','location','dong','code','lightId','desc','via','receipt','contact','photo','lat','lng','status','createdAt','importedAt','ext','reporterId','privacyExpiresAt'])
+        && d.status == '접수' && d.get('reporterId', null) in [null, request.auth.uid]
+        && (!('privacyExpiresAt' in d) || (d.get('ext', '') is string && d.get('ext', '') != ''
+          && exists(/databases/$(db)/documents/citizen_reports/$(d.ext))
+          && get(/databases/$(db)/documents/citizen_reports/$(d.ext)).data.get('privacyExpiresAt', null) == d.privacyExpiresAt));
+    }
+    // 개인정보 보관 만료일은 지우거나 늦출 수 없다(당기기만 가능).
+    function reportExpiryKept(next, prev){
+      return !next.diff(prev).affectedKeys().hasAny(['privacyExpiresAt'])
+        || (prev.get('privacyExpiresAt', null) is int && next.get('privacyExpiresAt', null) is int && next.privacyExpiresAt <= prev.privacyExpiresAt);
+    }
     function importedReportMatches(id,source,reportId){
       let report=getAfter(/databases/$(db)/documents/reports/$(reportId)).data;
       return report.ext==id && report.get('desc','')==source.get('desc','')

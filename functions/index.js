@@ -66,6 +66,12 @@ exports.approveJoinRequest=onCall(callableOptions,async request=>{try{
   });return {status:decision};
 }catch(e){fail(e);}});
 
+// Public endpoints take a limited-use App Check token and consume it, so one token cannot be replayed for a flood of requests.
+async function publicAppCheck(req){
+  const token=req.get('X-Firebase-AppCheck');if(!token)throw new HttpsError('unauthenticated','앱 확인이 필요합니다.');
+  let result;try{result=await getAppCheck().verifyToken(token,{consume:true});}catch{throw new HttpsError('unauthenticated','앱 확인을 다시 시도해 주세요.');}
+  if(result.alreadyConsumed)throw new HttpsError('unauthenticated','앱 확인을 다시 시도해 주세요.');
+}
 exports.submitCitizenReport=onRequest({region,cors:false,secrets:[rateSecret],maxInstances:10,timeoutSeconds:30,memory:'512MiB'},async(req,res)=>{
   res.set('Cache-Control','no-store');
   const origin=req.get('Origin')||'',origins=allowedOrigins.value().split(',').map(x=>x.trim()).filter(Boolean);
@@ -75,20 +81,20 @@ exports.submitCitizenReport=onRequest({region,cors:false,secrets:[rateSecret],ma
   if(req.method==='OPTIONS'){res.set('Access-Control-Allow-Methods','POST');res.set('Access-Control-Allow-Headers','Content-Type, X-Firebase-AppCheck');res.status(204).end();return;}
   if(req.method!=='POST'){res.status(405).json({error:'POST 요청이 필요합니다.'});return;}
   try{
-    if(!emulator){const token=req.get('X-Firebase-AppCheck');if(!token)throw new HttpsError('unauthenticated','앱 확인이 필요합니다.');try{await getAppCheck().verifyToken(token);}catch{throw new HttpsError('unauthenticated','앱 확인을 다시 시도해 주세요.');}}
+    if(!emulator)await publicAppCheck(req);
     if(!req.is('application/json')||Number(req.get('Content-Length')||0)>1600000||JSON.stringify(req.body||{}).length>1600000)throw new C.InputError('신고 요청 크기를 확인하세요.');
     const now=Date.now(),settings=(await db.doc('settings/operations').get()).data()||{};
     const parsed=C.normalizeReport(req.body,now,settings.privacyDays),id='qr-'+C.hash(parsed.requestId),ref=db.doc('citizen_reports/'+id);
     const key=emulator?'emulator-only-rate-key':rateSecret.value();
-    // req.ip is the address provided by the managed HTTP runtime. Never use a client-supplied ID as a quota key.
-    const rateId=crypto.createHmac('sha256',key).update(req.ip||req.socket.remoteAddress||'unknown').digest('hex');
-    const limit=db.doc('privateLimits/report-'+rateId),receipt='R'+new Date(now).toISOString().slice(2,10).replace(/-/g,'')+'-'+id.slice(-8).toUpperCase();
+    // The quota key is the address Google's front end saw (C.clientAddress), never a client-chosen header value or ID.
+    const rateId=crypto.createHmac('sha256',key).update(C.clientAddress(req)).digest('hex');
+    const limit=db.doc('privateLimits/report-'+rateId),all=db.doc('privateLimits/report-all'),receipt='R'+new Date(now).toISOString().slice(2,10).replace(/-/g,'')+'-'+id.slice(-8).toUpperCase();
     const fingerprint=C.hash(JSON.stringify({...parsed.rec,at:0,privacyExpiresAt:0})+parsed.photo);
     const photo=await C.normalizePhoto(parsed.photo,sharp);
     const result=await db.runTransaction(async tx=>{
-      const [existing,previous]=await Promise.all([tx.get(ref),tx.get(limit)]);
+      const [existing,previous,total]=await Promise.all([tx.get(ref),tx.get(limit),tx.get(all)]);
       if(existing.exists){if(existing.data().requestHash!==fingerprint)throw new HttpsError('already-exists','같은 요청 ID의 내용이 다릅니다.');return {receipt:existing.data().receipt,id,statusCode:C.statusCode(key,id)};}
-      tx.set(limit,C.consumeLimit(previous.data(),now,10));
+      tx.set(limit,C.consumeLimit(previous.data(),now,10));tx.set(all,C.consumeLimit(total.data(),now,C.REPORTS_PER_HOUR));
       tx.create(ref,{...parsed.rec,photo,receipt,requestHash:fingerprint});return {receipt,id,statusCode:C.statusCode(key,id)};
     });await health.record('gateway',true);res.status(200).json(result);
   }catch(e){const code=e.code||'';if(!(e instanceof C.InputError)&&!(e instanceof HttpsError))await health.record('gateway',false,{code});res.status(code==='resource-exhausted'?429:code==='unauthenticated'?401:code==='already-exists'?409:code==='invalid-argument'?400:500).json({error:e instanceof C.InputError||e instanceof HttpsError?e.message:'접수하지 못했습니다. 잠시 후 다시 시도하세요.'});}
@@ -105,11 +111,11 @@ exports.citizenReportStatus=onRequest({region,cors:false,secrets:[rateSecret],ma
   if(req.method==='OPTIONS'){res.set('Access-Control-Allow-Methods','POST');res.set('Access-Control-Allow-Headers','Content-Type, X-Firebase-AppCheck');res.status(204).end();return;}
   if(req.method!=='POST'){res.status(405).json({error:'POST 요청이 필요합니다.'});return;}
   try{
-    if(!emulator){const token=req.get('X-Firebase-AppCheck');if(!token)throw new HttpsError('unauthenticated','앱 확인이 필요합니다.');try{await getAppCheck().verifyToken(token);}catch{throw new HttpsError('unauthenticated','앱 확인을 다시 시도해 주세요.');}}
+    if(!emulator)await publicAppCheck(req);
     if(!req.is('application/json')||JSON.stringify(req.body||{}).length>400)throw new C.InputError('조회 요청을 확인하세요.');
     const query=C.normalizeStatusQuery(req.body),now=Date.now(),key=emulator?'emulator-only-rate-key':rateSecret.value();
-    const rateId=crypto.createHmac('sha256',key).update(req.ip||req.socket.remoteAddress||'unknown').digest('hex'),limit=db.doc('privateLimits/status-'+rateId);
-    await db.runTransaction(async tx=>{tx.set(limit,C.consumeLimit((await tx.get(limit)).data(),now,30));});
+    const rateId=crypto.createHmac('sha256',key).update(C.clientAddress(req)).digest('hex'),limit=db.doc('privateLimits/status-'+rateId),all=db.doc('privateLimits/status-all');
+    await db.runTransaction(async tx=>{const [mine,total]=await Promise.all([tx.get(limit),tx.get(all)]);tx.set(limit,C.consumeLimit(mine.data(),now,30));tx.set(all,C.consumeLimit(total.data(),now,C.LOOKUPS_PER_HOUR));});
     const rows=await db.collection('citizen_reports').where('receipt','==',query.receipt).limit(2).get();
     const doc=rows.docs.find(d=>C.sameCode(C.statusCode(key,d.id),query.code));
     if(!doc)throw new C.InputError('접수번호나 확인 코드가 맞지 않아요. 다시 확인해 주세요.','not-found');

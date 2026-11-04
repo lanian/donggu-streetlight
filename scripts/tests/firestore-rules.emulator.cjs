@@ -10,7 +10,7 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
   const address = new URL('http://' + process.env.FIRESTORE_EMULATOR_HOST);
   assert.ok(['127.0.0.1', 'localhost', '[::1]', '::1'].includes(address.hostname), 'Use a local emulator host.');
   const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
-  const { doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, runTransaction } = require('firebase/firestore');
+  const { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, deleteField, writeBatch, runTransaction } = require('firebase/firestore');
   const projectId = 'demo-donggu-streetlight';
   let env;
   const staff = () => env.authenticatedContext('inspector-a').firestore();
@@ -538,6 +538,30 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       await assertFails(setDoc(doc(outsider, 'lights/p2'), { status: '고장', updatedAt: 1 }));
       await assertFails(setDoc(doc(outsider, 'roles/outsider'), { role: 'admin' }));
       await assertFails(setDoc(doc(staff(), 'roles/inspector-a'), { role: 'admin' }));
+    });
+
+    test('the staff roster is readable by staff only; anyone signed in reads just their own role', async () => {
+      await seed({ 'roles/outsider': { role: 'resident', name: '주민' } });
+      const outsider = env.authenticatedContext('outsider').firestore(), stranger = env.authenticatedContext('stranger').firestore();
+      await assertFails(getDocs(collection(outsider, 'roles')));
+      await assertFails(getDoc(doc(outsider, 'roles/admin')));
+      await assertSucceeds(getDoc(doc(outsider, 'roles/outsider')));
+      await assertSucceeds(getDoc(doc(stranger, 'roles/stranger')));
+      await assertSucceeds(getDocs(collection(staff(), 'roles')));
+    });
+
+    test('inspector-made reports start as 접수 with known fields, and expiry can never be pushed out', async () => {
+      const db = staff(), base = { issue: '꺼짐', location: '', dong: '', code: '산수동 1', lightId: null, desc: '', via: '전화', receipt: '', contact: '', status: '접수', createdAt: 1000, reporterId: 'inspector-a' };
+      await assertSucceeds(setDoc(doc(db, 'reports/ok'), base));
+      await assertFails(setDoc(doc(db, 'reports/done'), { ...base, status: '완료' }));
+      await assertFails(setDoc(doc(db, 'reports/extra'), { ...base, resolvedBy: 'admin' }));
+      await assertFails(setDoc(doc(db, 'reports/forever'), { ...base, privacyExpiresAt: 9e15 }));
+      await assertFails(setDoc(doc(db, 'reports/other'), { ...base, reporterId: 'admin' }));
+      await seed({ 'reports/kept': { ...base, privacyExpiresAt: 5000 } });
+      await assertFails(updateDoc(doc(admin(), 'reports/kept'), { privacyExpiresAt: 9000 }));
+      await assertFails(updateDoc(doc(admin(), 'reports/kept'), { privacyExpiresAt: deleteField() }));
+      await assertSucceeds(updateDoc(doc(admin(), 'reports/kept'), { privacyExpiresAt: 4000 }));
+      await assertSucceeds(updateDoc(doc(admin(), 'reports/kept'), { status: '처리중', updatedAt: 2000 }));
     });
 
     test('server-owned restore receipts and health cannot be forged by client administrators',async()=>{

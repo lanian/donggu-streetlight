@@ -69,10 +69,18 @@ function publicStatus(citizen, report) {
   if(status==='처리중')return {receipt,stage:'in-progress',label:'처리 중이에요',detail:'현장 확인이나 보수를 진행하고 있어요.',updatedOn:kstDate(report.updatedAt||citizen.importedAt)};
   return {receipt,stage:'reviewing',label:'담당자가 확인했어요',detail:'처리 순서를 정하고 있어요.',updatedOn:kstDate((report&&report.updatedAt)||citizen.importedAt)};
 }
+// Cloud Run (2nd gen functions) appends the address its front end saw to X-Forwarded-For, after anything the caller sent,
+// so the last entry is the one a caller cannot choose. Express's req.ip would take the first, caller-controlled entry.
+function clientAddress(req) {
+  const forwarded=String((req.get&&req.get('X-Forwarded-For'))||'').split(',').map(x=>x.trim()).filter(Boolean);
+  return forwarded.length?forwarded[forwarded.length-1]:(req.socket&&req.socket.remoteAddress)||req.ip||'unknown';
+}
+// Whole-service ceilings on top of the per-address ones, so changing addresses cannot flood the queue.
+const REPORTS_PER_HOUR=300, LOOKUPS_PER_HOUR=3000;
 const PRIVATE_FIELDS=['contact','photo','lat','lng','acc','ua'];
 function auditSummary(before, after) {
   const changed=[...new Set([...Object.keys(before||{}),...Object.keys(after||{})])].filter(k=>JSON.stringify(before&&before[k])!==JSON.stringify(after&&after[k])).sort();
   const snapshot=value=>value?Object.fromEntries(['role','status','result','lightId','reviewedAt','reviewedBy','assignedTo','revision','imported','privacyPurgedAt'].filter(k=>value[k]!==undefined).map(k=>[k,value[k]])):null;
   return {action:!before?'create':!after?'delete':'update',changedFields:changed,before:snapshot(before),after:snapshot(after)};
 }
-module.exports={InputError,hash,text,identity,days,normalizeReport,normalizePhoto,consumeLimit,PRIVATE_FIELDS,auditSummary,STATUS_ALPHABET,statusCode,sameCode,normalizeStatusQuery,publicStatus};
+module.exports={clientAddress,REPORTS_PER_HOUR,LOOKUPS_PER_HOUR,InputError,hash,text,identity,days,normalizeReport,normalizePhoto,consumeLimit,PRIVATE_FIELDS,auditSummary,STATUS_ALPHABET,statusCode,sameCode,normalizeStatusQuery,publicStatus};
