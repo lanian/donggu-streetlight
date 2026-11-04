@@ -37,7 +37,7 @@ async function main() {
   const boot=async()=>{await page.goto(origin);await page.waitForFunction(()=>typeof S!=='undefined'&&S.live&&DGOffline.ready);assert.equal(await page.evaluate(()=>window.FIREBASE_CONFIG),null);assert.equal(await page.evaluate(()=>DGIntegration.whenReady()),true);await page.evaluate(()=>DGOperations.load());};
   // Escape/Back now leave one level at a time (navigation stack); the helper closes every level.
   const close=async()=>{if(await page.locator('#sheet.open').count()){await page.evaluate(()=>closeSheet('all'));await page.waitForFunction(()=>!document.querySelector('#sheet').classList.contains('open'));}};
-  const admin=async key=>{await close();await page.locator('[data-tab="admin"]').click();await page.locator('[data-asec="'+key+'"]').click();};
+  const admin=async key=>{await close();await page.locator('[data-tab="admin"]').click();await page.locator('.menu [data-asec="'+key+'"]').click(); /* the menu item, not the PC 오늘 할 일 count with the same target */};
   try {
     await boot();
     if(await page.locator('#demoRole').inputValue()!=='admin')await page.locator('#demoRole').selectOption('admin');
