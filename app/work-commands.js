@@ -122,7 +122,7 @@
         const stamp = light && light.updatedAt || null;
         if (stamp !== (job.lightUpdatedAt || null)) fail('시설 상태가 다른 작업에서 변경됐어요. 최신 상태를 확인한 뒤 검수해 주세요.', 'conflict');
         expected[lightPath] = light ? { field: 'updatedAt', value: stamp } : null;
-        ops.push({ path: lightPath, data: { status: job.facilityStatus, updatedAt: job.at, lastRepairedAt: job.at, lastWorkId: job.workId }, merge: true });
+        ops.push({ path: lightPath, data: { status: job.facilityStatus, statusAt: job.at, updatedAt: job.at, lastRepairedAt: job.at, lastWorkId: job.workId, ...(job.facilityStatus === '정상' ? { redoNote: null } : {}) }, merge: true });
       }
       if (job.closeReports) {
         for (const id of next.reportIds) {

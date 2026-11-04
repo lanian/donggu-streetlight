@@ -15,7 +15,7 @@ service cloud.firestore {
     // 점검자는 상태·표찰·대표 사진과 좌표 제안만 바꿀 수 있다.
     // 좌표 원본, 광원, 철거, 대장반영, 변경 이력 등은 관리자가 처리한다.
     function lightFieldKeys(){
-      return ['status','lastInspected','lastResult','updatedAt','redoNote',
+      return ['status','statusAt','lastInspected','lastResult','updatedAt','redoNote',
         'code','kind','dong','num','road','main','sub','plateFixed','plateFixedAt',
         'posSuggest','reps','photoId','photoT','photoAt','photoBy','photo','repWide','repPlate','repAround'];
     }
@@ -25,8 +25,19 @@ service cloud.firestore {
         && (!('code' in data) || optionalText(data, 'code', 200))
         && (!('updatedAt' in data) || data.updatedAt is int)
         && (!('lastInspected' in data) || data.lastInspected == null || data.lastInspected is int)
+        && (!('statusAt' in data) || data.statusAt == null || data.statusAt is int)
         && (!('posSuggest' in data) || data.posSuggest == null || (data.posSuggest is map
           && data.posSuggest.lat is number && data.posSuggest.lng is number));
+    }
+    // 점검자는 점검·순찰 기록과 함께만 상태를 바꾸고(lastInspected도 바뀜), 그 기록이 지금 상태를 정한 일보다 늦어야 한다.
+    // 기기 시계가 앞서 간 기록이 다른 점검을 막지 않도록, 시각은 서버 시각 + 5분까지만 받는다.
+    function staffStatusChange(next, prev){
+      let changed=next.diff(prev).affectedKeys();
+      let at=changed.hasAny(['statusAt']) && next.get('statusAt',null) is int ? next.statusAt : next.get('lastInspected',0);
+      let limit=request.time.toMillis()+300000;
+      return (!changed.hasAny(['lastInspected']) || next.get('lastInspected',null)==null || next.lastInspected<=limit)
+        && (!changed.hasAny(['statusAt']) || next.get('statusAt',null)==null || next.statusAt<=limit)
+        && (!changed.hasAny(['status']) || (changed.hasAny(['lastInspected']) && at is int && at>=prev.get('statusAt',0) && at<=limit));
     }
     function ownPositionSuggestion(data){
       return data.get('posSuggest', null) is map
@@ -121,6 +132,8 @@ service cloud.firestore {
       allow read: if isStaff();
       allow create: if isAdmin() || (isStaff() && (
         (request.resource.data.keys().hasOnly(lightFieldKeys()) && validLightFields(request.resource.data)
+          && (!('status' in request.resource.data) || (request.resource.data.get('lastInspected',null) is int
+            && request.resource.data.lastInspected<=request.time.toMillis()+300000))
           && request.resource.data.get('redoNote', null) == null
           && request.resource.data.get('photo', null) == null
           && validRep(request.resource.data,'repWide') && validRep(request.resource.data,'repPlate') && validRep(request.resource.data,'repAround')
@@ -133,6 +146,7 @@ service cloud.firestore {
         && (isAdmin() || (isStaff()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(lightFieldKeys())
         && validLightFields(request.resource.data)
+        && staffStatusChange(request.resource.data, resource.data)
         && (resource.data.get('lastInspected',null)==null || (request.resource.data.get('lastInspected',null) is int && request.resource.data.lastInspected>=resource.data.lastInspected))
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['repWide']) || validRep(request.resource.data,'repWide'))
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['repPlate']) || validRep(request.resource.data,'repPlate'))

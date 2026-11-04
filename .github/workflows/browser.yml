@@ -54,3 +54,4 @@ jobs:
           node scripts/roles-status-browser-smoke.cjs
           node scripts/security-browser-smoke.cjs
           node scripts/privacy-browser-smoke.cjs
+          node scripts/status-integrity-browser-smoke.cjs
