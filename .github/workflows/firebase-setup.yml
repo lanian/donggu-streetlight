@@ -1,0 +1,64 @@
+# Firebase 초기 설정 (수동 실행 전용) — Actions 탭 › "Firebase setup" › Run workflow
+#  1) rules-and-indexes : firestore.rules 와 firestore.indexes.json(18개)을 배포
+#  2) first-admin       : 처음 로그인한 계정 UID를 최초 관리자로 지정(한 번만 가능, 이후엔 앱 안에서 관리)
+# 필요한 저장소 비밀값: FIREBASE_SERVICE_ACCOUNT (Firebase 콘솔 › 프로젝트 설정 › 서비스 계정 › 새 비공개 키 의 JSON 전체)
+# 앱 코드·Pages 배포와는 별개이며, 누군가 이 화면에서 직접 실행할 때만 동작합니다.
+name: Firebase setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'Firebase 프로젝트 ID (예: donggu-light)'
+        required: true
+      step:
+        description: '실행할 단계'
+        type: choice
+        options: [rules-and-indexes, first-admin]
+        required: true
+      admin_uid:
+        description: 'first-admin일 때: Authentication › 사용자 목록의 UID'
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-setup
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PROJECT: ${{ inputs.project_id }}
+      STEP: ${{ inputs.step }}
+      ADMIN_UID: ${{ inputs.admin_uid }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Check inputs and credentials
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          [[ "$PROJECT" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || { echo "::error::프로젝트 ID 형식이 아니에요: $PROJECT"; exit 1; }
+          if [ "$STEP" = first-admin ]; then [[ "$ADMIN_UID" =~ ^[A-Za-z0-9]{10,128}$ ]] || { echo "::error::admin_uid에 Authentication 사용자 목록의 UID를 넣어 주세요."; exit 1; }; fi
+          [ -n "$SA" ] || { echo "::error::저장소 비밀값 FIREBASE_SERVICE_ACCOUNT가 없어요."; exit 1; }
+          umask 077; printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node -e 'const j=require(process.argv[1]);if(j.type!=="service_account"){console.error("::error::서비스 계정 JSON이 아니에요");process.exit(1)}if(j.project_id!==process.argv[2]){console.error("::error::비밀값의 프로젝트("+j.project_id+")와 입력한 프로젝트("+process.argv[2]+")가 달라요");process.exit(1)}' "$RUNNER_TEMP/sa.json" "$PROJECT"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+      - name: Deploy Firestore rules and indexes
+        if: inputs.step == 'rules-and-indexes'
+        run: npx --yes firebase-tools@15.34.1 deploy --only firestore:rules,firestore:indexes --project "$PROJECT" --non-interactive
+      - name: Set the first administrator
+        if: inputs.step == 'first-admin'
+        run: |
+          npm ci --prefix functions --include=optional --ignore-scripts --no-audit --no-fund
+          node scripts/admin-setup.cjs --project "$PROJECT" --uid "$ADMIN_UID"
+          node scripts/admin-setup.cjs --project "$PROJECT" --uid "$ADMIN_UID" --apply
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
