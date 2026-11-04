@@ -128,3 +128,25 @@ test('UTF-8 archive byte limit is enforced independently from JSON character lim
   const c = JSON.parse(run.candidatesJson)[0]; c.title = '한'.repeat(205000);
   assert.throws(() => C.normalizeRun({ ...run, candidatesJson: JSON.stringify([c]) }), { code: 'resource-exhausted' });
 });
+
+test('compact archive rows keep the required values and a whole-district review splits by 법정동 without dropping rows', async () => {
+  const records = [observation({ level: 'bright', observedAt: now - 1000 })];
+  const evidence = Model.evaluate(Model.createContext(records, [], { now, minute: 1260 }), point, .1);
+  const row = C.archiveCandidate({ name: '산수로', dong: '산수동', len: 48, mid: { lat: 35.157777912345, lng: 126.944690123456 }, scopeException: [], context: { ...evidence, base: 0.06729133289389992, adjusted: 0.0672913328938, coverage: { total: 48.04, bright: 0, dark: 0, conflict: 0, external: 0, unobserved: 48.04, supported: 0, unit: 'm' } } });
+  assert.equal(row.lat, 35.1577779); assert.equal(row.base, .0673); assert.ok(row.adjusted >= row.base);
+  assert.deepEqual(row.coverage, { total: 48, unobserved: 48, unit: 'm' }); assert.equal(row.length, 48);
+  assert.equal(row.scopeException, undefined, 'empty lists are left out');
+  // 1,200 candidates over 12 dongs: too large as one archive before compaction, fits after
+  const dongs = Array.from({ length: 12 }, (_, i) => '시험' + i + '동');
+  const cand = i => ({ name: '검토 도로 ' + i, dong: dongs[i % 12], len: 30, mid: { lat: 35.14 + i * 1e-5, lng: 126.93 }, context: { ...evidence, coverage: { total: 30, bright: 0, dark: 0, conflict: 0, external: 0, unobserved: 30, supported: 0, unit: 'm' } } });
+  const build = review => C.buildRun({ review: { at: now, minute: 1260, mode: 'roads', kind: '전체', ...review }, lights: [{ id: 'registered-1', ...point, updatedAt: 12 }], records, roads: null, model: { weak: .3 }, calibration: null, baseAt: () => .1 });
+  const fits = await build({ dong: '전체', cands: Array.from({ length: 1200 }, (_, i) => cand(i)) });
+  assert.equal(fits.candidateCount, 1200);
+  const huge = Array.from({ length: 3000 }, (_, i) => cand(i));
+  await assert.rejects(build({ dong: '전체', cands: huge }), { code: 'resource-exhausted' });
+  const parts = C.splitReview({ dong: '전체', cands: huge });
+  assert.equal(parts.length, 12); assert.equal(parts.reduce((n, p) => n + p.cands.length, 0), 3000, 'every candidate is in exactly one part');
+  assert.match(parts[0].dong, /^전체 중 시험\d+동 \(12개로 나눔\)$/);
+  const runs = []; for (const part of parts) runs.push(await build(part));
+  assert.equal(runs.reduce((n, r) => n + JSON.parse(r.candidatesJson).length, 0), 3000);
+});

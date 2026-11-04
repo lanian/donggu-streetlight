@@ -209,3 +209,19 @@ test('search includes pair facility IDs displayed as codes, and clearing control
   f.S.rvQuery = ''; f.S.rvSort = ''; f.S.rvEvidence = 'all';
   assert.equal(f.ctx.rvList(rv).length, 2);
 });
+
+test('roads outside the 동구 boundary are not predicted and their length is reported', () => {
+  const gu = { name: '동구', polygons: [{ outer: square(-200, -200, 0, 200), holes: [] }] };
+  const f = fixture({ ways: [road('inside', -100), road('outside', 120)] }); f.roads.gu = gu;
+  const result = f.roadsReview();
+  assert.deepEqual([...new Set(result.map(c => c.wayId))], ['inside'], 'only the road inside 동구 is reviewed');
+  approx(result.skip.outside, 100, 1); assert.equal(result.skip.guSource, 'gu');
+  // a dark observation beyond the boundary does not become a candidate either
+  const g = fixture({ ways: [], records: [observation(xy(150))] }); g.roads.gu = gu;
+  assert.equal(g.roadsReview().length, 0);
+  const h = fixture({ ways: [], records: [observation(xy(-150))] }); h.roads.gu = gu;
+  assert.equal(h.roadsReview().length, 1, 'the same observation inside 동구 is kept');
+  // without any boundary the 동구 행정동 boundaries are used together
+  const k = fixture({ ways: [road('inside', -100), road('outside', 120)], bounds: [{ name: '학동', polygons: gu.polygons }] });
+  assert.deepEqual([...new Set(k.roadsReview().map(c => c.wayId))], ['inside']); assert.equal(k.roadsReview().skip.guSource, 'dongs');
+});

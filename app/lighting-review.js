@@ -27,6 +27,45 @@ function rvCountExcluded(summary, ids, length = 0) {
   summary[length ? 'manualMeters' : 'manualPoints'] += length || 1;
   for (const id of ids) { const row = summary.byArea[id] || (summary.byArea[id] = { meters: 0, points: 0 }); if (length) row.meters += length; else row.points++; }
 }
+/* 광주 동구 안만 예측한다. 도로망은 사각형 범위로 받아 남구·북구·서구 도로도 섞여 오므로,
+   함께 받은 동구 경계(없으면 동구 행정동 경계의 합)로 걸러 낸다. 경계 자료가 전혀 없으면
+   관리 대장 시설 300m 안만 남긴다. 등 간격 검토는 동구 관리 대장 시설끼리의 짝이라 이 경계로 거르지 않는다
+   (OSM 경계가 조금 어긋나도 경계 근처 대장 시설의 후보가 빠지지 않게). 위도 방향으로 약 22m 간격의 가로줄마다 경계와 만나는
+   경도를 미리 구해 두어, 도로 표본마다 다각형 전체를 훑지 않는다. */
+const RV_GU_ROW = 0.0002;
+let rvGuCache = { roads: undefined, mask: null };
+function rvGuMask() {
+  const ROADS = rvRoads();
+  if (rvGuCache.roads === ROADS) return rvGuCache.mask;
+  const polygons = ROADS?.gu?.polygons?.length ? ROADS.gu.polygons : (ROADS?.bounds || []).flatMap(b => b.polygons || []);
+  let mask = null;
+  if (polygons.length) {
+    const rings = polygons.flatMap(p => [p.outer, ...(p.holes || [])]).filter(r => Array.isArray(r) && r.length > 2);
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    for (const r of rings) for (const [lat, lng] of r) { if (lat < minLat) minLat = lat; if (lat > maxLat) maxLat = lat; if (lng < minLng) minLng = lng; if (lng > maxLng) maxLng = lng; }
+    const rows = Math.max(1, Math.ceil((maxLat - minLat) / RV_GU_ROW)), cross = Array.from({ length: rows }, () => []);
+    for (const r of rings) for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [la, lo] = r[i], [lb, lob] = r[j]; if (la === lb) continue;
+      const lo0 = Math.min(la, lb), hi0 = Math.max(la, lb);
+      for (let row = Math.max(0, Math.floor((lo0 - minLat) / RV_GU_ROW)); row < rows; row++) {
+        const y = minLat + (row + .5) * RV_GU_ROW; if (y >= hi0) break; if (y < lo0) continue;
+        cross[row].push(lo + (y - la) / (lb - la) * (lob - lo));
+      }
+    }
+    for (const c of cross) c.sort((a, b) => a - b);
+    mask = { minLat, maxLat, minLng, maxLng, cross, source: ROADS?.gu?.polygons?.length ? 'gu' : 'dongs' };
+  }
+  rvGuCache = { roads: ROADS, mask }; return mask;
+}
+function rvInGu(point, grid) {
+  const m = rvGuMask();
+  if (!m) { if (!grid.items?.length) return true; const p = grid.toXY(point); return grid.near(p.x, p.y, 300).some(n => !n.it.l.removed); }
+  if (point.lat < m.minLat || point.lat > m.maxLat || point.lng < m.minLng || point.lng > m.maxLng) return false;
+  const c = m.cross[Math.min(m.cross.length - 1, Math.floor((point.lat - m.minLat) / RV_GU_ROW))];
+  let lo = 0, hi = c.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (c[mid] <= point.lng) lo = mid + 1; else hi = mid; }
+  return lo % 2 === 1; // an odd number of boundary crossings to the west: inside
+}
+function rvRoads() { try { return ROADS; } catch (_) { return null; } } // a bare test sandbox has no road network
 function rvPointInScope(point, dong, kind, grid) {
   if ((!dong || dong === '전체') && kind === '전체') return true;
   const p = grid.toXY(point), near = grid.near(p.x, p.y, 90).filter(n => !n.it.l.removed).sort((a, b) => a.d - b.d).slice(0, 3).map(n => n.it.l);
@@ -79,7 +118,7 @@ function rvAddObservationPoints(out, dong, kind, ctx, G, areaContext, automaticA
     const xy = G.toXY(record), E = G.lightAt(xy.x, xy.y), evidence = rvEvaluate(ctx, G, record, E);
     if (!['dark', 'conflict'].includes(evidence.fieldLevel) || !evidence.observations.some(o => o.id === record.id)) continue;
     const near = G.near(xy.x, xy.y, 90).filter(n => !n.it.l.removed).sort((a, b) => a.d - b.d).slice(0, 3).map(n => n.it.l);
-    if (!rvPointInDong(record, dong, near[0]) || kind !== '전체' && near.length && !near.some(l => l.kind === kind)) continue;
+    if (!rvInGu(record, G) || !rvPointInDong(record, dong, near[0]) || kind !== '전체' && near.length && !near.some(l => l.kind === kind)) continue;
     const key = evidence.observations.map(o => o.id).sort().join('|'); if (seen.has(key)) continue; seen.add(key);
     const context = rvAggregate([{ evidence, length: 1 }], 'point');
     const area = rvAreaDecision(areaContext, record);
@@ -111,7 +150,7 @@ function lightReview(dong, kind) {
 }
 function roadReview(dong, kind) {
   const G = lightGrid(); if (!ROADS) return [];
-  const ctx = rvContext(), areaContext = rvAreaContext(), summary = rvScopeSummary(), weak = LIGHT_MODEL.weak, out = [], areas = roadAreas(G), skip = { ways: 0, apt: 0, forest: 0 };
+  const ctx = rvContext(), areaContext = rvAreaContext(), summary = rvScopeSummary(), weak = LIGHT_MODEL.weak, out = [], areas = roadAreas(G), skip = { ways: 0, apt: 0, forest: 0, outside: 0 };
   const inArea = (x, y) => { for (const a of areas) if (x >= a.x0 && x <= a.x1 && y >= a.y0 && y <= a.y1 && DongguField.inPolygon(x, y, a)) return a.t; return ''; };
   for (const w of ROADS.ways) {
     const wayExcluded = !!(w.sv && ROAD_SKIP_SERVICE.test(w.sv) || w.priv || /아파트|APT|주차장/i.test(w.name || ''));
@@ -140,6 +179,7 @@ function roadReview(dong, kind) {
       const startLL = G.toLL(sample.start.x, sample.start.y), endLL = G.toLL(sample.end.x, sample.end.y);
       for (const areaPiece of rvAreaPieces(areaContext, startLL, endLL)) for (const piece of DGLightingModel.splitSegment(ctx, areaPiece.start, areaPiece.end)) {
         const point = G.toXY(piece.point), length = sample.length * areaPiece.fraction * piece.fraction;
+        if (!rvInGu(piece.point, G)) { skip.outside += length; flush(); continue; }
         if (!rvPointInScope(piece.point, dong, kind, G)) { flush(); continue; }
         const E = G.lightAt(point.x, point.y), area = inArea(point.x, point.y);
         const evidence = rvEvaluate(ctx, G, piece.point, E);
@@ -160,7 +200,7 @@ function roadReview(dong, kind) {
     if (skippedWay) skip.ways++;
   }
   rvAddObservationPoints(out, dong, kind, ctx, G, areaContext, areas); out.sort((a, b) => b.score - a.score);
-  skip.apt = Math.round(skip.apt); skip.forest = Math.round(skip.forest); out.skip = skip; out.areaSummary = summary; return out;
+  skip.apt = Math.round(skip.apt); skip.forest = Math.round(skip.forest); skip.outside = Math.round(skip.outside); skip.guSource = rvGuMask()?.source || 'registry'; out.skip = skip; out.areaSummary = summary; return out;
 }
 function rvList(rv) {
   if (!rv) return [];
@@ -246,14 +286,14 @@ function reviewSection() {
     '<div class="split"><button class="btn ghost sm" data-asec="lightingcontext">외부 광원·관찰 관리 (' + active.length + ')</button><button class="btn ghost sm" data-asec="lightingareas">산·숲 등 검토 제외 구역</button><button class="btn ghost sm" data-lc="new-observation">현장 밝기 기록</button></div>' +
     (DGLighting.state.error ? '<p class="notice">' + esc(DGLighting.state.error) + ' <button class="btn ghost sm" data-lc="reload">자료 다시 읽기</button></p>' : '') +
     (globalThis.DGLightingAreas?.state.error ? '<p class="notice">검토 구역을 읽지 못했어요: ' + esc(DGLightingAreas.state.error) + ' <button class="btn ghost sm" data-la="reload">구역 다시 읽기</button></p>' : '') +
-    '<details class="help"><summary>계산과 한계</summary><p>대장 시설의 간격·종류·상태로 상대 지수를 계산해요. 0.30 미만 지점 또는 도로의 24m 이상 구간은 모델상 부족 후보로 남겨요. 외부 광원은 확인된 반경·점등 시간·재확인 기한 안에서 보완하고, 대장 시설과 중복되거나 야간·시간 정보가 불명확한 자료는 확인 대상으로 표시해요. 반경과 영향 정도는 모델 가정이에요.</p><p>현장 밝기와 조도계 lux는 별도 근거로 표시하며 모델에 더하지 않아요. 모델상 밝아도 현장 어두움 관찰이 있으면 검토 대상으로 남아요. 도로는 8m 이하 조각을 광원·관찰 반경의 경계에서 다시 나누어 집계해요. 표시 길이는 좌표와 입력 반경에 따른 근사치예요. 아파트·학교·숲·사유지 길은 도로 검토에서 제외하지만 현장 어두움 지점은 별도로 표시해요. 상대 지수는 밝기 백분율·실측 조도·법정 기준 충족률이 아니며 조명 설치 결정을 대신하지 않아요.</p></details>' +
+    '<details class="help"><summary>계산과 한계</summary><p>대장 시설의 간격·종류·상태로 상대 지수를 계산해요. 0.30 미만 지점 또는 도로의 24m 이상 구간은 모델상 부족 후보로 남겨요. 외부 광원은 확인된 반경·점등 시간·재확인 기한 안에서 보완하고, 대장 시설과 중복되거나 야간·시간 정보가 불명확한 자료는 확인 대상으로 표시해요. 반경과 영향 정도는 모델 가정이에요.</p><p>현장 밝기와 조도계 lux는 별도 근거로 표시하며 모델에 더하지 않아요. 모델상 밝아도 현장 어두움 관찰이 있으면 검토 대상으로 남아요. 검토 범위는 광주 동구 안이며, 함께 받은 동구 경계 밖의 도로·관찰 지점은 계산하지 않아요. 도로는 8m 이하 조각을 광원·관찰 반경의 경계에서 다시 나누어 집계해요. 표시 길이는 좌표와 입력 반경에 따른 근사치예요. 아파트·학교·숲·사유지 길은 도로 검토에서 제외하지만 현장 어두움 지점은 별도로 표시해요. 상대 지수는 밝기 백분율·실측 조도·법정 기준 충족률이 아니며 조명 설치 결정을 대신하지 않아요.</p></details>' +
     '<div class="seg"><button data-rvmode="roads" aria-pressed="' + (mode === 'roads') + '" ' + (ROADS ? '' : 'disabled') + '>도로 따라 검토</button><button data-rvmode="pairs" aria-pressed="' + (mode === 'pairs') + '">등 간격으로 검토</button></div>' +
     '<div class="split">' + (ROADS ? '<span class="muted">도로 ' + ROADS.ways.length.toLocaleString() + '개 · © OpenStreetMap contributors</span>' : '') + (!ROADS || can('admin') ? '<button class="btn ghost sm" id="rvRoads"' + (ROADS ? ' data-refetch="1"' : '') + '>' + (ROADS ? '도로망 다시 받기' : '도로망 불러오기') + '</button>' : '') + '<span class="muted" id="rvRoadsStat">' + esc(S.rvRoadsStat || '') + '</span></div>' +
     '<div class="grid2"><div><label class="f" for="rvDong">검토 지역</label><select class="f-in" id="rvDong">' + dongOptions(S.rvDong || '전체', '모든 동') + '</select></div><div><label class="f" for="rvKind">관리 시설 종류</label><select class="f-in" id="rvKind">' + ['전체', ...KINDS].map(k => '<option' + (k === (S.rvKind || '전체') ? ' selected' : '') + '>' + esc(k) + '</option>').join('') + '</select></div></div>' +
     '<label class="f" for="rvTime">검토할 야간 시간 (한국 시간 · KST)</label><input class="f-in" id="rvTime" type="time" value="' + DGLighting.minuteText(S.rvMinute ?? 1260) + '"><p class="muted">예: 21:00의 상가 빛과 02:00의 폐점 후 상황을 각각 검토할 수 있어요. 관찰의 최근성은 현재 날짜를 기준으로 확인해요.</p><button class="btn block" id="rvRun">검토 실행</button>' +
     (S.rvMessage ? '<p class="notice" role="status">' + esc(S.rvMessage) + '</p>' : '') +
     (rv ? '<p class="muted">' + esc(dongLabel(rv.dong)) + ' · ' + DGLighting.minuteText(rv.minute) + ' KST · 관리 대장 ' + rv.n.toLocaleString() + '개 · 검토 ' + esc(DGLighting.kstTime(rv.at)) + '</p>' + rvAreaSummaryHTML(rv) + '<div class="rv-toolbar"><div class="grid2"><div><label class="f" for="rvEvidence">근거별 보기</label><select class="f-in" id="rvEvidence">' + Object.entries({ all: '전체 후보 · 보완된 곳도 유지', attention: '우선 현장 확인', dark: '현장 어두움·관찰 충돌', supported: '외부 광원·밝음 관찰로 보완', gap: '90m 안 등록 광원 자료 부족' }).map(([v, t]) => '<option value="' + v + '"' + (v === (S.rvEvidence || 'all') ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div><div><label class="f" for="rvSort">정렬</label><select class="f-in" id="rvSort">' + Object.entries({ priority: '확인 우선순위', length: '긴 도로 구간부터', name: '장소 이름순' }).map(([v, t]) => '<option value="' + v + '"' + (v === (S.rvSort || 'priority') ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div></div><label class="f" for="rvQuery">장소·동·주변 시설 검색</label><input class="f-in" type="search" id="rvQuery" value="' + esc(S.rvQuery || '') + '" placeholder="도로 이름이나 주변 표찰 번호"><div class="split"><strong role="status">표시 ' + cs.length + '곳 / 전체 ' + rv.cands.length + '곳' + (rv.mode === 'roads' ? ' · ' + (cs.reduce((s, c) => s + (c.len || 0), 0) / 1000).toFixed(2) + 'km' : '') + '</strong><button class="btn ghost sm" data-rvclear>보기 초기화</button></div>' + (cs.length ? '<div class="split"><button class="btn sm" data-rvmap="all">표시 후보 지도</button><button class="btn ghost sm" id="csv4">현재 보기 CSV</button></div>' : '') + '</div>' +
-      (sk.ways || sk.apt || sk.forest ? '<p class="muted">제외: 사유지·주차장 통로 ' + (sk.ways || 0) + '개 · 단지 ' + (sk.apt || 0) + 'm · 산·숲 ' + (sk.forest || 0) + 'm</p>' : '') +
+      (rv.mode === 'roads' ? '<p class="muted">광주 동구 안만 예측해요' + ({ gu: ' (동구 경계 기준)', dongs: ' (동구 행정동 경계 기준)', registry: ' (경계 자료가 없어 관리 시설 300m 안 기준)' }[sk.guSource] || '') + (sk.outside ? ' · 동구 밖 도로 ' + (sk.outside / 1000).toFixed(1) + 'km 제외' : '') + '</p>' : '') + (sk.ways || sk.apt || sk.forest ? '<p class="muted">제외: 사유지·주차장 통로 ' + (sk.ways || 0) + '개 · 단지 ' + (sk.apt || 0) + 'm · 산·숲 ' + (sk.forest || 0) + 'm</p>' : '') +
       (cs.length ? cs.slice(0, rv.show).map((c, i) => '<article tabindex="-1" class="panel rv-candidate' + (c.key === S.rvSelectedKey ? ' rv-selected' : '') + '" data-rvkey="' + esc(c.key || rvCandidateKey(c)) + '" style="border-left:5px solid ' + rvColorVar(c) + '"><div class="split"><b>#' + (i + 1) + ' ' + esc(rvTitle(c)) + '</b><span class="chip">' + esc(rvLabel(c)) + '</span></div><p class="muted">' + esc(c.dong || '지역 확인 필요') + ' · ' + (c.point ? '현장 관찰 지점' : c.len != null ? esc(c.typeLabel) + ' · ' + c.len + 'm' : '시설 간격 ' + c.d + 'm · 대장 기준 간격 ' + c.need + 'm') + (c.nolight ? ' · 90m 안 등록 광원 자료 부족' : '') + '</p>' + rvEvidenceHTML(c) + rvButtons(c, i) + '</article>').join('') : '<p class="empty">현재 자료와 조건에서 표시할 후보가 없어요.' + (rv.cands.length ? ' 검색어나 근거별 보기 조건을 바꿔 보세요.' : ' 제외 범위도 확인해 주세요. 실제로 모두 밝다는 뜻은 아니에요.') + '</p>') +
       (cs.length > rv.show ? '<button class="btn ghost block" id="rvMore">더 보기 · ' + (cs.length - rv.show) + '곳 남음</button>' : '') : '') + '</div>';
 }
