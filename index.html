@@ -138,6 +138,11 @@ header p{margin:0;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:
 .devnote,.devmode{font-size:12px;margin:8px 2px 4px}.devmode{text-align:center;margin-top:18px}
 .linkbtn{font:inherit;font-size:inherit;background:none;border:0;padding:4px 2px;color:var(--fix);text-decoration:underline;cursor:pointer;min-height:32px}
 .deskonly{margin:0 0 10px}
+/* update check: what must be finished first (would be lost) vs what stays on this device */
+.upd-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.upd-h{font-size:15px;margin:16px 0 8px}.upd-h.bad{color:var(--bad)}.upd-h.ok{color:var(--ok)}
+.upd-item{border:1px solid var(--line);border-left:4px solid var(--ok);border-radius:10px;background:var(--card);padding:10px 12px;margin-bottom:8px;display:flex;flex-direction:column;gap:4px}
+.upd-item.lose{border-left-color:var(--bad)}.upd-item .muted{font-size:13px}.upd-item ul{margin:2px 0 0;padding-left:18px;font-size:13px;color:var(--ink-2)}.upd-item .btn{align-self:flex-start;margin-top:4px}
 .menu .mt{font-weight:700;font-size:15px;display:flex;align-items:center;gap:4px}.menu .md{font-size:12px;color:var(--ink-2)}
 h2 .btn.sm{font-weight:600;margin-top:-4px}
 .status{margin:2px 0 14px}
@@ -813,7 +818,7 @@ const PWA={prompt:null,canInstall:false,iosHint:false,waiting:null,standalone:ma
   const ios=DEV.ios&&!window.MSStream; // includes iPadOS, which reports itself as a Mac
   if(ios&&!PWA.standalone&&!recently&&!(window.claude&&window.claude.use))PWA.iosHint=true;
   if("serviceWorker" in navigator&&!(window.claude&&window.claude.use)&&(location.protocol==="https:"||location.hostname==="localhost")){
-    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareOcr:async()=>{try{await fetch("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",{cache:"reload"})}catch(e){}await getOcr(null,"eng",{refresh:true});await getOcr(null,"kor+eng",{refresh:true})}});
+    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareUpdate:()=>updateCheck(),onChange:()=>{try{render()}catch(e){}},prepareOcr:async()=>{try{await fetch("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",{cache:"reload"})}catch(e){}await getOcr(null,"eng",{refresh:true});await getOcr(null,"kor+eng",{refresh:true})}});
   }
   // shortcuts from the home-screen icon
   const go=new URLSearchParams(location.search).get("go");if(go)window.addEventListener("load",()=>setTimeout(()=>{if(go==="scan")openScanner("inspect");else if(go==="patrol"&&can("inspect")){if(DEV.field)openPatrol();else{openAdminSection("patrol");toast("야간 순찰은 GPS가 있는 휴대폰에서 시작해요. PC에서는 순찰 기록을 볼 수 있어요.")}}},900));
@@ -909,6 +914,51 @@ window.addEventListener("dgdevice",()=>{try{const sh=$("#sheet");if(sh&&sh.class
 /* Desk screens (tables, maps, reports) open across the whole PC workspace instead of the 860px side panel. */
 const WIDE_SECTIONS=new Set(["works","due","hist","inbox","dashboard","report","registryupdate","audit","light","lightinghistory","lightingareas","lightingimport","lightingcontext","lightingtasks","map","dong","kind","open","pend","np","edit","inventory","qr","patrol","health"]);
 function sheetWide(key){if(DEV.field||!key)return false;if(/^(map|ptmap):/.test(key))return true;const m=/^asec:(.+)$/.exec(key);return !!(m&&WIDE_SECTIONS.has(m[1]))}
+/* ---------- app update: say plainly what is kept and what must be finished first ----------
+   A reload keeps everything already stored on this device (drafts, unsent work) when the device keeps records; what is
+   only on screen (an open camera, a running patrol, a form or note not yet stored, anything on a shared device) would be
+   lost. updateCheck first stores what it can, then lists both groups. The update goes ahead only when nothing would be
+   lost; otherwise each item has a button that takes the person to it. */
+const DRAFT_KIND={draft:"점검 작성",patrol:"순찰 기록",workDraft:"보수 작업 등록",workCompletion:"보수 작업 완료 보고",lightingDraft:"외부 광원·현장 밝기",lightingTaskDraft:"밝기 재확인 업무",lightingAreaDraft:"밝기 검토 제외 구역",formDraft:"입력 양식"};
+async function updateItems(){
+  // store whatever can be stored first, so it moves from "would be lost" to "kept"
+  try{await DGIntegration.persistDraft()}catch(e){}try{await DGIntegration.persistPatrol()}catch(e){}
+  try{const top=navTop();if(top&&fdKind(top.key))await fdPersist(top.key)}catch(e){}
+  try{if(window.DGOperations?.persistActive)await DGOperations.persistActive()}catch(e){}
+  const durable=!!(DGOffline.ready&&DGOffline.durable),lose=[],keep=[];
+  if(pt.on)lose.push({t:`야간 순찰이 진행 중이에요 (표시 ${pt.marks.length}건, 어두운 지점 ${pt.spots.length}곳)`,how:"순찰을 끝내고 저장하면 적용할 수 있어요.",go:"patrol"});
+  if(typeof photoEditor!=="undefined"&&photoEditor)lose.push({t:"사진을 편집하고 있어요",how:"편집을 마치거나 취소하세요.",go:"close"});
+  if(typeof scan==="object"&&scan&&scan.busy)lose.push({t:"표찰을 읽는 중이에요",how:"읽기가 끝나면 적용할 수 있어요."});
+  const top=navTop(),fk=top&&fdKind(top.key);
+  if(fk&&fdDirty(top.key)&&!(durable&&FD.state[top.key]?.persisted))lose.push({t:`${FD_FORMS[fk].label||"입력 내용"}을 작성하고 있어요`,how:durable?"기기에 보관하지 못했어요. 저장하거나 입력을 비우세요.":"이 기기(공유 모드)에는 보관되지 않아요. 저장하거나 입력을 비우세요.",go:"close"});
+  if(draftDirty(draft)&&!durable){const l=byId(draft.lightId);lose.push({t:`${l?l.code:"시설"} 점검을 작성하고 있어요`,how:"공유 기기 모드라 보관되지 않아요. 점검 결과를 저장하세요.",go:"light:"+draft.lightId})}
+  if(["#rNum","#rDesc","#ibNum","#ibDesc"].some(q=>$(q)?.value?.trim()))lose.push({t:"신고 내용을 입력하고 있어요",how:"접수를 마치거나 입력을 지우세요.",go:"close"});
+  let jobs=[],drafts=[];
+  if(DGOffline.ready){try{jobs=(await DGOffline.jobs()).filter(j=>j.state!=="synced");drafts=(await Promise.all(Object.keys(DRAFT_KIND).map(k=>DGOffline.list(k).then(rows=>rows.map(r=>({...r,kind:k})))))).flat()}catch(e){}}
+  const nameOf=d=>{const l=d.kind==="draft"?byId(d.id):d.value&&d.value.lightId?byId(d.value.lightId):null;return `${DRAFT_KIND[d.kind]||"작성 중 기록"}${l?" · "+l.code:d.value&&d.value.title?" · "+d.value.title:""}`};
+  if(jobs.length)(durable?keep:lose).push({t:`보내지 못한 기록 ${jobs.length}건`,how:durable?"이 기기에 보관돼 있고, 연결되면 자동으로 보내요.":"공유 기기 모드라 새로 열면 사라져요. 먼저 보내세요.",go:"outbox",list:jobs.slice(0,5).map(j=>j.summary)});
+  if(drafts.length)(durable?keep:lose).push({t:`작성 중이던 기록 ${drafts.length}건`,how:durable?"이 기기에 보관돼 있어요. 업데이트 후 저장 대기함에서 이어 쓸 수 있어요.":"공유 기기 모드라 새로 열면 사라져요. 저장하거나 정리하세요.",go:"outbox",list:drafts.slice(0,5).map(nameOf)});
+  return {lose,keep,durable};
+}
+function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
+function updateBanner(){return window.DongguPWA&&DongguPWA.updateReady&&DongguPWA.updateReady()?`<div class="notice slim upd-banner"><b>새 버전이 있어요</b> 적용 전에 남길 내용을 확인해 드려요. <button type="button" class="btn sm" data-updapply style="margin-left:auto">새 버전 적용</button></div>`:""}
+async function updateCheck(){
+  const {lose,keep}=await updateItems();
+  if(!lose.length){
+    if(!keep.length)return true;
+    return dgConfirm(keep.map(i=>`• ${i.t} — ${i.how}`).join("\n"),{title:"새 버전을 적용할까요?",ok:"적용하고 다시 열기",cancel:"나중에"});
+  }
+  navRoute("update",()=>updateSheet());updateSheet({lose,keep});return false;
+}
+async function updateSheet(pre){
+  const {lose,keep}=pre||await updateItems();
+  if(!lose.length&&pre==null){closeSheet();DongguPWA.applyUpdate();return}
+  openSheet(`<div class="sheet-head"><div><h3>새 버전 적용 전에 확인해요</h3><div class="muted">앱을 새로 열면 화면에만 있는 내용은 사라져요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+    <h3 class="upd-h bad">먼저 마쳐 주세요 <span class="muted">${lose.length}</span></h3>${lose.map(i=>updateItemHtml(i,true)).join("")}
+    ${keep.length?`<h3 class="upd-h ok">그대로 남아요 <span class="muted">${keep.length}</span></h3>${keep.map(i=>updateItemHtml(i,false)).join("")}`:""}
+    <div class="split" style="margin-top:14px"><button type="button" class="btn sodium" id="updRecheck">다 마쳤어요 · 다시 확인</button><button type="button" class="btn ghost" data-close>나중에</button></div>
+    <p class="muted" style="font-size:12px">새 버전은 다음에 앱을 열 때도 적용할 수 있어요. 지금 쓰는 데는 문제가 없어요.</p>`);
+}
 /* First screen once roles are known: the last tab used on this device, otherwise 관리 현황 for an administrator on a PC
    and 현장 점검 everywhere else. Chosen once per page load; a person's own tab choice afterwards always wins. */
 function chooseLandingTab(){
@@ -979,7 +1029,7 @@ const ICONS={pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 function vInspect(){
   const list=filtered();
   const due=S.lights.filter(isDue).length;const open=S.lights.filter(l=>l.status&&l.status!=="정상").length;
-  return `${tally(true)}
+  return `${tally(true)}${updateBanner()}
   ${!S.canWrite?`<div class="notice slim"><b>보기 전용</b> 점검 결과를 저장하려면 참여자 권한이 필요해요.</div>`:""}
   ${S.me==="local"?`<div class="notice slim"><b>체험 모드</b> 기록은 이 기기에만 남고 공유되지 않아요.</div>`:""}
   ${DongguPWA.panelHTML()}
@@ -1163,7 +1213,7 @@ function vAdmin(){
   const keys=adminKeys().filter(k=>k!=="open"||!DEV.field);
   const openList=`<h2 style="margin-top:6px">조치가 필요한 등 <span class="muted">${open.length}</span>${open.length>6?`<button class="btn ghost sm" data-asec="open" style="float:right">전체 보기</button>`:""}</h2>
   <div class="list">${open.length?open.slice(0,6).map(lightRow).join(""):`<div class="empty">모든 가로등이 정상이에요.</div>`}</div>`;
-  return `${setupNotice}${tally(false)}
+  return `${setupNotice}${tally(false)}${updateBanner()}
   ${DEV.field?openList:todayStrip()}
   ${adminMenu(keys)}
   ${DEV.field?"":openList}
@@ -1585,7 +1635,9 @@ document.addEventListener("click",async e=>{
   if(t.id==="fbRetry"){location.reload();return}
   if(t.id==="pwaInstall"){if(PWA.prompt){PWA.prompt.prompt();PWA.prompt.userChoice.then(r=>{if(r.outcome==="accepted"){PWA.canInstall=false;PWA.prompt=null;render()}})}return}
   if(t.id==="pwaDismiss"){PWA.canInstall=false;PWA.iosHint=false;try{localStorage.setItem("dg-pwa-dismiss",String(Date.now()))}catch(e){}render();return}
-  if(t.id==="pwaReload"){DongguPWA.applyUpdate();return}
+  if(t.id==="pwaReload"||t.dataset.updapply!==undefined){DongguPWA.applyUpdate();return}
+  if(t.id==="updRecheck"){const r=await updateItems();if(!r.lose.length){closeSheet("all");DongguPWA.applyUpdate()}else updateSheet(r);return}
+  if(t.dataset.updgo){const g=t.dataset.updgo;if(g==="outbox"){openAdminSection("outbox");return}if(g==="patrol"){closeSheet("all");return}if(g.startsWith("light:")){openLight(g.slice(6));return}closeSheet();return}
   if(t.id==="ptCoverageRetry"){loadPatrolCoverage();return}
   if(t.id==="themeBtn"){const cur=document.documentElement.dataset.theme||"auto";const next=cur==="auto"?"dark":cur==="dark"?"light":"auto";try{localStorage.setItem("dg-theme",next)}catch(e){}applyTheme(next);toast(`화면을 ${next==="auto"?"자동":next==="dark"?"야간":"주간"}으로 바꿨어요.`);return}
   if(t.id==="claimAdmin"){if(FB){toast("최초 관리자는 승인된 사용자 ID로 서버 초기 설정 도구에서 지정합니다.");return}if(rolesReady()){toast("이미 관리자가 있어요.");render();return}setRole(S.me,"admin").then(()=>{if(FB)db.collection("meta").doc("setup").set({at:Date.now(),by:S.me}).catch(()=>{})});return}
