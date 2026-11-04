@@ -992,8 +992,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v46-roles-status";
+const APP_VER="v47-seed-safe";
 const RELEASE_NOTES=[
+  {v:"v47-seed-safe",d:"2026-11-04",t:"체험 자료를 새로 받아도 이 기기에 남긴 기록은 지우지 않아요"},
   {v:"v46-roles-status",d:"2026-11-04",t:"역할별로 할 수 있는 일(내 권한) 화면 · 주민 신고 처리 상태 조회"},
   {v:"v45-version-info",d:"2026-11-04",t:"버전 정보 화면을 새로 만들고, 철거된 등은 목록·검색·지도에서 숨겨요"},
   {v:"v44-streetlights-20260910",d:"2026-11-04",t:"가로등 대장을 공공데이터(동구 가로등 현황, 2026-09-10 기준)로 바꿨어요"},
