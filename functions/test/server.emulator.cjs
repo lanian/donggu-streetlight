@@ -40,12 +40,12 @@ if(!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||'')){
     assert.deepEqual((await db.doc('roles/new').get()).data().dongs,['산수1동']);
     await assert.rejects(()=>handlers.approveJoinRequest.run(adminRequest({uid:'new'})),e=>e.code==='failed-precondition');
   });
-  function submit(body,ip='127.0.0.42'){
+  function submit(body,ip='127.0.0.42',handler='submitCitizenReport'){
     return new Promise((resolve,reject)=>{
       const headers={origin:'http://localhost:9000','content-type':'application/json'};
       const req={method:'POST',body,headers,ip,socket:{remoteAddress:ip},get:key=>headers[key.toLowerCase()]||'',is:value=>value==='application/json'};
       const res={statusCode:200,set(){return this},status(status){this.statusCode=status;return this},json(data){resolve({status:this.statusCode,data});return this},end(){resolve({status:this.statusCode});return this},on(){return this},once(){return this}};
-      Promise.resolve(handlers.submitCitizenReport(req,res)).catch(reject);
+      Promise.resolve(handlers[handler](req,res)).catch(reject);
     });
   }
   test('gateway handles concurrent retries once and rejects replayed IDs with changed contents',async()=>{
@@ -55,6 +55,30 @@ if(!/^127\.0\.0\.1:\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST||'')){
     assert.equal((await submit({...body,desc:'different'})).status,409);
     for(let i=0;i<9;i++)assert.equal((await submit({...body,requestId:'another-request-'+String(i).padStart(16,'0')})).status,200);
     assert.equal((await submit({...body,requestId:'over-quota-aaaaaaaaaaaaaa'})).status,429);
+  });
+  test('citizen status lookup needs the receipt and its code and reveals only the stage',async()=>{
+    const status=(body,ip='127.0.0.77')=>submit(body,ip,'citizenReportStatus');
+    const sent=await submit({requestId:'status-request-aaaaaaaa',code:'산수동 2',issue:'꺼짐',desc:'마트 앞',contact:'010-0000-0000',consent:true},'127.0.0.43');
+    assert.equal(sent.status,200);assert.match(sent.data.statusCode,/^[2-9A-HJ-NP-Z]{6}$/);
+    const again=await submit({requestId:'status-request-aaaaaaaa',code:'산수동 2',issue:'꺼짐',desc:'마트 앞',contact:'010-0000-0000',consent:true},'127.0.0.43');
+    assert.equal(again.data.statusCode,sent.data.statusCode,'a retried submission returns the same code');
+    const ok={receipt:sent.data.receipt,code:sent.data.statusCode};
+    let r=await status(ok);assert.equal(r.status,200);assert.equal(r.data.stage,'received');
+    assert.deepEqual(Object.keys(r.data).sort(),['detail','label','receipt','stage','updatedOn']);
+    assert.doesNotMatch(JSON.stringify(r.data),/마트|010|산수동/);
+    const wrong=await status({...ok,code:ok.code==='222222'?'333333':'222222'});
+    const missing=await status({receipt:'R260101-00000000',code:ok.code});
+    assert.equal(wrong.status,404);assert.equal(missing.status,404);assert.equal(wrong.data.error,missing.data.error,'unknown receipt and wrong code look the same');
+    assert.equal((await status({receipt:'nope',code:'x'})).status,400);
+    // after staff import the stage follows the staff report
+    const raw=(await db.collection('citizen_reports').where('receipt','==',ok.receipt).get()).docs[0];
+    await db.doc('reports/rp-1').set({status:'처리중',updatedAt:Date.UTC(2026,10,3,16),contact:'secret'});
+    await raw.ref.update({imported:true,importedAt:Date.now(),reportId:'rp-1'});
+    r=await status({receipt:ok.receipt.toLowerCase(),code:ok.code.toLowerCase()});assert.equal(r.data.stage,'in-progress');assert.equal(r.data.updatedOn,'2026-11-04');
+    await db.doc('reports/rp-1').update({status:'완료'});assert.equal((await status(ok)).data.stage,'done');
+    // per-address limit
+    for(let i=0;i<30;i++)await status(ok,'127.0.0.99');
+    assert.equal((await status(ok,'127.0.0.99')).status,429);
   });
   test('server audit is idempotent and the expiry job removes sensitive values in both copies',async()=>{
     const ref=db.doc('reports/private');await ref.set({status:'접수',contact:'secret',photo:'private',desc:'work detail',privacyExpiresAt:1});

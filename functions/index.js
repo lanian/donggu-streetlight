@@ -87,11 +87,35 @@ exports.submitCitizenReport=onRequest({region,cors:false,secrets:[rateSecret],ma
     const photo=await C.normalizePhoto(parsed.photo,sharp);
     const result=await db.runTransaction(async tx=>{
       const [existing,previous]=await Promise.all([tx.get(ref),tx.get(limit)]);
-      if(existing.exists){if(existing.data().requestHash!==fingerprint)throw new HttpsError('already-exists','같은 요청 ID의 내용이 다릅니다.');return {receipt:existing.data().receipt,id};}
+      if(existing.exists){if(existing.data().requestHash!==fingerprint)throw new HttpsError('already-exists','같은 요청 ID의 내용이 다릅니다.');return {receipt:existing.data().receipt,id,statusCode:C.statusCode(key,id)};}
       tx.set(limit,C.consumeLimit(previous.data(),now,10));
-      tx.create(ref,{...parsed.rec,photo,receipt,requestHash:fingerprint});return {receipt,id};
+      tx.create(ref,{...parsed.rec,photo,receipt,requestHash:fingerprint});return {receipt,id,statusCode:C.statusCode(key,id)};
     });await health.record('gateway',true);res.status(200).json(result);
   }catch(e){const code=e.code||'';if(!(e instanceof C.InputError)&&!(e instanceof HttpsError))await health.record('gateway',false,{code});res.status(code==='resource-exhausted'?429:code==='unauthenticated'?401:code==='already-exists'?409:code==='invalid-argument'?400:500).json({error:e instanceof C.InputError||e instanceof HttpsError?e.message:'접수하지 못했습니다. 잠시 후 다시 시도하세요.'});}
+});
+
+// 주민 처리 상태 조회: 접수번호 + 확인 코드가 맞을 때만 단계(접수·확인·처리 중·완료)와 날짜를 돌려준다.
+// 없는 번호와 틀린 코드는 같은 답을 주고, 주소(IP)별로 시간당 30회까지만 받는다.
+exports.citizenReportStatus=onRequest({region,cors:false,secrets:[rateSecret],maxInstances:10,timeoutSeconds:15,memory:'256MiB'},async(req,res)=>{
+  res.set('Cache-Control','no-store');
+  const origin=req.get('Origin')||'',origins=allowedOrigins.value().split(',').map(x=>x.trim()).filter(Boolean);
+  const emulator=process.env.FUNCTIONS_EMULATOR==='true';
+  if(origin&&(origins.includes(origin)||(emulator&&/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)))){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}
+  else if(origin){res.status(403).json({error:'허용되지 않은 출처입니다.'});return;}
+  if(req.method==='OPTIONS'){res.set('Access-Control-Allow-Methods','POST');res.set('Access-Control-Allow-Headers','Content-Type, X-Firebase-AppCheck');res.status(204).end();return;}
+  if(req.method!=='POST'){res.status(405).json({error:'POST 요청이 필요합니다.'});return;}
+  try{
+    if(!emulator){const token=req.get('X-Firebase-AppCheck');if(!token)throw new HttpsError('unauthenticated','앱 확인이 필요합니다.');try{await getAppCheck().verifyToken(token);}catch{throw new HttpsError('unauthenticated','앱 확인을 다시 시도해 주세요.');}}
+    if(!req.is('application/json')||JSON.stringify(req.body||{}).length>400)throw new C.InputError('조회 요청을 확인하세요.');
+    const query=C.normalizeStatusQuery(req.body),now=Date.now(),key=emulator?'emulator-only-rate-key':rateSecret.value();
+    const rateId=crypto.createHmac('sha256',key).update(req.ip||req.socket.remoteAddress||'unknown').digest('hex'),limit=db.doc('privateLimits/status-'+rateId);
+    await db.runTransaction(async tx=>{tx.set(limit,C.consumeLimit((await tx.get(limit)).data(),now,30));});
+    const rows=await db.collection('citizen_reports').where('receipt','==',query.receipt).limit(2).get();
+    const doc=rows.docs.find(d=>C.sameCode(C.statusCode(key,d.id),query.code));
+    if(!doc)throw new C.InputError('접수번호나 확인 코드가 맞지 않아요. 다시 확인해 주세요.','not-found');
+    const citizen=doc.data(),report=citizen.reportId?(await db.doc('reports/'+citizen.reportId).get()).data():null;
+    res.status(200).json(C.publicStatus(citizen,report));
+  }catch(e){const code=e.code||'';res.status(code==='resource-exhausted'?429:code==='unauthenticated'?401:code==='not-found'?404:code==='invalid-argument'?400:500).json({error:e instanceof C.InputError||e instanceof HttpsError?e.message:'지금은 조회할 수 없어요. 잠시 후 다시 시도하세요.'});}
 });
 
 // Server-owned audit entries use the trigger's authenticated actor, never a client-provided "by" as proof.

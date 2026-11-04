@@ -51,3 +51,4 @@ jobs:
           node scripts/device-profile-browser-smoke.cjs
           node scripts/update-check-browser-smoke.cjs
           node scripts/version-info-browser-smoke.cjs
+          node scripts/roles-status-browser-smoke.cjs
