@@ -145,7 +145,7 @@ exports.purgeExpiredPersonalData=onSchedule({region,schedule:'every 24 hours',ti
   try{
   for(const collection of ['citizen_reports','reports'])for(let page=0;page<25;page++){
     const rows=await db.collection(collection).where('privacyExpiresAt','<=',now).limit(400).get();if(rows.empty)break;
-    const batch=db.batch();for(const d of rows.docs){const patch=Object.fromEntries(C.PRIVATE_FIELDS.map(k=>[k,FieldValue.delete()]));batch.update(d.ref,{...patch,privacyExpiresAt:FieldValue.delete(),privacyPurgedAt:now});}await batch.commit();counts[collection==='citizen_reports'?'citizenReports':'reports']+=rows.size;
+    const batch=db.batch();for(const d of rows.docs){const patch=Object.fromEntries(C.PRIVATE_FIELDS.map(k=>[k,FieldValue.delete()]));if(collection==='reports'&&d.data().ext)patch.location=FieldValue.delete(); /* an imported QR report's location text is the reporter's GPS position */batch.update(d.ref,{...patch,privacyExpiresAt:FieldValue.delete(),privacyPurgedAt:now});}await batch.commit();counts[collection==='citizen_reports'?'citizenReports':'reports']+=rows.size;
   }
   for(const collection of ['privateLimits','staffInvites'])for(let page=0;page<10;page++){const rows=await db.collection(collection).where('expiresAt','<=',now).limit(400).get();if(rows.empty)break;const batch=db.batch();rows.docs.forEach(d=>batch.delete(d.ref));await batch.commit();counts[collection==='staffInvites'?'expiredInvites':'expiredLimits']+=rows.size;}
   for(const collection of ['citizen_reports','reports'])counts.remainingExpired+=(await db.collection(collection).where('privacyExpiresAt','<=',now).count().get()).data().count;

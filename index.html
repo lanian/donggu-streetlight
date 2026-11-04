@@ -998,8 +998,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v48-security";
+const APP_VER="v49-privacy";
 const RELEASE_NOTES=[
+  {v:"v49-privacy",d:"2026-11-04",t:"신고자 정보 보호: 파기 범위 확대, 백업·점검자 CSV에서 제외, 완료 전 확인"},
   {v:"v48-security",d:"2026-11-04",t:"보안 강화: 신고 내용 표시 안전 처리, 외부 스크립트 제한, 라이브러리는 앱에 포함된 것부터 사용"},
   {v:"v47-seed-safe",d:"2026-11-04",t:"체험 자료를 새로 받아도 이 기기에 남긴 기록은 지우지 않아요"},
   {v:"v46-roles-status",d:"2026-11-04",t:"역할별로 할 수 있는 일(내 권한) 화면 · 주민 신고 처리 상태 조회"},
@@ -1212,7 +1213,7 @@ function reportCard(r,admin){
   const l=r.lightId?byId(r.lightId):null;
   return `<div class="panel st-${esc(r.status)}" style="border-left:5px solid var(--c)">
     <div style="display:flex;gap:8px;align-items:center"><b>${esc(r.issue)}</b><span class="chip" style="margin-left:auto">${esc(r.status)}</span></div>
-    <div class="muted">${l?kindBadge(l.kind):""}${r.code?`<b>${esc(r.code)}</b> · `:""}${esc(r.dong||"")} ${esc(r.location||"")}</div>
+    <div class="muted">${l?kindBadge(l.kind):""}${r.code?`<b>${esc(r.code)}</b> · `:""}${esc(r.dong||"")} ${esc(r.location||(typeof r.lat==="number"?`신고자 위치 기록됨 (±${r.acc??"?"}m)`:""))}</div>
     ${r.via||r.receipt||r.contact?`<div class="muted">${[r.via,r.receipt,r.contact?`연락처 ${esc(r.contact)}`:""].filter(Boolean).map(esc).join(" · ")}</div>`:""}
     ${r.desc?`<div style="margin-top:6px">${esc(r.desc)}</div>`:""}
     ${r.photo?`<img class="thumb" src="${esc(safeImageSrc(r.photo))}" alt="신고 사진" loading="lazy" style="max-height:180px">`:""}
@@ -1775,7 +1776,11 @@ document.addEventListener("click",async e=>{
   if(t.dataset.lstat&&draft){if(!need("inspect"))return;const id=draft.lightId,to=t.dataset.lstat;if(await write(()=>patchLight(id,{status:to,updatedAt:Date.now()}),`${to}(으)로 변경했어요.`))closeSheet();return}
   if(t.dataset.issue){document.querySelectorAll("#issueSeg button").forEach(b=>b.setAttribute("aria-pressed",b===t));return}
   if(t.id==="sendReport"){sendReport(t);return}
-  if(t.dataset.rstat){if(!need("admin"))return;const to=t.dataset.to;write(()=>db.doc("reports/"+t.dataset.rstat).update({status:to,updatedAt:Date.now(),...(to==="완료"?{contact:""}:{})}),`신고를 ${to}(으)로 변경했어요.`);return}
+  if(t.dataset.rstat){if(!need("admin"))return;const to=t.dataset.to,r=S.reports.find(x=>x.id===t.dataset.rstat);
+    if(to==="완료"&&r){const work=r.workId&&window.DGOperations&&(DGOperations.state.orders||[]).find(w=>w.id===r.workId&&!["completed","verified","cancelled"].includes(w.status));
+      const lines=[r.contact?"신고자 연락처를 지워요. 되돌릴 수 없어요(처리 결과를 먼저 안내했는지 확인하세요).":"",work?"연결된 보수 작업이 아직 끝나지 않았어요.":""].filter(Boolean);
+      if(lines.length&&!await dgConfirm(lines.join("\n"),{title:"신고를 완료로 바꿀까요?",ok:"완료로 변경",cancel:"취소",danger:!!r.contact}))return}
+    write(()=>db.doc("reports/"+t.dataset.rstat).update({status:to,updatedAt:Date.now(),...(to==="완료"?{contact:""}:{})}),`신고를 ${to}(으)로 변경했어요.`);return}
   if(t.dataset.tofault){const r=S.reports.find(x=>x.id===t.dataset.tofault);if(!r)return;write(async()=>{await patchLight(r.lightId,{status:"고장",updatedAt:Date.now()});if(r.status==="접수")await db.doc("reports/"+r.id).update({status:"처리중",updatedAt:Date.now()})},"가로등을 고장으로 등록했어요.");return}
   if(t.id==="addLight"){if(need("inspect"))addLight();return}
   if(t.dataset.regset){if(!need("admin"))return;const to=t.dataset.to;write(()=>patchLight(t.dataset.regset,{reg:to,regAt:Date.now(),updatedAt:Date.now()}),`'${to}'(으)로 바꿨어요.`);return}
@@ -1929,6 +1934,7 @@ document.addEventListener("change",async e=>{
   if(e.target.id==="qrDong"){QR.dong=e.target.value;render();return}
   if(e.target.id==="qrKind"){QR.kind=e.target.value;render();return}
   if(e.target.id==="bkPhotos"){if(BK.busy)return;BK.photos=e.target.checked;return}
+  if(e.target.id==="bkPii"){if(BK.busy)return;BK.pii=e.target.checked;return}
   if(e.target.id==="bkOver"){if(BK.busy)return;BK.overwrite=e.target.checked;BK.preview=null;render();return}
   if(e.target.id==="bkRoles"){if(BK.busy)return;BK.roles=e.target.checked;BK.preview=null;render();return}
   if(e.target.id==="bkFile"){if(BK.busy)return;BK.file=e.target.files&&e.target.files[0]||null;BK.preview=null;render();return}
@@ -2088,7 +2094,7 @@ async function importCitizenReports(){
       const hasLightId=typeof x.lightId==="string"&&x.lightId.length>0;
       let l=hasLightId?byId(x.lightId):null,code=x.code||"";if(l)code=l.code;else if(!hasLightId&&code){const p=parseCode(code);if(p){l=lookup(p);code=l?l.code:labelText(p)}}
       if(!hasLightId&&!l&&typeof x.lat==="number"){const G=lightGrid(),me=G.toXY({lat:x.lat,lng:x.lng}),nb=G.near(me.x,me.y,40).filter(o=>!o.it.l.removed).sort((a,b)=>a.d-b.d)[0];if(nb&&!code)l=nb.it.l}
-      const rec={issue:x.issue||"기타",location:typeof x.lat==="number"?`${x.lat}, ${x.lng} (±${x.acc||"?"}m)`:"",dong:l?l.dong:"",code,lightId:l?l.id:null,desc:(x.desc||"").slice(0,1000),via:"QR 신고 페이지",receipt:x.receipt||"",contact:x.contact||"",photo:x.photo||null,lat:x.lat??null,lng:x.lng??null,status:"접수",createdAt:x.at||0,importedAt:x.at||0,ext:sourceId,reporterId:null,...(Number.isFinite(x.privacyExpiresAt)?{privacyExpiresAt:x.privacyExpiresAt}:{})};
+      const rec={issue:x.issue||"기타",location:"",dong:l?l.dong:"",code,lightId:l?l.id:null,desc:(x.desc||"").slice(0,1000),via:"QR 신고 페이지",receipt:x.receipt||"",contact:x.contact||"",photo:x.photo||null,lat:x.lat??null,lng:x.lng??null,status:"접수",createdAt:x.at||0,importedAt:x.at||0,ext:sourceId,reporterId:null,...(Number.isFinite(x.privacyExpiresAt)?{privacyExpiresAt:x.privacyExpiresAt}:{})};
       const marker={imported:true,importedAt:Date.now(),importedBy:actor,reportId:targetId,contact:firebase.firestore.FieldValue.delete(),photo:firebase.firestore.FieldValue.delete()};
       try{let exists=false;const rawRef=fs.doc(collection+"/"+sourceId),target=db.doc("reports/"+targetId);
         if(fs===db&&typeof fs.runTransaction==="function"){
@@ -2123,8 +2129,9 @@ async function addInboxReport(btn){
   if(ok){if(typeof fdClear==="function")fdClear("asec:inbox");for(const id of ["ibNum","ibLoc","ibDesc","ibRc","ibContact"]){const el=$("#"+id);if(el){el.value="";delete el.dataset.lightId;delete el.dataset.lightCode}}render()}else{btn.disabled=false;btn.textContent="신고 접수"}
 }
 async function exportReportsCSV(){
-  const q=csvCell;
-  const rows=[["접수일시","상태","경로","접수번호","등 번호","동","위치","유형","내용","연락처","처리일시"],...S.reports.map(r=>[fmtDT(r.createdAt),r.status,r.via||"",r.receipt||"",r.code||"",r.dong||"",r.location||"",r.issue,r.desc||"",r.contact||"",r.status!=="접수"?fmtDT(r.updatedAt):""])];
+  // Inspectors get the work columns only; the reporter's contact and GPS position go to administrators alone.
+  const q=csvCell,admin=can("admin"),pos=r=>typeof r.lat==="number"?`${r.lat}, ${r.lng}`:"";
+  const rows=[["접수일시","상태","경로","접수번호","등 번호","동","위치","유형","내용",...(admin?["신고자 위치","연락처"]:[]),"처리일시"],...S.reports.map(r=>[fmtDT(r.createdAt),r.status,r.via||"",r.receipt||"",r.code||"",r.dong||"",r.ext?"":(r.location||""),r.issue,r.desc||"",...(admin?[pos(r)||(r.ext?r.location||"":""),r.contact||""]:[]),r.status!=="접수"?fmtDT(r.updatedAt):""])];
   const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
   try{await dl.save({filename:`동구가로등_신고_${fmtD(Date.now()).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
 }
@@ -2144,12 +2151,12 @@ function qrSection(){
   <div class="qrgrid" style="--mm:${mm}mm">${show.map(l=>`<div class="qrl"><div class="qrimg">${qrSvg(qrUrl(l),200)}</div><div class="qrt"><b>${esc(l.code)}</b><span>${esc(l.kind)} · 고장 신고는 QR을 찍어 주세요</span></div></div>`).join("")}</div>`;
 }
 /* ---------- backup: every collection as one JSON, and the reverse — for moving between the artifact, Firebase and other backends ---------- */
-const BK={busy:false,msg:"",photos:true,overwrite:false,roles:false,file:null,preview:null};
+const BK={busy:false,msg:"",photos:true,pii:false,overwrite:false,roles:false,file:null,preview:null};
 const BK_COLS=["lights","lightFields","inspections","reports","reportEvents","patrols","roles","photos","workOrders","workEvents","auditEvents","settings","inventory","inventoryMoves","lightingContext","lightingOperations","lightingTasks","lightingRuns","lightingWorkflowOperations","lightingAreas","lightingAreaOperations"];
 function backupSection(){
   const p=BK.preview;
   return `<details class="help"><summary>백업과 복원</summary><p>배포 대장을 제외한 운영 기록을 전체 조회해 JSON으로 내려받아요. 먼저 추가·건너뜀·덮어쓰기 건수를 확인하세요. Firebase의 보수·재고·재확인 업무와 불변 이력은 관리자 서버에서 연결 관계를 검증하고 원작성자를 보존해 복원해요. 이 묶음은 200문서·4MB까지 한 번에 반영하며 큰 자료는 관리자 대량 이전 도구를 사용해요. 사용자 역할은 별도로 선택하며 서버 감사 기록과 처리 영수증은 직접 복원하지 않아요.</p></details>
-  <div class="panel"><h3>내보내기</h3><label class="muted"><input type="checkbox" id="bkPhotos" ${BK.busy?"disabled":""} ${BK.photos?"checked":""}> 사진 포함</label>
+  <div class="panel"><h3>내보내기</h3><label class="muted"><input type="checkbox" id="bkPhotos" ${BK.busy?"disabled":""} ${BK.photos?"checked":""}> 사진 포함</label><label class="muted" style="display:block"><input type="checkbox" id="bkPii" ${BK.busy?"disabled":""} ${BK.pii?"checked":""}> 신고자 개인정보 포함 (연락처·신고 사진·위치) — 서버 이전용, 파일을 안전하게 보관하세요</label>
   <div class="split"><button class="btn sm" id="bkExport" ${BK.busy?"disabled":""}>전체 JSON 내려받기</button></div>
   <h3>가져오기</h3><input type="file" id="bkFile" ${BK.busy?"disabled":""} accept="application/json,.json" class="f-in">
   <label class="muted" style="display:block;margin:8px 0"><input type="checkbox" id="bkOver" ${BK.busy?"disabled":""} ${BK.overwrite?"checked":""}> 기존 문서를 덮어쓰기</label>
@@ -2158,12 +2165,14 @@ function backupSection(){
   <div class="split"><button class="btn sodium sm" id="bkImport" ${BK.busy||!BK.file?"disabled":""}>${p?"검토한 내용 가져오기":"복원 내용 검토"}</button>${p?`<button class="btn ghost sm" id="bkPreview" ${BK.busy?"disabled":""}>현재 자료와 다시 비교</button>`:""}<span class="muted">${esc(BK.msg||"")}</span></div></div>`;
 }
 async function backupExport(){
-  if(BK.busy)return;const includePhotos=BK.photos;BK.busy=true;BK.msg="전체 기록 모으는 중…";render();
+  if(BK.busy)return;const includePhotos=BK.photos,includePii=!!BK.pii;BK.busy=true;BK.msg="전체 기록 모으는 중…";render();
   try{const out={app:"donggu-streetlight",version:2,complete:true,at:Date.now(),by:S.me||null,mode:FB?"firebase":db.mode==="local"?"local":"artifact",collections:{},counts:{}};
     for(const c of BK_COLS){if(c==="photos"&&!includePhotos)continue;out.collections[c]=await listAllRecords(c,{requireServer:!!FB,onPage:n=>{BK.msg=`${c} ${n}건 확인 중…`;render()}})}
     // Include a materialized light state so an artifact backup can be restored into a
     // backend that does not subscribe to the artifact's immutable patch log.
     if(out.collections.lightFields&&out.collections.lightFields.length){const base=Object.fromEntries((out.collections.lights||[]).map(({id,...v})=>[id,v]));out.collections.lights=Object.entries(DGData.mergeLightFields(base,out.collections.lightFields)).map(([id,v])=>({id,...v}))}
+    // Reporter details stay out of the file unless asked for: the file lives outside the retention schedule.
+    if(!includePii)for(const c of["reports","citizen_reports"])if(out.collections[c])out.collections[c]=out.collections[c].map(withoutReporter);out.personalData=includePii;
     for(const[c,rows]of Object.entries(out.collections))out.counts[c]=rows.length;
     const data=JSON.stringify(out);await dl.save({filename:`동구가로등_백업_${fmtD(Date.now()).replace(/\./g,"")}.json`,data:new Blob([data],{type:"application/json"})});
     BK.msg=`전체 ${Object.values(out.counts).reduce((a,b)=>a+b,0)}건 내보냈어요 (${Math.round(data.length/1048576*10)/10}MB).`;
@@ -2173,6 +2182,7 @@ async function backupExport(){
 async function backupPreview(){
   if(BK.busy||!BK.file)return;const selected={file:BK.file,overwrite:BK.overwrite,roles:BK.roles};BK.busy=true;BK.preview=null;BK.msg="백업과 기존 자료 확인 중…";render();
   try{const input=JSON.parse(await selected.file.text());DGData.validateBackup(input);
+    for(const c of["reports","citizen_reports"])if(Array.isArray(input.collections[c]))input.collections[c]=input.collections[c].map(r=>r&&(r.privacyPurgedAt||(Number.isFinite(r.privacyExpiresAt)&&r.privacyExpiresAt<=Date.now()))?withoutReporter(r):r);
     if(BK.file!==selected.file||BK.overwrite!==selected.overwrite||BK.roles!==selected.roles)throw new Error("파일 또는 복원 선택이 바뀌었어요. 선택한 내용으로 다시 검토해 주세요.");
     if(input.collections.lightFields&&input.collections.lightFields.length){const base=Object.fromEntries((input.collections.lights||[]).map(({id,...v})=>[id,v]));input.collections.lights=Object.entries(DGData.mergeLightFields(base,input.collections.lightFields)).map(([id,v])=>({id,...v}))}
     const plan={...selected,at:Date.now(),collections:{},add:0,skip:0,replace:0,excluded:0,notes:[],operational:null};
@@ -2206,6 +2216,8 @@ async function backupImport(){
   }
   const collections=Object.entries(plan.collections).sort(([a],[b])=>(a==="roles")-(b==="roles"));
   for(const[c,rows]of collections)for(const row of (c==="roles"?[...rows].sort((a,b)=>(a.id===S.me)-(b.id===S.me)):rows)){const{id,...original}=row;let data=original;
+    // A report whose reporter details were already destroyed (or are past their keep-until date) never gets them back from a file.
+    if((c==="reports"||c==="citizen_reports")&&(data.privacyPurgedAt||(Number.isFinite(data.privacyExpiresAt)&&data.privacyExpiresAt<=Date.now())))data=withoutReporter(data);
     try{let skipped=false;
       if(c==="lightingAreas"){const result=await DGLightingAreas.restoreRecord(row,plan.overwrite);skipped=result.skipped}
       else if(c==="lightingContext"){const result=await DGLighting.restoreRecord(row,plan.overwrite);skipped=result.skipped}
@@ -2228,6 +2240,9 @@ async function backupImport(){
   if(failures.length){BK.msg+=" 실패 목록을 내려받아 확인하고 다시 시도하세요.";try{await dl.save({filename:"동구가로등_복원실패.json",data:new Blob([JSON.stringify({at:Date.now(),failures},null,2)],{type:"application/json"})})}catch(e){}}
   else BK.file=null;toast(BK.msg);render();
 }
+/* Reporter details (what identifies a citizen or where they stood): kept out of backups unless asked, never restored once destroyed. */
+const REPORTER_FIELDS=["contact","photo","lat","lng","acc","ua"];
+function withoutReporter(r){const out={...r};for(const k of REPORTER_FIELDS)delete out[k];if(out.ext&&out.location)out.location="";return out}
 /* ---------- period report: one printable page the office can file ---------- */
 const REP={period:"month",from:"",to:"",dong:"전체",photos:true,inlinePh:true,data:null,loading:false,err:""};
 function repRange(){const now=new Date();let a,b=now.getTime();
