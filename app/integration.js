@@ -27,7 +27,7 @@
   function scheduleDraft() { clearTimeout(timer); timer = setTimeout(() => persistDraft().catch(warn), 160); }
   function patrolSnapshot() {
     const p = api.patrol(); if (!p.sessionId || !(p.track.length || p.marks.length || p.spots.length || p.passed.size)) return null;
-    return { sessionId: p.sessionId, start: p.start, end: p.end || null, dong: p.dong, total: p.total, track: copy(p.track), passed: [...p.passed], marks: copy(p.marks), spots: copy(p.spots), dist: p.dist, pos: p.pos && copy(p.pos), last: p.last && copy(p.last), heading: p.heading, paused: true };
+    return { sessionId: p.sessionId, start: p.start, end: p.end || null, dong: p.dong, total: p.total, track: copy(p.track), passed: [...p.passed], marks: copy(p.marks), spots: copy(p.spots), dist: p.dist, pos: p.pos && copy(p.pos), last: p.last && copy(p.last), heading: p.heading, savedPart: p.savedPart ? copy(p.savedPart) : null, paused: true };
   }
   async function persistPatrol() {
     if (!root.DGOffline.ready) return;
