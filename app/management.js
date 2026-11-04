@@ -62,7 +62,7 @@
       const values = C.normalizeRegistry(JSON.parse(await file.text()));
       if (token !== registryLoad) return;
       const base = api.registry(), known = new Set(base.map(l => l.id));
-      const prior = [...base, ...api.state().lights.filter(l => !known.has(l.id) && l.registryJobId)];
+      const prior = [...base, ...(api.state().allLights || api.state().lights).filter(l => !known.has(l.id) && l.registryJobId)];
       state.registry = C.registryDiff(prior, values, api.overrides()); state.source = file.name;
     } catch (error) { if (token !== registryLoad) return; state.registryError = error.message || '대장 형식을 확인해 주세요.'; }
     const input = Q('#dgRegistryFile'); if (input) input.value = '';

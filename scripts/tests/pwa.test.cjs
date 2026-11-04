@@ -134,3 +134,13 @@ test('with the app pre-check, the update goes only on its yes, and an approved u
   // drafts kept on the device still count as "pending" for the old check, but the person already agreed: reload
   flags.dirty = true; await listeners.controllerchange(); assert.equal(calls.reloads, 1);
 });
+
+test('the version shown in the app is the service-worker release, and its release note is on top', () => {
+  const sw = /const VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(root, 'sw.js'), 'utf8'))[1];
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const app = /const APP_VER="([^"]+)"/.exec(html)[1];
+  assert.equal(app, sw, 'bump APP_VER in index.html together with VERSION in sw.js');
+  const first = /const RELEASE_NOTES=\[\s*\{v:"([^"]+)",d:"(\d{4}-\d{2}-\d{2})"/.exec(html);
+  assert.ok(first, 'RELEASE_NOTES starts with {v, d:"YYYY-MM-DD", t}');
+  assert.equal(first[1], sw, 'add a RELEASE_NOTES line for the new version');
+});

@@ -74,6 +74,19 @@
     state.requested = true; state.waiting.postMessage({ type: 'activate-update' });
     state.message = '새 버전을 적용하는 중…'; render(); return true;
   }
+  // "새 버전 확인": ask the server for a newer sw.js now instead of waiting for the browser's own check
+  async function lookForUpdate() {
+    const reg = state.registration;
+    if (!reg) return { found: false, message: '앱 저장 준비가 아직 끝나지 않았어요. 연결된 상태로 잠시 후 다시 확인하세요.' };
+    if (state.waiting || state.reloadReady) return { found: true, message: '' };
+    if (navigator.onLine === false) return { found: false, message: '오프라인이라 확인할 수 없어요. 연결된 뒤 다시 눌러 주세요.' };
+    try { await reg.update(); } catch (_) { return { found: false, message: '서버에 연결하지 못했어요. 잠시 뒤 다시 확인하세요.' }; }
+    const w = reg.installing;
+    if (w) await new Promise(resolve => { const t = setTimeout(resolve, 20000); w.addEventListener('statechange', () => { if (w.state === 'installed' || w.state === 'redundant' || w.state === 'activated') { clearTimeout(t); resolve(); } }); });
+    if (reg.waiting && navigator.serviceWorker.controller && !state.waiting) { state.waiting = reg.waiting; render(); options.onChange?.(); }
+    const found = !!(state.waiting || state.reloadReady);
+    return { found, message: found ? '' : w ? '새 버전을 내려받는 중이에요. 잠시 뒤 다시 확인하세요.' : '지금 쓰는 버전이 최신이에요 (' + new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) + ' 확인)' };
+  }
   function start(config) {
     options = config;
     if (!('serviceWorker' in navigator)) return;
@@ -98,5 +111,5 @@
     if (document.readyState === 'complete') register(); else window.addEventListener('load', register, { once: true });
     document.addEventListener('click', e => { const id = e.target.closest('button')?.id; if (id === 'offlineCheck') check(); else if (id === 'offlinePrepare') prepare(); });
   }
-  window.DongguPWA = { start, applyUpdate, check, panelHTML, render, provider, tileLayer, updateReady: () => !!(state.waiting || state.reloadReady) };
+  window.DongguPWA = { start, applyUpdate, check, lookForUpdate, panelHTML, render, provider, tileLayer, updateReady: () => !!(state.waiting || state.reloadReady) };
 })();

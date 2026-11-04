@@ -136,6 +136,9 @@ header p{margin:0;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:
 .deskmenu>summary{cursor:pointer;padding:12px 2px;font-weight:700;list-style:none;min-height:44px}.deskmenu>summary::-webkit-details-marker{display:none}.deskmenu>summary::before{content:"▸ ";color:var(--ink-2)}.deskmenu[open]>summary::before{content:"▾ "}
 .deskmenu>summary small{display:block;font-weight:400;color:var(--ink-2);font-size:12px;margin-top:2px}.deskmenu .menu{padding-bottom:10px}
 .devnote,.devmode{font-size:12px;margin:8px 2px 4px}.devmode{text-align:center;margin-top:18px}
+.ver-foot{text-align:center;font-size:12px;margin:14px 0 4px}.ver-foot .linkbtn{color:var(--ink-2);font-size:12px}.ver-foot b{color:var(--fix)}
+.ver-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}.ver-row:last-child{border-bottom:0}.ver-row .k{flex:0 0 92px;color:var(--ink-2);font-size:13px}.ver-row .v{flex:1;min-width:0;overflow-wrap:anywhere}.ver-row .v small{display:block;color:var(--ink-2);font-size:12px;margin-top:2px}.ver-row .btn{margin-left:6px;vertical-align:middle}
+.ver-notes{margin:0 0 12px;padding-left:20px;font-size:13px}.ver-notes li{margin:0 0 8px}.ver-notes li.cur b{color:var(--sodium,var(--fix))}
 .linkbtn{font:inherit;font-size:inherit;background:none;border:0;padding:4px 2px;color:var(--fix);text-decoration:underline;cursor:pointer;min-height:32px}
 .deskonly{margin:0 0 10px}
 /* update check: what must be finished first (would be lost) vs what stays on this device */
@@ -592,17 +595,17 @@ function plateRef(l){return{lightId:l.id,codeText:l.code,kind:l.kind||"가로등
 // find a registered light for a parsed label (prefers ones still standing)
 function lookup(p){
   if(!p)return null;
-  if(p.lightId)return S.lights.find(l=>l.id===p.lightId)||null;
+  if(p.lightId)return (S.allLights||S.lights).find(l=>l.id===p.lightId)||null;
   const live=a=>a.find(l=>!l.removed)||a[0]||null;
   if(p.kind==="가로등"){
     const m=nrm(p.main),s=nrm(p.sub);
-    const cands=S.lights.filter(l=>l.kind==="가로등"&&nrm(l.main)===m&&nrm(l.sub)===s);
+    const cands=(S.allLights||S.lights).filter(l=>l.kind==="가로등"&&nrm(l.main)===m&&nrm(l.sub)===s);
     if(p.road){const exact=cands.filter(l=>l.road===p.road);if(exact.length)return live(exact)}
     const noRoad=cands.filter(l=>!p.road||!l.road);
-    return live(noRoad)||(cands.length===1?cands[0]:null)||S.lights.find(l=>l.code===labelText(p))||null;
+    return live(noRoad)||(cands.length===1?cands[0]:null)||(S.allLights||S.lights).find(l=>l.code===labelText(p))||null;
   }
   const n=nrm(p.num);
-  return live(S.lights.filter(l=>isPlateDong(l.kind)&&l.dong===p.dong&&nrm(l.num)===n))||S.lights.find(l=>l.code===codeOf(p.dong,p.num))||null;
+  return live((S.allLights||S.lights).filter(l=>isPlateDong(l.kind)&&l.dong===p.dong&&nrm(l.num)===n))||(S.allLights||S.lights).find(l=>l.code===codeOf(p.dong,p.num))||null;
 }
 const ROAD_RE=/([\uac00-\ud7a3]{1,8}?(?:대로|로|길))\s*(\d{1,4})\s*-\s*(\d{1,3})(?![\d-])/;      // 지호로 65-5
 const GL_RE=/(?<![\d-])(\d{1,4})\s*-\s*(\d{1,3})(?![\d-]|\s*-\s*\d)/;   // 140-8, not phone 608-2894, not 1544-1555, not 2022-11-26
@@ -612,12 +615,12 @@ function parseCode(text){
     try{
       const query=t.includes("?")?t.slice(t.indexOf("?")+1).split("#")[0]:t.replace(/^&/,"");
       const params=new URLSearchParams(query),id=params.get("lid");
-      if(id){const l=S.lights.find(x=>x.id===id);return l?plateRef(l):null}
+      if(id){const l=(S.allLights||S.lights).find(x=>x.id===id);return l?plateRef(l):null}
       for(const key of ["c","no","num","id","code","lamp"]){const value=params.get(key);if(value&&value!==t){const p=parseCode(value);if(p)return p}}
     }catch(e){}
     return null;
   }
-  const exact=S.lights.filter(l=>l.code&&plateKey(l.code)===plateKey(t));
+  const exact=(S.allLights||S.lights).filter(l=>l.code&&plateKey(l.code)===plateKey(t));
   if(exact.length)return plateRef(exact.find(l=>!l.removed)||exact[0]);
   for(const d of DONGS_M){const m=t.match(new RegExp("(?:^|[^\\uac00-\\ud7a3])"+dongRe(d)+"\\s*(\\d{1,5}(?:\\s*-\\s*\\d{1,3}){0,2})(?![\\d-])"));if(m)return{kind:"보안등",dong:d,num:m[1].replace(/\s+/g,"")}}
   const r=t.match(ROAD_RE);if(r)return{kind:"가로등",road:r[1],main:r[2],sub:r[3]};
@@ -669,7 +672,7 @@ const fmtDT=t=>{if(!t)return"";const d=new Date(t);return fmtD(t)+` ${String(d.g
 const fmtDist=d=>d<1000?`${Math.round(d)}m`:`${(d/1000).toFixed(1)}km`;
 const inspectionDays=()=>((typeof DGOperations!=="undefined"&&Number(DGOperations.state.settings.inspectionDays))||DUE_DAYS);
 const isDue=l=>!!l.lastInspected&&(Date.now()-l.lastInspected)>inspectionDays()*864e5;
-const byId=id=>{if(!LIDX){LIDX=new Map();S.lights.forEach(l=>LIDX.set(l.id,l))}return LIDX.get(id)};
+const byId=id=>{if(!LIDX){LIDX=new Map();(S.allLights||S.lights).forEach(l=>LIDX.set(l.id,l))}return LIDX.get(id)};
 /* In-app dialogs (app/dialog.js). The fallbacks keep extracted functions testable in a bare sandbox. */
 function dgConfirm(m,o){return window.DGDialog?DGDialog.confirm(m,o):Promise.resolve(confirm(m))}
 function dgPrompt(m,o){return window.DGDialog?DGDialog.prompt(m,o):Promise.resolve(prompt(m,o&&o.value||""))}
@@ -694,11 +697,14 @@ function dataChanged(key){
 /* Registry: the light list ships with the page (data/lights.json, converted from getPoint.json).
    The shared "lights" collection only holds what changes in the field — status, last inspection —
    keyed by the same id, plus any light registered by hand. Field values win over the registry. */
-let BASE=[],OV={},RAW_OV={},LIGHT_FIELDS=[],LIDX=null;
+let BASE=[],OV={},RAW_OV={},LIGHT_FIELDS=[],LIDX=null,ALL_LIGHTS=[],ALL_FROM=null;
+/* (S.allLights||S.lights): every light including 철거 ones (for id lookups, plates, history). If S.lights was replaced directly
+   (tests, imports) the hidden list no longer matches it, so S.lights itself is the whole list. */
+Object.defineProperty(S,"allLights",{get:()=>ALL_FROM===S.lights?ALL_LIGHTS:S.lights,enumerable:false});
 const addrOf=o=>[o.addr||o.jibun||"",o.pole,o.sw?`점멸 ${o.sw}`:"",o.removed?"철거":"",o.noPlate?"표찰 없음":"",o.dongGuess?"동은 위치로 추정":"",o.posApprox?"위치는 분전함 기준(추정)":""].filter(Boolean).join(" · ");
 async function loadRegistry(){
   try{
-    const j=await (await fetch("data/lights.json",{cache:"no-cache"})).json();
+    const j=await (await fetch("data/lights.json",{cache:"no-cache"})).json();S.regMeta={source:j.source||"",generatedAt:j.generatedAt||"",count:j.count||j.rows.length};
     BASE=j.rows.map(row=>{const o={};j.cols.forEach((c,i)=>{if(row[i]!=null)o[c]=row[i]});o.status="정상";o.lastInspected=null;o.address=addrOf(o);return o});
   }catch(e){S.regErr=true}
   mergeLights();
@@ -707,7 +713,7 @@ function mergeLights(){
   const seen=new Set();
   const out=BASE.map(b=>{seen.add(b.id);const o=OV[b.id];if(!o)return b;const m={...b,...o,id:b.id};if("pole"in o||"sw"in o||"removed"in o||"noPlate"in o||"posApprox"in o)m.address=addrOf(m);return m});
   for(const [id,o] of Object.entries(OV))if(!seen.has(id)&&o.code)out.push({...o,id});
-  S.lights=out.filter(l=>!l._deleted);LIDX=null;LG=null;
+  ALL_LIGHTS=out.filter(l=>!l._deleted);S.lights=ALL_LIGHTS.filter(l=>!l.removed);ALL_FROM=S.lights; /* 철거 표시된 등은 목록·검색·지도·통계에서 숨기고, 이력·표찰 조회는 (S.allLights||S.lights)로 찾는다 */LIDX=null;LG=null;
   if(typeof invalidateLightingReview==="function")invalidateLightingReview("시설 대장 정보가 바뀌었어요.");
 }
 function onLights(snap){RAW_OV={};snap.docs.forEach(d=>{RAW_OV[d.id]=d.data()});OV=DGData.mergeLightFields(RAW_OV,LIGHT_FIELDS);mergeLights()}
@@ -818,7 +824,7 @@ const PWA={prompt:null,canInstall:false,iosHint:false,waiting:null,standalone:ma
   const ios=DEV.ios&&!window.MSStream; // includes iPadOS, which reports itself as a Mac
   if(ios&&!PWA.standalone&&!recently&&!(window.claude&&window.claude.use))PWA.iosHint=true;
   if("serviceWorker" in navigator&&!(window.claude&&window.claude.use)&&(location.protocol==="https:"||location.hostname==="localhost")){
-    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareUpdate:()=>updateCheck(),onChange:()=>{try{render()}catch(e){}},prepareOcr:async()=>{try{await fetch("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",{cache:"reload"})}catch(e){}await getOcr(null,"eng",{refresh:true});await getOcr(null,"kor+eng",{refresh:true})}});
+    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareUpdate:()=>updateCheck(),onChange:()=>{try{render();verRefresh()}catch(e){}},prepareOcr:async()=>{try{await fetch("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js",{cache:"reload"})}catch(e){}await getOcr(null,"eng",{refresh:true});await getOcr(null,"kor+eng",{refresh:true})}});
   }
   // shortcuts from the home-screen icon
   const go=new URLSearchParams(location.search).get("go");if(go)window.addEventListener("load",()=>setTimeout(()=>{if(go==="scan")openScanner("inspect");else if(go==="patrol"&&can("inspect")){if(DEV.field)openPatrol();else{openAdminSection("patrol");toast("야간 순찰은 GPS가 있는 휴대폰에서 시작해요. PC에서는 순찰 기록을 볼 수 있어요.")}}},900));
@@ -834,7 +840,7 @@ function applyTheme(t){if(t==="auto")delete document.documentElement.dataset.the
 (function(){let t="auto";try{t=localStorage.getItem("dg-theme")||"auto"}catch(e){}applyTheme(t)})();
 async function resolveNames(){
   if(!user)return;
-  const ids=[...new Set([...S.insp.map(i=>i.inspector),...S.lights.flatMap(l=>[l.foundBy,...(l.edits||[]).map(e=>e.by)]),...S.patrols.map(p=>p.by),...S.roles.map(r=>r.id),...S.reports.map(r=>r.reporterId)].filter(Boolean))].filter(id=>!(id in S.names));
+  const ids=[...new Set([...S.insp.map(i=>i.inspector),...(S.allLights||S.lights).flatMap(l=>[l.foundBy,...(l.edits||[]).map(e=>e.by)]),...S.patrols.map(p=>p.by),...S.roles.map(r=>r.id),...S.reports.map(r=>r.reporterId)].filter(Boolean))].filter(id=>!(id in S.names));
   if(!ids.length)return;
   try{const ps=await user.profiles(ids);ids.forEach(id=>S.names[id]=(ps[id]&&ps[id].name)||"점검자");render()}catch(e){}
 }
@@ -853,7 +859,7 @@ function roleSection(){
   const me=S.me;const rows=S.roles.slice().sort((a,b)=>(a.role==="admin"?0:a.role==="inspector"?1:2)-(b.role==="admin"?0:b.role==="inspector"?1:2));
   const known=new Set(rows.map(r=>r.id));
   const seen=new Map();const touch=(id,what)=>{if(id&&!known.has(id)&&!seen.has(id))seen.set(id,what)};
-  S.insp.forEach(i=>touch(i.inspector,"점검 기록"));S.patrols.forEach(p=>touch(p.by,"순찰"));S.lights.forEach(l=>{touch(l.foundBy,"현장 등록");(l.edits||[]).forEach(e=>touch(e.by,"정보 수정"))});S.reports.forEach(r=>touch(r.reporterId,"신고"));
+  S.insp.forEach(i=>touch(i.inspector,"점검 기록"));S.patrols.forEach(p=>touch(p.by,"순찰"));(S.allLights||S.lights).forEach(l=>{touch(l.foundBy,"현장 등록");(l.edits||[]).forEach(e=>touch(e.by,"정보 수정"))});S.reports.forEach(r=>touch(r.reporterId,"신고"));
   const nm=id=>esc(S.names[id]||(rows.find(r=>r.id===id)||{}).name||id.slice(0,10)+"…");
   const sel=(id,cur)=>`<select data-rolesel="${esc(id)}" aria-label="역할">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${cur===k?"selected":""}>${v}</option>`).join("")}</select>`;
   const admins=rows.filter(r=>r.role==="admin").length;
@@ -941,6 +947,61 @@ async function updateItems(){
   return {lose,keep,durable};
 }
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
+/* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
+   RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
+const APP_VER="v45-version-info";
+const RELEASE_NOTES=[
+  {v:"v45-version-info",d:"2026-11-04",t:"버전 정보 화면을 새로 만들고, 철거된 등은 목록·검색·지도에서 숨겨요"},
+  {v:"v44-streetlights-20260910",d:"2026-11-04",t:"가로등 대장을 공공데이터(동구 가로등 현황, 2026-09-10 기준)로 바꿨어요"},
+  {v:"v43-kakao-waypoints",d:"2026-11-04",t:"방문 계획: 카카오맵에서도 경유지를 넣어 여러 곳 경로를 열어요"},
+  {v:"v42-update-check",d:"2026-11-04",t:"새 버전 적용 전에 남는 기록과 먼저 마칠 일을 나눠 알려 줘요"},
+  {v:"v41-device-profile",d:"2026-11-04",t:"PC와 휴대폰을 구분해 첫 화면과 메뉴를 맞춰요"},
+  {v:"v40-map-tap",d:"2026-11-04",t:"지도에서 작은 표시를 빗나가게 눌러도 가장 가까운 등을 골라요"},
+  {v:"v36-visit-route",d:"2026-11-03",t:"미점검 방문 계획: 노선 최적화와 여러 곳 경로 열기"},
+  {v:"v34-night-theme",d:"2026-11-02",t:"야간(어두운) 화면을 전체 점검했어요"},
+  {v:"v32-map-view",d:"2026-11-02",t:"지도 보기: 묶음·번호 표시, 상태 필터, 검색·내 주변, 길찾기"}];
+const verShort=v=>(/^v\d+/.exec(v||"")||[v||""])[0];
+const verDate=v=>(RELEASE_NOTES.find(r=>r.v===v)||{}).d||"";
+function regDate(){const m=/기준일 ([\d.·-]+)/.exec(S.regMeta&&S.regMeta.source||"");return m?m[1]:""}
+function verFoot(){const ready=window.DongguPWA&&DongguPWA.updateReady&&DongguPWA.updateReady(),rd=regDate();
+  return `<p class="ver-foot"><button type="button" class="linkbtn" data-verinfo aria-label="버전 정보 보기">버전 ${esc(verShort(APP_VER))} · ${esc(verDate(APP_VER))}${rd?` · 대장 ${esc(rd)} 기준`:""}${ready?` · <b>새 버전 있음</b>`:""}</button></p>`}
+const VER={sw:null,swErr:"",checking:false,msg:""};
+function verFacts(){
+  const ready=!!(window.DongguPWA&&DongguPWA.updateReady&&DongguPWA.updateReady()),ctrl=!!(navigator.serviceWorker&&navigator.serviceWorker.controller);
+  const sw=VER.sw&&VER.sw.version,removed=(S.allLights||S.lights).length-S.lights.length,m=S.regMeta||{};
+  const offline=!("serviceWorker"in navigator)?"이 브라우저는 앱 저장을 지원하지 않아요":!ctrl?"아직 저장되지 않았어요(연결된 상태로 한 번 더 열면 저장돼요)":VER.swErr?VER.swErr:!sw?"확인하는 중…":sw===APP_VER?`${verShort(sw)} — 이 화면과 같아요`:ready?`${verShort(sw)} — 새 버전이 기다리고 있어요`:`${verShort(sw)} — 이 화면(${verShort(APP_VER)})과 달라요. 앱을 닫았다 열면 맞춰져요`;
+  const kinds={};S.lights.forEach(l=>{const k=l.kind||"가로등";kinds[k]=(kinds[k]||0)+1});
+  return {ready,app:`${verShort(APP_VER)} (${APP_VER}) · ${verDate(APP_VER)}`,offline,
+    reg:S.regErr?"대장 파일을 읽지 못했어요":`${regDate()?regDate()+" 기준 · ":""}사용 ${S.lights.length.toLocaleString()}개${removed?` · 철거 숨김 ${removed.toLocaleString()}개`:""}`,
+    regKinds:Object.entries(kinds).map(([k,n])=>`${k} ${n.toLocaleString()}`).join(" · "),
+    regFile:m.generatedAt?`대장 파일 만든 때 ${fmtDT(Date.parse(m.generatedAt))}`:"",
+    store:DGOffline.ready?(DGOffline.durable?"이 기기에 보관 — 앱을 닫아도 작성 중 기록이 남아요":"공유 기기 모드 — 창을 닫으면 작성 중 기록이 사라져요"):"저장소 준비 중",
+    link:(FB?"공유 서버":db.mode==="local"?"이 기기만(시험 모드)":"연결 확인 중")+(navigator.onLine?" · 온라인":" · 오프라인"),
+    device:`${DongguDevice.label(DEV.kind)}${DEV.mode==="auto"?" (자동)":""}`};
+}
+function verBody(){
+  const f=verFacts(),row=(k,v,sub)=>`<div class="ver-row"><span class="k">${k}</span><span class="v">${v}${sub?`<small>${sub}</small>`:""}</span></div>`;
+  return `<div class="panel ver-panel">${row("앱 버전",esc(f.app))}${row("오프라인 저장",esc(f.offline))}
+    ${row("새 버전",f.ready?`<b style="color:var(--fix)">있어요</b> <button type="button" class="btn sodium sm" data-updapply>새 버전 적용</button>`:`${VER.checking?"확인하는 중…":esc(VER.msg||"기다리는 새 버전 없음")} <button type="button" class="btn ghost sm" data-vercheck${VER.checking?" disabled":""}>새 버전 확인</button>`)}
+    ${row("가로등 대장",esc(f.reg),esc([f.regKinds,f.regFile].filter(Boolean).join(" · ")))}${row("저장 방식",esc(f.store))}${row("연결",esc(f.link))}${row("화면 방식",esc(f.device))}</div>
+    <h4 style="margin:14px 0 6px">최근 바뀐 점</h4><ol class="ver-notes">${RELEASE_NOTES.slice(0,8).map(r=>`<li${r.v===APP_VER?' class="cur"':""}><b>${esc(verShort(r.v))}</b> <span class="muted">${esc(r.d)}</span><br>${esc(r.t)}</li>`).join("")}</ol>
+    <div class="split"><button type="button" class="btn ghost" data-vercopy>문의할 때 붙여 넣을 정보 복사</button></div>
+    <p class="muted" style="font-size:12px">문제를 알릴 때 이 정보를 함께 보내면 어떤 버전·대장에서 생긴 일인지 바로 알 수 있어요.</p>`;
+}
+function verText(){const f=verFacts();return ["[동구 가로등 앱 버전 정보]",`앱: ${f.app}`,`오프라인 저장: ${f.offline}`,`새 버전 대기: ${f.ready?"있음":"없음"}`,`대장: ${f.reg}`,f.regKinds,f.regFile,`저장: ${f.store}`,`연결: ${f.link}`,`화면: ${f.device}`,`기록 시각: ${fmtDT(Date.now())}`,`브라우저: ${navigator.userAgent}`].filter(Boolean).join("\n")}
+function verRefresh(){const b=$("#verBody");if(b)b.innerHTML=verBody()}
+async function verLoadSw(){if(!(navigator.serviceWorker&&navigator.serviceWorker.controller)||!window.DongguPWA){verRefresh();return}
+  try{VER.sw=await DongguPWA.check();VER.swErr=""}catch(e){VER.swErr=e.message||"확인하지 못했어요"}verRefresh()}
+function openVersionInfo(){
+  navRoute("verinfo",()=>openVersionInfo());
+  openSheet(`<div class="sheet-head"><div><h3>버전 정보</h3><div class="muted">지금 쓰는 앱과 가로등 대장의 버전이에요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div><div id="verBody">${verBody()}</div>`);
+  verLoadSw();
+}
+async function verCheck(){
+  if(VER.checking)return;VER.checking=true;VER.msg="";verRefresh();
+  try{const r=await DongguPWA.lookForUpdate();VER.msg=r.message||""}catch(e){VER.msg="확인하지 못했어요. 잠시 뒤 다시 눌러 주세요."}
+  VER.checking=false;verRefresh();
+}
 function updateBanner(){return window.DongguPWA&&DongguPWA.updateReady&&DongguPWA.updateReady()?`<div class="notice slim upd-banner"><b>새 버전이 있어요</b> 적용 전에 남길 내용을 확인해 드려요. <button type="button" class="btn sm" data-updapply style="margin-left:auto">새 버전 적용</button></div>`:""}
 async function updateCheck(){
   const {lose,keep}=await updateItems();
@@ -1057,10 +1118,12 @@ function vInspect(){
     <div class="frow"><span class="fl">상태</span><div class="chips"><button type="button" id="openOnly" aria-pressed="${S.stat==="__open"}">조치 필요만${open?` <span class="muted" style="font-size:11px">${open}</span>`:""}</button>${LSTAT.map(st=>`<button type="button" data-stat="${st}" aria-pressed="${S.stat===st}">${st}</button>`).join("")}</div></div>
     <div class="split" style="margin-top:8px"><button type="button" class="btn ghost sm" id="filterReset">모두 지우기</button><button type="button" class="btn sm" id="filterDone" style="margin-left:auto">닫기</button></div></div>`
   :act.length?`<div class="chipbar active"><span class="muted" style="align-self:center;font-size:12px">필터</span>${act.map(([k,v])=>`<button type="button" data-fclear="${k}" aria-pressed="true">${esc(v)} ×</button>`).join("")}</div>`:""}`})()}
-  <div id="listArea">${listArea(list,due)}</div><p class="muted" style="font-size:11px;text-align:center;margin:14px 0 4px">버전 ${APP_VER}</p>`;
+  <div id="listArea">${listArea(list,due)}</div>${verFoot()}`;
 }
+function removedHits(){const q=S.q.trim().toLowerCase().replace(/\s+/g,"");if(!q)return 0;return (S.allLights||S.lights).filter(l=>l.removed&&(l.code+" "+(l.label||"")+" "+l.dong+" "+(l.address||"")+" "+(l.lampId||"")+" "+(l.mgmt||"")).toLowerCase().replace(/\s+/g,"").includes(q)).length}
 function listArea(list,due){
-  return `<h2 style="margin-top:6px">${S.near&&S.pos?"가까운 순":S.q.trim()?"검색 결과":"점검할 등"} <span class="muted">${list.length.toLocaleString()}</span>${S.near&&!S.pos?`<span class="muted" style="font-weight:400;font-size:13px"> · 위치 잡는 중…</span>`:""}</h2>
+  const rh=removedHits();
+  return `${rh?`<p class="muted rm-hint" style="margin:0 0 8px">철거된 등 ${rh}개도 이 검색과 맞아요 — 목록에서는 숨겨요. <button type="button" class="btn ghost sm" data-openremoved>철거된 등 보기</button></p>`:""}<h2 style="margin-top:6px">${S.near&&S.pos?"가까운 순":S.q.trim()?"검색 결과":"점검할 등"} <span class="muted">${list.length.toLocaleString()}</span>${S.near&&!S.pos?`<span class="muted" style="font-weight:400;font-size:13px"> · 위치 잡는 중…</span>`:""}</h2>
   ${S.near||S.q.trim()||due===0?"":`<p class="muted" style="margin:-6px 0 10px">고장·수리중이 먼저, 그다음 오래 점검하지 않은 순서예요. 점검주기(${inspectionDays()}일) 경과 ${due}개.</p>`}
   <div class="list${S.near?" near":""}">${list.length?list.slice(0,S.limit).map(lightRow).join("")+(list.length>S.limit?`<button class="btn ghost block" id="moreList">더 보기 · ${list.length-S.limit}개 남음</button>`:""):`<div class="empty">${S.lights.length?`조건에 맞는 가로등이 없어요.<div class="muted" style="margin-top:4px">${[S.dong!=="전체"?`동: ${esc(S.dong)}`:"",S.kind!=="전체"?`종류: ${esc(S.kind)}`:"",S.stat?`상태: ${S.stat==="__open"?"조치 필요":esc(S.stat)}`:"",S.q.trim()?`검색: ${esc(S.q)}`:""].filter(Boolean).join(" · ")}</div><div class="split" style="justify-content:center"><button class="btn ghost sm" id="clearFilters">필터 모두 해제</button></div>`:(S.live?"등록된 가로등이 없어요. 관리 현황 탭에서 가로등을 등록하세요.":"가로등 목록을 불러오는 중이에요.")}</div>`}`;
 }
@@ -1143,6 +1206,7 @@ const ADMIN_SECTIONS={
   pend:{t:"미등록 관리",d:"대장 반영·반려·연결",n:()=>pendingList().filter(l=>l.reg==="미등록").length||null,write:true,body:()=>pendingSection()},
   np:{t:"표찰 없는 등",d:"대장 기준 · 새 표찰 기록",n:()=>S.lights.filter(l=>l.noPlate&&!l.reg&&!l.plateFixed).length||null,write:true,body:()=>noPlateSection()},
   patrol:{t:"야간 순찰 기록",d:"순찰 범위·경로·일지",n:()=>S.patrols.length||null,write:true,body:()=>patrolSection()},
+  removed:{t:"철거된 등",d:"목록·지도에서 숨긴 등 · 이력 보기",n:()=>removedList().length||null,body:()=>removedSection()},
   edit:{t:"정보 수정된 등",d:"변경 내역·CSV",n:()=>editedList().length||null,write:true,body:()=>editedSection()},
   report:{t:"보고서",d:"기간별 점검 보고서 · 인쇄/PDF",n:null,body:()=>reportSection()},
   inbox:{t:"신고함",d:"전화·문자·QR로 들어온 신고",n:()=>S.reports.filter(r=>r.status!=="완료").length||null,write:true,body:()=>inboxSection()},
@@ -1167,7 +1231,7 @@ function refreshAdminSection(){
    site first and folds desk work (backup, registry diff, audit, QR printing…) under "PC 업무", still one tap away. */
 const MENU_GROUPS=[
   {t:"접수·조치",keys:["dashboard","works","inbox","hist","due","open","outbox"]},
-  {t:"대장·등록",keys:["reg","pend","np","edit","registryupdate","qr"]},
+  {t:"대장·등록",keys:["reg","pend","np","edit","removed","registryupdate","qr"]},
   {t:"현장 기록",keys:["patrol","lightingcontext","lightingtasks"]},
   {t:"밝기 검토",keys:["light","lightinghistory","lightingareas","lightingimport"]},
   {t:"현황·보고",keys:["report","map","kind","dong"]},
@@ -1217,7 +1281,7 @@ function vAdmin(){
   ${DEV.field?openList:todayStrip()}
   ${adminMenu(keys)}
   ${DEV.field?"":openList}
-  <p class="muted devmode">화면 방식: <b>${DongguDevice.label(DEV.kind)}</b>${DEV.mode==="auto"?" (자동)":""} <button type="button" class="linkbtn" data-devmode-open>바꾸기</button></p>${FB&&!can("admin")?DGSecurity.devicePanel()+`<button class="btn ghost sm" id="fbSignOut">로그아웃</button>`:""}`;
+  <p class="muted devmode">화면 방식: <b>${DongguDevice.label(DEV.kind)}</b>${DEV.mode==="auto"?" (자동)":""} <button type="button" class="linkbtn" data-devmode-open>바꾸기</button></p>${verFoot()}${FB&&!can("admin")?DGSecurity.devicePanel()+`<button class="btn ghost sm" id="fbSignOut">로그아웃</button>`:""}`;
 }
 function vReport(){
   const mine=S.me?S.reports.filter(r=>r.reporterId===S.me):[];
@@ -1595,6 +1659,8 @@ document.addEventListener("click",async e=>{
   if(t.dataset.light){openLight(t.dataset.light);return}
   if(t.dataset.stat){S.stat=S.stat===t.dataset.stat?null:t.dataset.stat;S.limit=60;render();return}
   if(t.id==="moreList"){S.limit+=100;render();return}
+  if(t.id==="rmMore"){S.rmlimit=(S.rmlimit||60)+100;openAdminSection("removed");return}
+  if(t.closest("[data-openremoved]")){S.rmq=S.q.trim();S.tab="admin";render();openAdminSection("removed");return}
   if(t.id==="clearFilters"){S.stat=null;S.dong="전체";S.kind="전체";S.q="";S.limit=60;render();return}
   if(t.id==="nearSort"){nearToggle();return}
   if(t.id==="filterBtn"){S.filterOpen=!S.filterOpen;render();return}
@@ -1615,6 +1681,9 @@ document.addEventListener("click",async e=>{
   if(t.dataset.asec){openAdminSection(t.dataset.asec);return}
   if(t.id==="sync"){if(can("inspect")&&ADMIN_SECTIONS.outbox)openAdminSection("outbox");else toast(t.title||"동기화 상태");return}
   if(t.dataset.devmodeOpen!==undefined){devModeChoose();return}
+  if(t.closest("[data-verinfo]")){openVersionInfo();return}
+  if(t.closest("[data-vercheck]")){verCheck();return}
+  if(t.closest("[data-vercopy]")){(async()=>{const txt=verText();try{await navigator.clipboard.writeText(txt);toast("버전 정보를 복사했어요")}catch(e){await dgPrompt("아래 내용을 길게 눌러 복사해 주세요.",{title:"버전 정보",value:txt,multiline:true})}})();return}
   if(t.dataset.camstart!==undefined){startCam();return}
   if(t.id==="openOnly"){S.stat=S.stat&&S.stat!=="정상"?null:"__open";S.limit=60;render();return}
   if(t.dataset.kind&&t.closest("#kindFilter")){S.kind=t.dataset.kind;S.limit=60;render();return}
@@ -1797,7 +1866,7 @@ document.addEventListener("click",async e=>{
 });
 $("#sheetBg").addEventListener("click",()=>closeSheet());
 document.addEventListener("keydown",e=>{if(e.defaultPrevented)return;if(e.key==="/"&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.target.closest("input,textarea,select,[contenteditable]")&&!(window.DGDialog&&DGDialog.isOpen())){const box=document.querySelector("#sheet.open #mapQ")||document.querySelector("#sheet.open input[type=search]")||(!document.querySelector("#sheet.open")&&$("#q"));if(box){e.preventDefault();box.focus();box.select&&box.select();return}}if(e.key==="Enter"&&e.target.id==="mapQ"){e.preventDefault();const first=document.querySelector("#mapHits [data-maphit]");if(first)first.click();return}const tab=e.target.closest('[role="tab"]');if(tab&&["ArrowLeft","ArrowRight","Home","End"].includes(e.key)){const tabs=[...document.querySelectorAll('nav [role="tab"]')].filter(b=>!b.hidden);const i=tabs.indexOf(tab),n=e.key==="Home"?0:e.key==="End"?tabs.length-1:(i+(e.key==="ArrowRight"?1:-1)+tabs.length)%tabs.length;e.preventDefault();tabs[n].focus();tabs[n].click()}});
-document.addEventListener("input",e=>{if(e.target.id==="mapQ"){clearTimeout(window.mapQTimer);window.mapQTimer=setTimeout(()=>mapSearchInput(e.target.value),120);return}if(e.target.id==="rvQuery"){S.rvQuery=e.target.value;if(S.review)S.review.show=20;clearTimeout(window.rvQueryTimer);if(e.isComposing||window.rvQueryComposing)return;window.rvQueryTimer=setTimeout(()=>{if(document.getElementById("rvQuery"))render()},150);return}if(e.target.id==="ibNum"){delete e.target.dataset.lightId;delete e.target.dataset.lightCode;return}if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;renderList()}});
+document.addEventListener("input",e=>{if(e.target.id==="mapQ"){clearTimeout(window.mapQTimer);window.mapQTimer=setTimeout(()=>mapSearchInput(e.target.value),120);return}if(e.target.id==="rvQuery"){S.rvQuery=e.target.value;if(S.review)S.review.show=20;clearTimeout(window.rvQueryTimer);if(e.isComposing||window.rvQueryComposing)return;window.rvQueryTimer=setTimeout(()=>{if(document.getElementById("rvQuery"))render()},150);return}if(e.target.id==="ibNum"){delete e.target.dataset.lightId;delete e.target.dataset.lightCode;return}if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;renderList();return}if(e.target.id==="rmQ"){S.rmq=e.target.value;S.rmlimit=60;const t=document.createElement("div");t.innerHTML=removedSection();for(const id of["rmList","rmCount"]){const a=$("#"+id),b=t.querySelector("#"+id);if(a&&b)a.replaceWith(b)}}});
 document.addEventListener("compositionstart",e=>{if(e.target.id==="rvQuery"){window.rvQueryComposing=true;clearTimeout(window.rvQueryTimer)}});
 document.addEventListener("compositionend",e=>{if(e.target.id==="rvQuery"){window.rvQueryComposing=false;S.rvQuery=e.target.value;if(S.review)S.review.show=20;clearTimeout(window.rvQueryTimer);window.rvQueryTimer=setTimeout(()=>{if(document.getElementById("rvQuery"))render()},150)}});
 document.addEventListener("change",async e=>{
@@ -2137,7 +2206,7 @@ function reportData(){
   const open=lights.filter(l=>l.status!=="정상");
   const pats=(REP.data&&REP.data.patrols||S.patrols).filter(p=>p.start>=a&&p.start<=b&&(REP.dong==="전체"||p.dong===REP.dong||[...(p.passed||[]),...(p.marks||[]).map(m=>m.id)].some(id=>inD(byId(id)))));
   const pend=S.lights.filter(l=>l.reg&&l.foundAt>=a&&l.foundAt<=b&&inD(l));
-  const edits=S.lights.flatMap(l=>(l.edits||[]).filter(e=>e.at>=a&&e.at<=b&&!e.undone&&inD(l)).map(e=>({l,e})));
+  const edits=(S.allLights||S.lights).flatMap(l=>(l.edits||[]).filter(e=>e.at>=a&&e.at<=b&&!e.undone&&inD(l)).map(e=>({l,e})));
   const aKeys=[...new Set(lights.map(adongOf).filter(Boolean))].sort((x,y)=>adongOrder(x)-adongOrder(y));
   const byDong=aKeys.map(d=>{const ls=lights.filter(l=>adongOf(l)===d),ii=ins.filter(i=>adongOf(byId(i.lightId)||{dong:i.dong})===d);return{d,n:ls.length,insp:ii.length,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length,open:ls.filter(l=>l.status!=="정상").length}}).sort((x,y)=>y.insp-x.insp||y.n-x.n);
   const byWho=[...new Set(ins.map(i=>i.inspector).filter(Boolean))].map(w=>{const ii=ins.filter(i=>i.inspector===w);return{w,n:ii.length,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,fault:ii.filter(i=>i.result==="고장").length,bad:ii.filter(i=>i.result!=="정상").length,ph:ii.reduce((s,i)=>s+(i.photoN||(i.photo?1:0)),0),pt:ii.filter(i=>i.patrol).length}}).sort((x,y)=>y.n-x.n);
@@ -2596,8 +2665,18 @@ async function openPhotoSheet(lightId){
 const EDIT_FIELDS={lampType:"광원",pole:"등주",sw:"점멸기",poleNo:"전주번호",replacedYear:"교체연도",lat:"위도",lng:"경도",removed:"철거",note:"비고"};
 const LAMP_OPTS=["LED일반형","LED소켓형","CDM","메탈","나트륨","삼파장"],POLE_OPTS=["한전주","전용주(강관)","전용주(스텐)","전용주(테파)","전용주(주물)","전용주(기타)","벽부주","통신주"],SW_OPTS=["전자식","GPS","광전식","자동식","수동식","무선식"];
 const fmtVal=(f,v)=>f==="removed"?(v?"철거":"사용 중"):(v==null||v==="")?"(없음)":typeof v==="number"&&(f==="lat"||f==="lng")?v.toFixed(6):String(v);
-function editedList(){return S.lights.filter(l=>l.edits&&l.edits.length).sort((a,b)=>(b.edits[b.edits.length-1].at||0)-(a.edits[a.edits.length-1].at||0))}
+function editedList(){return (S.allLights||S.lights).filter(l=>l.edits&&l.edits.length).sort((a,b)=>(b.edits[b.edits.length-1].at||0)-(a.edits[a.edits.length-1].at||0))}
 function editHistory(l){return l.edits.slice().reverse().map(e=>`<div class="hist"><span class="muted">${fmtDT(e.at)} · ${esc(S.names[e.by]||"담당자")}</span>${e.undone?` <span class="chip">되돌림</span>`:""}<div>${e.changes.map(c=>`${esc(EDIT_FIELDS[c.f]||c.f)}: <s class="muted">${esc(fmtVal(c.f,c.from))}</s> → <b>${esc(fmtVal(c.f,c.to))}</b>`).join(" · ")}</div></div>`).join("")}
+function removedList(){return (S.allLights||S.lights).filter(l=>l.removed).sort((a,b)=>(b.removedAt||0)-(a.removedAt||0)||String(a.code).localeCompare(String(b.code),"ko",{numeric:true}))}
+function removedSection(){
+  const ls=removedList(),q=(S.rmq||"").replace(/\s+/g,"").toLowerCase();
+  const shown=q?ls.filter(l=>(l.code+" "+(l.label||"")+" "+l.dong+" "+(l.address||"")+" "+(l.mgmt||"")).toLowerCase().replace(/\s+/g,"").includes(q)):ls;
+  if(!ls.length)return `<div class="empty">철거로 표시된 등이 없어요.</div>`;
+  return `<details class="help"><summary>이 목록은</summary><p>철거됐거나 공공데이터 대장에서 빠진 등이에요. 점검 목록·검색·지도·통계·순찰에서는 보이지 않고, 예전 점검·사진·신고 이력은 그대로 남아 있어요.</p><p>잘못 표시된 등은 열어서 <b>정보 수정</b>에서 '철거된 등'을 해제하면 다시 목록에 나와요.</p></details>
+  <input class="f-in" id="rmQ" type="search" placeholder="표찰·주소로 찾기" value="${esc(S.rmq||"")}" aria-label="철거된 등 찾기" style="margin:0 0 8px">
+  <p class="muted" id="rmCount" style="margin:0 0 8px">${q?`${shown.length}개 찾음 · `:""}전체 ${ls.length}개 · 가로등 ${ls.filter(l=>l.kind==="가로등").length} · 보안등 등 ${ls.filter(l=>l.kind!=="가로등").length}</p>
+  <div class="list" id="rmList">${shown.slice(0,S.rmlimit||60).map(lightRow).join("")}${shown.length>(S.rmlimit||60)?`<button class="btn ghost block" id="rmMore">더 보기 · ${shown.length-(S.rmlimit||60)}개 남음</button>`:""}</div>`;
+}
 function editedSection(){
   const ls=editedList();
   if(!ls.length)return `<div class="empty">아직 정보를 고친 등이 없어요. 등 상세 화면의 "등 정보 수정"에서 광원·등주·점멸기·좌표·철거 여부를 바꿀 수 있어요.</div>`;
@@ -3784,7 +3863,7 @@ function confirmPick(){
 }
 
 /* ---------- live plate recognition: watch the viewfinder for a plate frame, read it when it holds still ---------- */
-const APP_VER="2026.10.22-1";
+
 const LIVE_AUTO=!(window.claude&&window.claude.use); // on-device OCR runs by itself; in the shared artifact Claude reads on a tap (sends a photo)
 let live={last:null,stable:0,cool:0,t:0,reading:false,key:null,snap:null,box:null};
 const liveCv=document.createElement("canvas");

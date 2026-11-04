@@ -50,3 +50,4 @@ jobs:
           node scripts/dark-mode-browser-smoke.cjs
           node scripts/device-profile-browser-smoke.cjs
           node scripts/update-check-browser-smoke.cjs
+          node scripts/version-info-browser-smoke.cjs

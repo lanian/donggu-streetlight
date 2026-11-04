@@ -132,7 +132,7 @@
       '<div class="list">' + rows.slice(0, state.show).map(w => '<button class="light-row dg-work-row" data-dg="open-work" data-id="' + E(w.id) + '"><span><b>' + E(w.title) + '</b><small>' + E(w.code) + ' · ' + E(label(w.assignedTo)) + '</small><small>기한 ' + time(w.dueAt) + '</small></span><span class="chip">' + E(C.STATES[w.status] || w.status) + '</span><span class="dg-priority' + (w.priority === '긴급' ? ' urgent' : '') + '">' + E(w.priority) + '</span>' + (w.dueAt && w.dueAt < Date.now() && !['verified', 'cancelled'].includes(w.status) ? '<span class="due">기한 초과</span>' : '') + '</button>').join('') + '</div>' +
       (state.loaded && state.workQueryKey === filterKey() && !rows.length ? '<div class="empty">선택한 조건의 작업이 없어요.</div>' : '') + (rows.length > state.show || state.hasMore ? '<button class="btn ghost block" data-dg="more-work">다음 작업 더 보기</button>' : '');
   }
-  function lightMatch(value) { return api.state().lights.find(l => l.id === value || l.code + ' [' + l.id + ']' === value); }
+  function lightMatch(value) { return (api.state().allLights || api.state().lights).find(l => l.id === value || l.code + ' [' + l.id + ']' === value); }
   function lightSuggestions(query) {
     const q = (query || '').toLowerCase();
     return api.state().lights.filter(l => !l.removed && (!q || (l.code + ' ' + l.id + ' ' + (l.address || '')).toLowerCase().includes(q))).slice(0, 50).map(l => '<option value="' + E(l.code + ' [' + l.id + ']') + '">' + E(l.address || l.dong) + '</option>').join('');
