@@ -54,3 +54,11 @@ test('status code is stable per report, secret-bound, and the public status name
   assert.equal(C.publicStatus(imported, null).stage, 'reviewing', 'a deleted staff report still shows it was seen');
   for (const out of [C.publicStatus(citizen, null), C.publicStatus(imported, { status: '완료', note: '작업자 메모' })]) assert.doesNotMatch(JSON.stringify(out), /비밀|010|메모/);
 });
+
+test('the quota address is the one the front end appended, not one the caller chose', () => {
+  const req = (xff, remote = '10.0.0.1') => ({ get: k => k === 'X-Forwarded-For' ? xff : '', socket: { remoteAddress: remote }, ip: 'leftmost' });
+  assert.equal(C.clientAddress(req('1.1.1.1, 203.0.113.9')), '203.0.113.9');
+  assert.equal(C.clientAddress(req('203.0.113.9')), '203.0.113.9');
+  assert.equal(C.clientAddress(req('')), '10.0.0.1');
+  assert.ok(C.REPORTS_PER_HOUR > 10 && C.LOOKUPS_PER_HOUR > 30);
+});

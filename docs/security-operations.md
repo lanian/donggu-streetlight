@@ -108,3 +108,20 @@ node functions/scripts/restore-backup.cjs --project PROJECT_ID --uid VERIFIED_AD
 - [Firestore 영속 캐시와 신뢰 기기](https://firebase.google.com/docs/firestore/manage-data/enable-offline)
 - [Firebase Auth 세션 유지 방식](https://firebase.google.com/docs/auth/web/auth-state-persistence)
 - [OWASP CSV Injection](https://community.owasp.org/attacks/CSV_Injection)
+
+## 브라우저 보안 (v48-security)
+
+- **콘텐츠 보안 정책(CSP):** 직원 앱은 시작할 때 CSP를 넣어요. 스크립트는 이 사이트와 고정한 라이브러리 CDN(cdnjs, jsDelivr, unpkg, Firebase gstatic, Google 로그인·reCAPTCHA)에서만 받아요. 플러그인(`object-src 'none'`)과 `<base>` 변경을 막아요. claude.ai 아티팩트 화면에서는 그쪽 정책을 따르므로 넣지 않아요. 지도 타일·서버 연결은 제공기관을 바꿀 수 있게 `https:` 전체를 허용해요.
+- **라이브러리:** jsQR·Leaflet·qrcode는 `vendor/`(오프라인 사전 캐시 포함)에서 먼저 읽고, 없을 때만 CDN에서 무결성 해시(SRI)를 확인해 받아요. OCR(tesseract.js)은 5.1.1로 고정하고 해시를 확인해요. 버전을 올릴 때는 해시도 함께 바꿔요.
+- **주민 신고 표시:** 신고의 등 번호·유형·내용은 화면에 글자로만 넣어요(`esc`). `scripts/security-browser-smoke.cjs`가 신고 위치 지도에서 이를 확인해요.
+
+## 공개 신고·조회 함수의 남용 방지 (v48-security)
+
+- App Check는 **1회용 토큰**을 써요. 신고 페이지가 요청마다 `getLimitedUseToken()`으로 새 토큰을 받고, 서버가 `verifyToken(..., {consume:true})`로 소모해요. 같은 토큰은 다시 쓸 수 없어요. Firebase 콘솔에서 App Check 재사용 방지(replay protection)가 가능한 상태인지 배포 전에 확인하세요.
+- 주소별 제한 키는 `X-Forwarded-For`의 **마지막** 항목(구글 프런트엔드가 붙인 주소)이에요. 호출자가 보낸 앞쪽 값은 쓰지 않아요. 배포 후 로그로 실제 주소가 찍히는지 한 번 확인하세요.
+- 서비스 전체 상한: 신고 시간당 300건, 처리 상태 조회 시간당 3,000건(`functions/core.js`). 넘으면 잠시 뒤 다시 시도하라고 안내해요.
+
+## 규칙 변경 (v48-security)
+
+- `roles`: 로그인한 사람은 **자기 역할 문서만** 읽고, 직원 명단 목록은 직원만 읽어요.
+- `reports`: 점검자가 만드는 신고는 정해진 항목만, 처음 상태는 `접수`, 보관 만료일은 원본 주민 신고와 같을 때만 허용해요. 보관 만료일은 누구도 지우거나 늦출 수 없어요.

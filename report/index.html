@@ -159,7 +159,7 @@ async function serverHeaders(url){
   const headers={"Content-Type":"application/json"};if(localUrl(url))return headers;
   for(const component of ["app","app-check"])await loadReportScript(`https://www.gstatic.com/firebasejs/10.12.2/firebase-${component}-compat.js`);
   if(!firebase.apps.length)firebase.initializeApp(C.firestore);if(!st.appCheck){firebase.appCheck().activate(C.appCheckSiteKey,true);st.appCheck=true;}
-  headers["X-Firebase-AppCheck"]=(await firebase.appCheck().getToken(false)).token;return headers;
+  /* a fresh limited-use token per request: the server consumes it, so it cannot be replayed */headers["X-Firebase-AppCheck"]=(await firebase.appCheck().getLimitedUseToken()).token;return headers;
 }
 async function sendGateway(rec){
   const payload={code:rec.code,lightId:rec.lightId||"",issue:rec.issue,desc:rec.desc,lat:rec.lat,lng:rec.lng,acc:rec.acc,photo:rec.photo||"",contact:rec.contact||"",consent:rec.consent,consentDays:C.privacyDays};
