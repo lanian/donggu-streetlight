@@ -18,6 +18,8 @@ const server = http.createServer((req, res) => {
   const origin = 'http://localhost:' + server.address().port;
   const browser = await chromium.launch({ executablePath: process.env.DONGGU_CHROMIUM || undefined, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-zygote'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block', geolocation: { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 }, permissions: ['geolocation'] });
+  // this smoke models field use on a phone: pin the device profile (a 390px window without touch counts as a PC)
+  await context.addInitScript(() => { try { localStorage.setItem('dg-device', 'phone'); } catch (e) {} });
   await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.fulfill({ status: 200, body: '', contentType: route.request().url().includes('.js') ? 'text/javascript' : 'text/plain' }));
   const page = await context.newPage(), errors = [], checks = [];
   page.on('pageerror', e => errors.push(e.message)); page.on('dialog', d => { errors.push('native dialog: ' + d.message()); d.dismiss(); });

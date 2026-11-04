@@ -61,7 +61,13 @@ const cssColumns=value=>value.split(' ').filter(Boolean).length;
   // The sheet enters with a 0.2s slide animation; measure its settled geometry.
   await page.locator('.sheet').evaluate(el=>Promise.all(el.getAnimations().map(a=>a.finished.catch(()=>{}))));
   const drawer=await page.locator('.sheet').evaluate(e=>{const r=e.getBoundingClientRect();return{left:r.left,right:r.right,width:r.width}});
-  assert.ok(drawer.left>=216&&Math.abs(drawer.right-1920)<2&&drawer.width<=861,'right-side desktop detail drawer: '+JSON.stringify(drawer));
+  // desk screens such as 보수 작업 use the whole workspace right of the rail on a PC (v41 device profile); the rail stays visible
+  assert.ok(drawer.left>=216&&Math.abs(drawer.right-1920)<2&&drawer.width>=1600,'wide desktop workspace right of the rail: '+JSON.stringify(drawer));
+  await page.goBack();await page.waitForFunction(()=>!document.querySelector('#sheet').classList.contains('open'));
+  await page.evaluate(()=>openAdminSection('outbox'));await page.locator('#sheet.open').waitFor();
+  await page.locator('.sheet').evaluate(el=>Promise.all(el.getAnimations().map(a=>a.finished.catch(()=>{}))));
+  const panel=await page.locator('.sheet').evaluate(e=>{const r=e.getBoundingClientRect();return{left:r.left,right:r.right,width:r.width}});
+  assert.ok(panel.left>=216&&Math.abs(panel.right-1920)<2&&panel.width<=861,'small screens keep the right-side detail drawer: '+JSON.stringify(panel));
   await page.goBack();await page.waitForFunction(()=>!document.querySelector('#sheet').classList.contains('open'));
   results.push('detail drawer stays to the right of the rail and closes with Back');
 

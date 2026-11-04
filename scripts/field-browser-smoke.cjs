@@ -27,6 +27,8 @@ const server = http.createServer((req, res) => {
 const photo = { name: 'local-proof.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') };
 const collect = async (browser, origin, serviceWorkers) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers });
+  // this smoke models field use on a phone: pin the device profile (a 390px window without touch counts as a PC)
+  await context.addInitScript(() => { try { localStorage.setItem('dg-device', 'phone'); } catch (e) {} });
   await context.route('**/*', route => {
     const url = new URL(route.request().url());
     if (url.origin === origin) return route.continue();
