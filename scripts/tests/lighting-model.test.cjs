@@ -327,3 +327,40 @@ test('30,000 road samples use the spatial model without scanning every source', 
   assert.ok(Number.isFinite(total) && total > 3000);
   t.diagnostic(`1,200 external records / 5,553 managed lights / 30,000 split and evaluated samples: ${Math.round(performance.now() - started)} ms`);
 });
+
+const obstruction = (extra = {}) => ({ id: 'obstruction-1', kind: 'obstruction', label: '공사 가림막', category: 'construction', operator: '',
+  ...origin, radius: 20, strength: 'medium', observedAt: now - 1000, validDays: 180, note: '', removed: false, ...extra });
+
+test('가림·가설물 normalise as always-present records with their own categories only', () => {
+  const r = Model.normalizeRecord({ ...obstruction(), schedule: 'hours', startMinute: 600, endMinute: 600, status: 'on', level: 'dark' }, { now });
+  assert.equal(r.schedule, 'always'); assert.equal(r.status, 'unknown'); assert.equal(r.level, 'unknown'); assert.equal(r.validDays, 180);
+  assert.equal(Model.normalizeRecord({ ...obstruction(), validDays: undefined }, { now }).validDays, 180);
+  assert.throws(() => Model.normalizeRecord(obstruction({ category: 'shop' }), { now }), /가림·가설물 종류/);
+  assert.throws(() => Model.normalizeRecord(source({ category: 'tree' }), { now }), /가림·가설물 종류를 쓸 수 없어요/);
+  assert.throws(() => Model.normalizeRecord(obstruction({ lux: 2, instrument: '조도계' }), { now }), /실측 조도/);
+  assert.throws(() => Model.normalizeRecord(obstruction({ radius: 81 }), { now }), /영향 범위/);
+  assert.equal(Model.recordState(obstruction({ nightConfirmed: false }), options).active, true, 'no night check for something that is there all day');
+  assert.equal(Model.recordState(obstruction({ observedAt: now - 181 * DAY }), options).reason, 'stale');
+});
+
+test('an obstruction cuts the registry index inside its radius, does not stack and never reduces external light', () => {
+  const inside = evaluate([obstruction()], north(10), .6);
+  approximately(inside.base, .3); approximately(inside.registryBase, .6); assert.equal(inside.reduction, .5);
+  assert.deepEqual(inside.obstructions.map(o => o.id), ['obstruction-1']);
+  const outside = evaluate([obstruction()], north(25), .6);
+  assert.equal(outside.base, .6); assert.equal(outside.obstructions.length, 0);
+  const blocked = evaluate([obstruction({ strength: 'high' })], origin, .5);
+  approximately(blocked.base, .125); assert.equal(blocked.classification, 'obstructed', 'lit by the registry alone, dark only because of the obstruction');
+  const both = evaluate([obstruction(), obstruction({ id: 'obstruction-2', strength: 'low' })], origin, .8);
+  approximately(both.base, .4, 1e-9); assert.equal(both.reduction, .5, 'the strongest one applies, they do not multiply');
+  const lit = evaluate([obstruction({ strength: 'high' }), source()], origin, .4);
+  approximately(lit.base, .1); approximately(lit.adjusted - lit.base, lit.external); assert.ok(lit.external > .9, 'external light is unchanged');
+  assert.equal(lit.classification, 'external_supported');
+  const weak = evaluate([obstruction()], origin, .2, { registryNearby: true });
+  assert.equal(weak.classification, 'model_weak', 'already weak without the obstruction');
+  const stale = evaluate([obstruction({ observedAt: now - 200 * DAY })], origin, .6);
+  assert.equal(stale.base, .6); assert.deepEqual(stale.hints.map(h => h.reason), ['stale']);
+  const context = Model.createContext([obstruction({ strength: 'low' })], [], options);
+  assert.equal(Model.obstructionAt(context, origin), .25); assert.equal(Model.obstructionAt(context, north(30)), 0);
+  assert.ok(Model.splitSegment(context, north(-40), north(40)).length >= 3, 'road pieces are cut at the obstruction boundary');
+});

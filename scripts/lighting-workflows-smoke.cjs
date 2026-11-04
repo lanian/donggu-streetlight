@@ -119,7 +119,7 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => __workflowDownloads.at(-1).data.split('\r\n').length), 2);
     record('immutable history contains every candidate/version and exports all runs and evaluated observations');
 
-    await page.evaluate(async () => { const current = S.review; const large = { ...current, cands: Array.from({ length: 2000 }, () => current.cands[0]), historyState: '', historyJob: null, historyError: '' }; S.review = large; await DGLightingWorkflows.captureReview(large); });
+    await page.evaluate(async () => { const current = S.review; const large = { ...current, cands: Array.from({ length: 2000 }, () => current.cands[0]), historyState: '', historyJob: null, historyJobs: null, historyError: '' }; S.review = large; await DGLightingWorkflows.captureReview(large); });
     assert.equal(await page.evaluate(() => S.review.historyState), 'failed'); assert.match(await page.evaluate(() => S.review.historyError), /최대|600KB/);
     assert.equal(await page.evaluate(async () => (await db.readAll('lightingRuns')).length), 2);
     record('oversized review is explicitly rejected without storing a truncated archive');

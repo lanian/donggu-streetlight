@@ -222,7 +222,9 @@ async function main() {
       const remote = { lat: latitude + 1000 / 110540, lng: longitude };
       await writeRecord('observation', { label: '긴 도로 일부만 밝음', level: 'bright', point: remote, radius: 10 });
       await page.evaluate(({ latitude, start, end }) => {
-        ROADS = { ver: 4, ways: [{ id: 'local-road', type: 'residential', name: '부분 관찰 검증로', pts: [[latitude, start], [latitude, end]] }], areas: [], bounds: [] };
+        ROADS = { ver: 4, ways: [{ id: 'local-road', type: 'residential', name: '부분 관찰 검증로', pts: [[latitude, start], [latitude, end]] }], areas: [], bounds: [],
+          // the road network always arrives with the 동구 boundary; reviews predict only inside it
+          gu: { name: '동구', polygons: [{ outer: [[latitude - .01, start - .01], [latitude - .01, end + .01], [latitude + .01, end + .01], [latitude + .01, start - .01]], holes: [] }] } };
         LG = null; S.rvNoLight = true; S.review = null;
       }, { latitude: remote.lat, start: lngAt(-100), end: lngAt(100) });
       const roadCandidates = await review('roads');
@@ -309,7 +311,9 @@ async function main() {
       record('different records drafted in two tabs keep separate durable keys and both remain recoverable after reload');
       if (process.env.DONGGU_BRIGHTNESS_SCREENSHOT) {
         await page.evaluate(({ latitude, start, end }) => {
-          ROADS = { ver: 4, ways: [{ id: 'local-road', type: 'residential', name: '부분 관찰 검증로', pts: [[latitude, start], [latitude, end]] }], areas: [], bounds: [] };
+          ROADS = { ver: 4, ways: [{ id: 'local-road', type: 'residential', name: '부분 관찰 검증로', pts: [[latitude, start], [latitude, end]] }], areas: [], bounds: [],
+          // the road network always arrives with the 동구 boundary; reviews predict only inside it
+          gu: { name: '동구', polygons: [{ outer: [[latitude - .01, start - .01], [latitude - .01, end + .01], [latitude + .01, end + .01], [latitude + .01, start - .01]], holes: [] }] } };
           LG = null; S.rvNoLight = true; S.review = null;
         }, { latitude: remote.lat, start: lngAt(-100), end: lngAt(100) });
         await review('roads');

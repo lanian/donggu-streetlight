@@ -214,24 +214,38 @@
     return openTask({ title: (record.label + ' 재확인').slice(0, 120), lat: record.lat, lng: record.lng, radius: Math.min(80, record.radius), originKind: 'record', originId: id, evidenceIds: [id], reviewMinute: api.state().rvMinute ?? 1260, note: root.DGLighting.recordSummary(record) });
   }
   function reviewHistoryStatus(review) {
-    const status = !review ? '' : review.historyState === 'synced' ? '현재 실행 이력 보관 완료' : review.historyState === 'preparing' ? '현재 실행 이력 준비 중…' : review.historyState === 'queued' ? '실행 이력 전송 대기 · 저장 대기함 확인' : review.historyError || '';
-    return '<div class="split"><button class="btn ghost sm" data-lw="tasks">재확인 업무</button><button class="btn ghost sm" data-lw="history">검토 이력·관찰 비교</button>' + (review && !['synced', 'preparing', 'queued'].includes(review.historyState) ? '<button class="btn ghost sm" data-lw="run-save">현재 실행 이력 보관</button>' : '') + '</div>' + (status ? '<p class="notice" role="status">' + E(status) + '</p>' : '') + '<p class="muted">검토 이력은 전체 후보·관찰 비교와 모델 버전을 함께 보관해요. 1회 최대 600KB이며 초과하면 범위를 나눠 검토해 주세요.</p>';
+    const status = !review ? '' : review.historyState === 'synced' ? '현재 실행 이력 보관 완료' + (review.historyParts > 1 ? ' · 한 번에 담기지 않아 법정동별 ' + review.historyParts + '건으로 나눠 모든 후보를 보관했어요' : '') : review.historyState === 'preparing' ? '현재 실행 이력 준비 중…' : review.historyState === 'queued' ? '실행 이력 전송 대기 · 저장 대기함 확인' : review.historyError || '';
+    return '<div class="split"><button class="btn ghost sm" data-lw="tasks">재확인 업무</button><button class="btn ghost sm" data-lw="history">검토 이력·관찰 비교</button>' + (review && !['synced', 'preparing', 'queued'].includes(review.historyState) ? '<button class="btn ghost sm" data-lw="run-save">현재 실행 이력 보관</button>' : '') + '</div>' + (status ? '<p class="notice" role="status">' + E(status) + '</p>' : '') + '<p class="muted">검토 이력은 전체 후보·관찰 비교와 모델 버전을 함께 보관해요. 한 건에 다 담기지 않는 동구 전체 검토는 법정동별로 나눠 모든 후보를 보관해요(한 동이 넘치면 보관하지 않아요).</p>';
   }
   async function captureReview(review) {
     if (!supported() || !review || ['preparing', 'synced', 'queued'].includes(review.historyState)) return;
     const scope = generation, author = actor();
     review.historyState = 'preparing'; review.historyError = ''; api.render();
     try {
-      let job = review.historyJob;
-      if (!job) {
+      let jobs = review.historyJobs || (review.historyJob ? [review.historyJob] : null);
+      if (!jobs) {
         const grid = api.lightingGrid(), configuration = api.lightingModel();
-        const data = await C.buildRun({ review: copy(review), lights: copy(api.state().lights), records: copy(root.DGLighting.state.records), roads: copy(api.lightingRoads() || null), model: copy(configuration.model), calibration: copy(configuration.calibration), baseAt: point => { const p = grid.toXY(point); return grid.lightAt(p.x, p.y); } });
-        job = { id: uid('lighting-run-op'), entity: 'run', recordId: uid('lighting-run'), actor: author, at: Date.now(), expectedRevision: 0, data }; review.historyJob = job;
+        const inputs = { lights: copy(api.state().lights), records: copy(root.DGLighting.state.records), roads: copy(api.lightingRoads() || null), model: copy(configuration.model), calibration: copy(configuration.calibration), baseAt: point => { const p = grid.toXY(point); return grid.lightAt(p.x, p.y); } };
+        const whole = copy(review); let runs;
+        try { runs = [await C.buildRun({ ...inputs, review: whole })]; } catch (error) {
+          // a whole-district review that does not fit one archive is kept as one archive per 법정동 (all of them or none)
+          if (error.code !== 'resource-exhausted' || (whole.dong && whole.dong !== '전체') || whole.cands.length < 2) throw error;
+          const parts = C.splitReview(whole); if (parts.length < 2) throw error;
+          runs = []; for (const part of parts) runs.push(await C.buildRun({ ...inputs, review: part }));
+        }
+        const at = Date.now();
+        jobs = runs.map(data => ({ id: uid('lighting-run-op'), entity: 'run', recordId: uid('lighting-run'), actor: author, at, expectedRevision: 0, data }));
+        review.historyJobs = jobs; review.historyJob = jobs[0]; review.historyParts = jobs.length;
       }
-      if (scope !== generation || actor() !== author || job.actor !== author) C.fail('계정이 바뀌어 이전 검토의 저장을 중단했어요.', 'account-changed');
-      const result = await root.DGOffline.submit('lighting-workflow', job, { id: job.id, summary: '밝기 검토 이력 · ' + time(review.at) });
-      review.historyState = result.state === 'synced' ? 'synced' : ['failed', 'conflict'].includes(result.state) ? 'failed' : 'queued';
-      review.historyError = result.error || ''; review.runId = job.recordId; state.runsLoaded = false;
+      if (scope !== generation || actor() !== author || jobs.some(job => job.actor !== author)) C.fail('계정이 바뀌어 이전 검토의 저장을 중단했어요.', 'account-changed');
+      const states = [], errors = [];
+      for (const [i, job] of jobs.entries()) {
+        if (job.synced) { states.push('synced'); continue; }
+        const result = await root.DGOffline.submit('lighting-workflow', job, { id: job.id, summary: '밝기 검토 이력 · ' + time(review.at) + (jobs.length > 1 ? ' · ' + (i + 1) + '/' + jobs.length : '') });
+        if (result.state === 'synced') job.synced = true; states.push(result.state); if (result.error) errors.push(result.error);
+      }
+      review.historyState = states.every(x => x === 'synced') ? 'synced' : states.some(x => ['failed', 'conflict'].includes(x)) ? 'failed' : 'queued';
+      review.historyError = errors[0] || ''; review.runId = jobs[0].recordId; state.runsLoaded = false;
     } catch (error) { review.historyState = 'failed'; review.historyError = errorText(error); }
     if (api.lightingReview() === review) api.render();
   }
@@ -370,7 +384,7 @@
       if (event.job?.kind !== 'lighting-workflow') return;
       if (event.type === 'synced') {
         if (event.job.payload?.entity === 'task') settleTask(event.job).catch(error => api.toast(errorText(error)));
-        if (event.job.payload?.entity === 'run') { const review = api.lightingReview(); if (review?.historyJob?.id === event.job.id) { review.historyState = 'synced'; review.historyError = ''; } state.runsLoaded = false; }
+        if (event.job.payload?.entity === 'run') { const review = api.lightingReview(), jobs = review?.historyJobs || (review?.historyJob ? [review.historyJob] : []), job = jobs.find(j => j.id === event.job.id); if (job) { job.synced = true; if (jobs.every(j => j.synced)) { review.historyState = 'synced'; review.historyError = ''; } } state.runsLoaded = false; }
         loadTasks();
       }
       if (event.type === 'discarded' && event.job.payload?.entity === 'task') {

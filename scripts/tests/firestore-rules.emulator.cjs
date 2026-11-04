@@ -359,6 +359,15 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       for (const client of [db, admin()]) await assertFails(deleteDoc(doc(client, 'lightingContext/external')));
     });
 
+    test('가림·가설물 records use only their own categories and carry no lighting status, level, lux or registry link', async () => {
+      const db = staff(), obstruction = (extra = {}) => lighting({ kind: 'obstruction', label: '공사 가림막', category: 'construction', operator: '', radius: 15, status: 'unknown', schedule: 'always', nightConfirmed: false, distinct: false, validDays: 180, ...extra });
+      await assertSucceeds(lightingWrite(db, 'obstruction-ok', obstruction({ operationId: 'obstruction-ok' })));
+      await assertSucceeds(lightingWrite(db, 'obstruction-wide', obstruction({ radius: 80, strength: 'high', category: 'tree', operationId: 'obstruction-wide' })));
+      for (const [i, bad] of [{ category: 'other_public' }, { schedule: 'hours' }, { status: 'on' }, { level: 'dark' }, { lux: 3, instrument: '조도계' }, { linkedLightId: 'light-1' }, { radius: 81 }].entries())
+        await assertFails(lightingWrite(db, 'obstruction-bad-' + i, obstruction({ ...bad, operationId: 'obstruction-bad-' + i })));
+      await assertFails(lightingWrite(db, 'source-with-obstruction-category', lighting({ category: 'construction', operationId: 'source-bad-category' })));
+    });
+
     test('lighting edits require ownership or admin while preserving creation metadata and strict revisions', async () => {
       await assertSucceeds(lightingWrite(staff(), 'external', lighting()));
       const edited = lighting({ operationId: 'lighting-edit', updatedAt: 2000, revision: 2, label: '확인한 명칭' });

@@ -6,10 +6,12 @@
   let api, attached = false, loading = null, reloadRequested = false, signature = '', unsubscribe, draftWrites = Promise.resolve(), editorMap;
   const state = { records: [], loaded: false, error: '', revision: 0, draft: null, filter: 'all', show: 40 };
   const Q = selector => document.querySelector(selector), E = value => api.esc(value == null ? '' : value);
-  const CATEGORIES = { other_public: '다른 공공기관', private: '민간·공동주택', shop: '상가', building: '건물', unknown: '관리 주체 미확인', field: '현장 관찰' };
+  const CATEGORIES = { other_public: '다른 공공기관', private: '민간·공동주택', shop: '상가', building: '건물', unknown: '관리 주체 미확인', field: '현장 관찰', construction: '공사 가림막·비계', tree: '가로수·수목', sign: '간판·차양·현수막', structure: '기타 구조물·가설물' };
+  const OBSTRUCTION_KINDS = { construction: '공사 가림막·비계', tree: '가로수·수목', sign: '간판·차양·현수막', structure: '기타 구조물·가설물' };
+  const OBSTRUCTION_LEVELS = { low: '조금 가림 · 대장 빛 25% 감소', medium: '절반쯤 가림 · 50% 감소', high: '대부분 가림 · 75% 감소' };
   const LEVELS = { bright: '밝음', adequate: '보통', dark: '어두움', unknown: '판단 보류' };
   const REASONS = { linked_registry: '관리 대장과 연결됨 · 중복 합산 제외', unresolved_link: '연결된 대장 ID 확인 필요', possible_registry_duplicate: '5m 이내 대장 시설 · 별개 광원 확인 필요', duplicate_source: '같은 위치의 중복 기록', not_night_confirmed: '야간 확인 필요', stale: '재확인 기한 경과', future: '관찰 시간이 아직 지나지 않음', off: '꺼짐 확인', unknown_status: '점등 상태 미확인', unknown_schedule: '점등 시간 미확인', outside_schedule: '선택 시간대 밖', invalid_record: '기록 형식 확인 필요', removed: '제외한 기록' };
-  const CLASSIFICATIONS = { observed_dark: '현장 어두움 관찰', observed_bright: '현장 밝음·보통 관찰', conflict: '현장 관찰 충돌', external_supported: '외부 광원으로 모델 보완', partial_supported: '일부 범위 보완 · 나머지 확인', data_gap: '대장 광원 정보 부족', model_weak: '모델상 부족 후보', model_lit: '모델상 기준 지수 이상' };
+  const CLASSIFICATIONS = { obstructed: '가림·가설물로 부족', observed_dark: '현장 어두움 관찰', observed_bright: '현장 밝음·보통 관찰', conflict: '현장 관찰 충돌', external_supported: '외부 광원으로 모델 보완', partial_supported: '일부 범위 보완 · 나머지 확인', data_gap: '대장 광원 정보 부족', model_weak: '모델상 부족 후보', model_lit: '모델상 기준 지수 이상' };
   const minuteText = minute => String(Math.floor(minute / 60)).padStart(2, '0') + ':' + String(minute % 60).padStart(2, '0');
   const parseMinute = value => /^\d{2}:\d{2}$/.test(value || '') ? +value.slice(0, 2) * 60 + +value.slice(3) : NaN;
   const kstInput = time => Number.isFinite(time) && time > 0 ? new Date(time + 9 * 3600000).toISOString().slice(0, 16) : '';
@@ -49,22 +51,24 @@
     if (record.observedAt + record.validDays * 86400000 <= Date.now()) flags.push('재확인 필요');
     if (record.observedAt > Date.now()) flags.push('관찰 시각 확인 필요');
     if (record.removed) flags.push('제외됨');
+    if (record.kind === 'obstruction') return ['가림 · ' + CATEGORIES[record.category], OBSTRUCTION_LEVELS[record.strength], record.operator, ...flags.filter(f => f !== '야간 미확인')].filter(Boolean).join(' · ');
     return [record.kind === 'source' ? CATEGORIES[record.category] : '현장 ' + LEVELS[record.level], record.operator, scheduleText(record), ...flags].filter(Boolean).join(' · ');
   }
   function view() {
     if (!state.loaded && !state.error && !loading) load();
-    const active = state.records.filter(r => !r.removed), records = state.records.filter(r => state.filter === 'removed' ? r.removed : !r.removed && (state.filter === 'all' || r.kind === state.filter || state.filter === 'stale' && r.observedAt + r.validDays * 86400000 <= Date.now() || state.filter === 'unconfirmed' && (!r.nightConfirmed || r.schedule === 'unknown')));
-    return '<div class="panel"><h3>대장 밖 광원·현장 관찰</h3><p>다른 기관의 등, 상가·건물의 빛을 위치와 점등 시간대로 기록해요. 다른 기관 자료를 자동으로 수집한 목록은 아니에요.</p><p class="muted">추가 광원은 상대 모델의 보완 입력이에요. 현장 밝기와 조도계 실측은 별도 근거로 표시하며 모델 지수에 더하지 않아요.</p>' +
-      (!canWrite() ? '<p class="notice">기록에는 점검 권한과 Firebase 또는 기기 저장 모드가 필요해요.</p>' : '<div class="split"><button class="btn" data-lc="new-source">외부 광원 추가</button><button class="btn ghost" data-lc="new-observation">현장 밝기 기록</button></div>') +
+    const active = state.records.filter(r => !r.removed), records = state.records.filter(r => state.filter === 'removed' ? r.removed : !r.removed && (state.filter === 'all' || r.kind === state.filter || state.filter === 'stale' && r.observedAt + r.validDays * 86400000 <= Date.now() || state.filter === 'unconfirmed' && r.kind !== 'obstruction' && (!r.nightConfirmed || r.schedule === 'unknown')));
+    return '<div class="panel"><h3>대장 밖 광원·가림·현장 관찰</h3><p>다른 기관의 등, 상가·건물의 빛을 위치와 점등 시간대로 기록해요. 공사 가림막·가로수·간판처럼 빛을 가리는 것은 가림·가설물로 기록하면 그 범위의 관리 시설 빛을 줄여 계산해요. 다른 기관 자료를 자동으로 수집한 목록은 아니에요.</p><p class="muted">추가 광원은 상대 모델의 보완 입력이에요. 현장 밝기와 조도계 실측은 별도 근거로 표시하며 모델 지수에 더하지 않아요.</p>' +
+      (!canWrite() ? '<p class="notice">기록에는 점검 권한과 Firebase 또는 기기 저장 모드가 필요해요.</p>' : '<div class="split"><button class="btn" data-lc="new-source">외부 광원 추가</button><button class="btn ghost" data-lc="new-obstruction">가림·가설물 기록</button><button class="btn ghost" data-lc="new-observation">현장 밝기 기록</button></div>') +
       (root.DGLightingWorkflows ? '<div class="split"><button class="btn ghost sm" data-lw="tasks">재확인 업무</button><button class="btn ghost sm" data-lw="history">검토 이력·관찰 비교</button>' + (api.can('admin') ? '<button class="btn ghost sm" data-lw="import">기관 자료 반입</button>' : '') + '</div>' : '') +
       (state.draft ? '<button class="btn ghost block" data-lc="resume">작성 중 기록 이어쓰기</button>' : '') +
       (state.error ? '<p class="notice" role="alert">' + E(state.error) + ' 기존에 읽은 자료만 표시해요.</p>' : '') +
-      '<div class="split"><select class="f-in" id="lcFilter" aria-label="보완 기록 종류">' + option({ all: '사용 중 전체', source: '외부 광원', observation: '현장 관찰', stale: '재확인 기한 경과', unconfirmed: '야간·시간 미확인', removed: '제외한 기록' }, state.filter) + '</select><button class="btn ghost sm" data-lc="reload">새로고침</button></div><p class="muted">사용 중 광원 ' + active.filter(r => r.kind === 'source').length + ' · 관찰 ' + active.filter(r => r.kind === 'observation').length + '</p>' +
+      '<div class="split"><select class="f-in" id="lcFilter" aria-label="보완 기록 종류">' + option({ all: '사용 중 전체', source: '외부 광원', obstruction: '가림·가설물', observation: '현장 관찰', stale: '재확인 기한 경과', unconfirmed: '야간·시간 미확인', removed: '제외한 기록' }, state.filter) + '</select><button class="btn ghost sm" data-lc="reload">새로고침</button></div><p class="muted">사용 중 광원 ' + active.filter(r => r.kind === 'source').length + ' · 가림 ' + active.filter(r => r.kind === 'obstruction').length + ' · 관찰 ' + active.filter(r => r.kind === 'observation').length + '</p>' +
       (records.length ? records.slice(0, state.show).map(r => '<div class="panel"><b>' + E(r.label) + '</b><p>' + E(recordSummary(r)) + '</p><p class="muted">' + (r.importedAt && !r.nightConfirmed ? '기관 자료 시각 · 현장 미확인: ' : '') + E(kstTime(r.observedAt)) + ' · 반경 ' + E(r.radius) + 'm · 재확인 ' + E(r.validDays) + '일' + (r.lux != null ? ' · 실측 ' + E(r.lux) + ' lux (' + E(r.instrument) + ')' : '') + '</p>' + (r.sourceAgency ? '<p class="muted">출처 ' + E(r.sourceAgency) + ' / ' + E(r.sourceRecordId) + ' · ' + E(r.sourceDataset) + '</p>' : '') + '<div class="split"><button class="btn ghost sm" data-lc="edit" data-id="' + E(r.id) + '">' + (canEdit(r) ? '확인·수정' : '기록 보기') + '</button>' + (root.DGLightingWorkflows && canWrite() ? '<button class="btn ghost sm" data-lw="record-task" data-record-id="' + E(r.id) + '">재확인 업무로</button>' : '') + '</div></div>').join('') : '<p class="empty">' + (state.loaded ? '이 범위의 기록이 없어요.' : '불러오는 중…') + '</p>') +
       (records.length > state.show ? '<button class="btn ghost block" data-lc="more">더 보기</button>' : '') + '</div>';
   }
   function defaults(kind, point) {
     const now = Date.now(), minute = root.DGLightingModel.minuteOfKst(now);
+    if (kind === 'obstruction') return { kind, label: '', category: 'construction', operator: '', lat: point?.lat ?? '', lng: point?.lng ?? '', radius: 15, strength: 'medium', status: 'unknown', level: 'unknown', schedule: 'always', startMinute: 1080, endMinute: 360, observedAt: now, validDays: 180, nightConfirmed: false, lux: null, instrument: '', note: '', linkedLightId: '', distinct: false, removed: false };
     return { kind, label: '', category: kind === 'source' ? 'other_public' : 'field', operator: '', lat: point?.lat ?? '', lng: point?.lng ?? '', radius: kind === 'source' ? 20 : 10, strength: 'medium', status: 'unknown', level: 'unknown', schedule: kind === 'source' ? 'unknown' : 'hours', startMinute: kind === 'source' ? 1080 : (minute + 1380) % 1440, endMinute: kind === 'source' ? 360 : (minute + 60) % 1440, observedAt: now, validDays: kind === 'source' ? 90 : 30, nightConfirmed: false, lux: null, instrument: '', note: '', linkedLightId: '', distinct: false, removed: false };
   }
   function observationTimeWarning(d) {
@@ -110,9 +114,28 @@
     if (input.originKind) Object.assign(data, { originKind: input.originKind, originId: input.originId, originPointId: input.originPointId || '', positionAccuracy: input.positionAccuracy || 0 });
     return openEditor('observation', input, null, false, root.DGLightingCommands.normalize(data));
   }
+  /* 가림·가설물: where it is, how much of the managed lights it blocks and until when it stays */
+  function renderObstruction(draft, d, disabled) {
+    api.navigate(heading('가림·가설물 기록') + '<form id="lcForm" data-record-id="' + E(draft.recordId) + '" data-kind="obstruction" class="panel" novalidate><fieldset ' + (disabled ? 'disabled' : '') + ' style="border:0;padding:0;margin:0;min-width:0">' +
+      field('lcLabel', '장소·가림 이름', d.label, 'maxlength="100" required placeholder="예: OO빌딩 신축 공사 가림막"') +
+      '<div class="grid2"><div>' + select('lcCategory', '가림 종류', OBSTRUCTION_KINDS, d.category) + '</div><div>' + field('lcOperator', '설치·관리 주체 (모르면 빈칸)', d.operator, 'maxlength="100"') + '</div></div>' +
+      '<div class="grid2"><div>' + field('lcLat', '위도', d.lat, 'type="number" step="any" min="-90" max="90" required') + '</div><div>' + field('lcLng', '경도', d.lng, 'type="number" step="any" min="-180" max="180" required') + '</div></div><div class="split"><button type="button" class="btn ghost sm" data-lc="gps">현재 위치 입력</button><button type="button" class="btn ghost sm" data-lc="pick-map">지도에서 위치 선택</button></div><p id="lcPosition" class="muted" role="status">위치는 가림이 있는 곳의 가운데에 맞춰 주세요.</p><div id="lcPickMap" style="display:none;height:260px" aria-label="가림 위치 선택 지도"></div>' +
+      '<div class="grid2"><div>' + field('lcRadius', '가림 영향 반경 (5–80m)', d.radius, 'type="number" min="5" max="80" step="1" required') + '</div><div>' + select('lcStrength', '가리는 정도', OBSTRUCTION_LEVELS, d.strength) + '</div></div>' +
+      '<p class="muted">반경 안의 관리 시설 빛(대장 모델)을 고른 비율만큼 줄여 계산해요. 가림이 겹치면 가장 큰 비율 하나만 적용하고, 외부 광원 빛은 줄이지 않아요. 비율은 모델 가정이며 실측값이 아니에요.</p>' +
+      field('lcObservedAt', '가림을 확인한 날짜·시각 (한국 시간)', kstInput(d.observedAt), 'type="datetime-local" required') +
+      field('lcValidDays', '가림이 남아 있을 기간 · 재확인까지 (일, 최대 365)', d.validDays, 'type="number" min="1" max="365" step="1" required') +
+      '<p class="muted">공사 기간처럼 끝나는 날이 정해져 있으면 그날까지로 맞춰 주세요. 기간이 지나면 계산에서 빠지고 재확인 대상으로 표시돼요.</p>' +
+      '<label class="f" for="lcNote">근거·메모</label><textarea class="f-in" id="lcNote" maxlength="1000" placeholder="예: 공사 허가 기간 ~12월 31일, 인도 쪽 등 2개를 가림">' + E(d.note) + '</textarea></fieldset>' +
+      saveButtons(draft, d) + '</form>', { key: 'lcedit', reopen: () => renderEditor() });
+  }
+  function saveButtons(draft, d) {
+    return (draft.pending ? '<p class="notice">전송 중인 내용은 저장 대기함에서 확인해 주세요. 완료 전에는 모델에 반영되지 않아요.</p><button type="button" class="btn ghost" data-asec="outbox">저장 대기함</button>' : draft.readonly ? '<p class="muted">작성자 또는 관리자가 수정할 수 있어요.</p>' : '<div class="split"><button type="submit" class="btn" id="lcSave">기록 저장</button><button type="button" class="btn ghost" data-lc="discard">초안 버리기</button>' + (draft.expectedRevision ? '<button type="button" class="btn ghost" data-lc="remove">' + (d.removed ? '다시 사용' : '검토에서 제외') + '</button>' : '') + '</div>') +
+      '<p id="lcSaveState" class="muted" role="status">' + (root.DGOffline.durable ? '작성 내용은 이 기기에 자동 보관돼요.' : '현재 창에서만 초안을 보관해요.') + '</p>';
+  }
   function renderEditor() {
     if (editorMap) { editorMap.remove(); editorMap = null; }
     const draft = state.draft, d = draft.data, source = d.kind === 'source', disabled = draft.readonly || !!draft.pending;
+    if (d.kind === 'obstruction') return renderObstruction(draft, d, disabled);
     api.navigate(heading(source ? '외부 광원 기록' : '현장 밝기 관찰') + '<form id="lcForm" data-record-id="' + E(draft.recordId) + '" class="panel" novalidate><fieldset ' + (disabled ? 'disabled' : '') + ' style="border:0;padding:0;margin:0;min-width:0">' +
       field('lcLabel', '장소·광원 이름', d.label, 'maxlength="100" required placeholder="예: OO교차로 다른 기관 보행등"') +
       (source ? '<div class="grid2"><div>' + select('lcCategory', '광원 구분', CATEGORIES_SOURCE(), d.category) + '</div><div>' + field('lcOperator', '관리기관·운영 주체 (모르면 빈칸)', d.operator, 'maxlength="100"') + '</div></div>' : select('lcLevel', '눈으로 확인한 밝기', LEVELS, d.level)) +
@@ -136,6 +159,7 @@
   function readForm() {
     const draft = state.draft; if (!draft || Q('#lcForm')?.dataset.recordId !== draft.recordId || draft.readonly || draft.pending) return draft;
     const d = draft.data, num = id => Q(id).value === '' ? '' : Number(Q(id).value);
+    if (d.kind === 'obstruction') { Object.assign(d, { label: Q('#lcLabel').value, category: Q('#lcCategory').value, operator: Q('#lcOperator').value, lat: num('#lcLat'), lng: num('#lcLng'), radius: num('#lcRadius'), strength: Q('#lcStrength').value, observedAt: Date.parse(Q('#lcObservedAt').value + '+09:00'), validDays: num('#lcValidDays'), note: Q('#lcNote').value }); return draft; }
     Object.assign(d, { label: Q('#lcLabel').value, lat: num('#lcLat'), lng: num('#lcLng'), radius: num('#lcRadius'), observedAt: Date.parse(Q('#lcObservedAt').value + '+09:00'), nightConfirmed: Q('#lcNight').checked, schedule: Q('#lcSchedule').value, startMinute: parseMinute(Q('#lcStart').value), endMinute: parseMinute(Q('#lcEnd').value), validDays: num('#lcValidDays'), note: Q('#lcNote').value });
     if (d.kind === 'source') Object.assign(d, { category: Q('#lcCategory').value, operator: Q('#lcOperator').value, strength: Q('#lcStrength').value, status: Q('#lcStatus').value, linkedLightId: Q('#lcLinked').value, distinct: Q('#lcDistinct').checked });
     else Object.assign(d, { level: Q('#lcLevel').value, lux: Q('#lcLux').value === '' ? null : +Q('#lcLux').value, instrument: Q('#lcInstrument').value });
@@ -174,7 +198,7 @@
     if (form) { form.querySelector('fieldset').disabled = true; Q('#lcSaveState').textContent = '저장 요청을 확인하는 중이에요. 입력한 내용은 전송 완료까지 잠시 잠겨요.'; }
     try {
       await writeDraft(d);
-      const result = await root.DGOffline.submit('lighting', job, { id: job.id, summary: (data.kind === 'source' ? '추가 광원 · ' : '현장 밝기 · ') + data.label });
+      const result = await root.DGOffline.submit('lighting', job, { id: job.id, summary: ({ source: '추가 광원 · ', obstruction: '가림·가설물 · ' }[data.kind] || '현장 밝기 · ') + data.label });
       if (result.state === 'synced') { await clearDraft(d); await load(); if (form?.isConnected && Q('#lcForm') === form) api.closeSheet(); api.toast('기록했어요. 밝기 검토를 다시 실행하면 반영돼요.'); }
       else { api.toast(result.error || '기기에 보관했어요. 전송 완료 후 검토에 반영돼요.'); if (state.draft === d) renderEditor(); }
     } catch (error) { d.pending = null; await writeDraft(d).catch(() => {}); throw error; }
@@ -190,7 +214,7 @@
   }
   async function handle(button) {
     const action = button.dataset.lc;
-    if (action === 'new-source' || action === 'new-observation') return openEditor(action === 'new-source' ? 'source' : 'observation', button.dataset.lat ? { lat: +button.dataset.lat, lng: +button.dataset.lng } : null);
+    if (action === 'new-source' || action === 'new-observation' || action === 'new-obstruction') return openEditor({ 'new-source': 'source', 'new-obstruction': 'obstruction' }[action] || 'observation', button.dataset.lat ? { lat: +button.dataset.lat, lng: +button.dataset.lng } : null);
     if (action === 'edit') return openEditor(null, null, button.dataset.id);
     if (action === 'resume') return openEditor(null, null, null, true);
     if (action === 'reload') return load();
@@ -250,5 +274,5 @@
     });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') persistDraft().catch(() => {}); });
   }
-  root.DGLighting = { attach, ready, load, context, view, openEditor, openObservation, state, restoreRecord, persistDraft, clearDraft, minuteText, parseMinute, kstTime, recordSummary, reason: key => REASONS[key] || key, classification: key => CLASSIFICATIONS[key] || key, categories: CATEGORIES, levels: LEVELS };
+  root.DGLighting = { attach, ready, load, context, view, openEditor, openObservation, state, restoreRecord, persistDraft, clearDraft, minuteText, parseMinute, kstTime, recordSummary, reason: key => REASONS[key] || key, classification: key => CLASSIFICATIONS[key] || key, categories: CATEGORIES, levels: LEVELS, obstructionLevels: OBSTRUCTION_LEVELS };
 })(globalThis);

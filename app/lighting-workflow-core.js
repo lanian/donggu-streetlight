@@ -36,7 +36,7 @@
     if (distance(task, normalized) > task.radius + normalized.radius) fail('재확인 지점과 현장 관찰 범위가 겹치지 않아요.', 'failed-precondition');
     return normalized;
   }
-  function parsed(value, max, label, array) { if (typeof value === 'string' && value.length > max) fail(label + '는 최대 ' + max.toLocaleString() + '자예요. 지역을 나눠 검토해 주세요. 일부 행만 보관하지 않아요.', 'resource-exhausted'); const s = text(value, max, label, true); let out; try { out = JSON.parse(s); } catch (_) { fail(label + ' JSON을 읽을 수 없어요.'); } if (array ? !Array.isArray(out) : !plain(out)) fail(label + ' 형식을 확인해 주세요.'); return { s, value: out }; }
+  function parsed(value, max, label, array) { if (typeof value === 'string' && value.length > max) fail(label + '는 최대 ' + max.toLocaleString() + '자예요(지금 ' + value.length.toLocaleString() + '자). 검토 지역을 동 하나로 좁혀 다시 실행해 주세요. 일부 행만 잘라 보관하지는 않아요.', 'resource-exhausted'); const s = text(value, max, label, true); let out; try { out = JSON.parse(s); } catch (_) { fail(label + ' JSON을 읽을 수 없어요.'); } if (array ? !Array.isArray(out) : !plain(out)) fail(label + ' 형식을 확인해 주세요.'); return { s, value: out }; }
   function normalizeRun(input) {
     if (!plain(input)) fail('검토 실행 이력을 확인해 주세요.');
     if (!['roads', 'pairs'].includes(input.mode) || !/^[a-f0-9]{64}$/.test(input.inputDigest || '')) fail('검토 방식과 자료 지문을 확인해 주세요.');
@@ -61,21 +61,46 @@
     for (const r of ctx.records.filter(r => r.kind === 'observation')) {
       const state = Model.recordState(r, options);
       if (!state.active || !['bright', 'adequate', 'dark'].includes(r.level)) { excluded.push({ id: r.id, label: r.label, reason: state.reason || 'unknown_observation' }); continue; }
-      const base = options.baseAt(r), result = Model.evaluate(ctx, r, base);
+      // base is the registry index after 가림·가설물, the same value candidates use; the unobstructed one is kept beside it
+      const registryBase = options.baseAt(r), result = Model.evaluate(ctx, r, registryBase), base = result.base;
       if (result.fieldLevel === 'conflict') { excluded.push({ id: r.id, label: r.label, reason: 'conflict' }); continue; }
       const bright = r.level !== 'dark', baseBright = base >= ctx.weak, adjustedBright = result.adjusted >= ctx.weak;
       counts.compared++; counts.baseMatched += Number(bright === baseBright); counts.adjustedMatched += Number(bright === adjustedBright);
       counts.baseMissedDark += Number(!bright && baseBright); counts.adjustedMissedDark += Number(!bright && adjustedBright);
       counts.baseWeakButBright += Number(bright && !baseBright); counts.adjustedWeakButBright += Number(bright && !adjustedBright);
-      rows.push({ id: r.id, label: r.label, lat: r.lat, lng: r.lng, observedAt: r.observedAt, level: r.level, base, adjusted: result.adjusted, baseMatch: bright === baseBright, adjustedMatch: bright === adjustedBright, lux: r.lux });
+      rows.push({ id: r.id, label: r.label, lat: r.lat, lng: r.lng, observedAt: r.observedAt, level: r.level, base, adjusted: result.adjusted, baseMatch: bright === baseBright, adjustedMatch: bright === adjustedBright, lux: r.lux, ...(result.obstructions.length ? { registryBase, obstructionIds: result.obstructions.map(o => o.id) } : {}) });
     }
     for (const r of ctx.invalidRecords) excluded.push({ id: r.id, label: r.label, reason: 'invalid_record' });
     return { at: ctx.now, minute: ctx.minute, weak: ctx.weak, counts, rows, excluded };
   }
+  /* One archived candidate. Values are rounded and empty fields left out so a whole-district review fits
+     the 300,000-character archive (about 190 characters a row instead of 350). A missing length,
+     sourceIds, observationIds, obstructionIds, pois or scopeException means none; zero coverage figures are left out too. */
+  const round = (value, digits) => { const f = 10 ** digits; return Math.round(value * f) / f; };
+  function archiveCandidate(c) {
+    const e = c.context, base = round(e.base, 4), adjusted = Math.max(base, round(e.adjusted, 4)), coverage = {};
+    for (const [k, v] of Object.entries(e.coverage || {})) if (typeof v === 'number' ? v !== 0 : v != null && v !== '') coverage[k] = typeof v === 'number' ? round(v, 1) : v;
+    const row = { title: c.a ? c.a.code + ' ↔ ' + c.b.code : c.name, dong: c.dong || '', lat: round(c.mid.lat, 7), lng: round(c.mid.lng, 7) };
+    if (c.len != null) row.length = c.len;
+    Object.assign(row, { classification: e.classification, base, adjusted, coverage });
+    const sources = (e.sources || []).map(x => x.id), observations = (e.observations || []).map(x => x.id);
+    if (sources.length) row.sourceIds = sources; if (observations.length) row.observationIds = observations; if (c.scopeException?.length) row.scopeException = c.scopeException;
+    const obstructions = (e.obstructions || []).map(x => x.id); if (obstructions.length) { row.obstructionIds = obstructions; row.registryBase = Math.max(base, round(e.registryBase ?? e.base, 4)); }
+    if (c.pois?.length) row.pois = c.pois.map(p => p.t + ':' + p.d);
+    return row;
+  }
+  /* When one archive cannot hold a whole-district review, it is kept as one archive per 법정동 instead:
+     every candidate is stored exactly once, and the set is saved only when every part fits. */
+  function splitReview(review) {
+    const groups = new Map();
+    for (const c of review.cands) { const key = c.dong || ''; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(c); }
+    const parts = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ko'));
+    return parts.map(([dong, cands]) => ({ ...review, cands, dong: '전체 중 ' + (dong || '동 미확인') + ' (' + parts.length + '개로 나눔)' }));
+  }
   async function buildRun({ review, lights, records, roads, model, calibration, baseAt }) {
     const areaScope = { records: review.areas || [], summary: review.areaSummary || {}, automaticExclusions: review.automaticExclusions || {} };
     const now = review.at, evaluation = evaluateObservations(records, lights, { now, minute: review.minute, weak: model.weak, baseAt });
-    const candidates = review.cands.map(c => ({ title: c.a ? c.a.code + ' ↔ ' + c.b.code : c.name, dong: c.dong || '', lat: c.mid.lat, lng: c.mid.lng, length: c.len ?? null, classification: c.context.classification, base: c.context.base, adjusted: c.context.adjusted, coverage: c.context.coverage, sourceIds: c.context.sources.map(x => x.id), observationIds: c.context.observations.map(x => x.id), scopeException: c.scopeException || [] }));
+    const candidates = review.cands.map(archiveCandidate);
     const versions = { registry: lights.map(l => [l.id, l.revision || 0, l.updatedAt || 0]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), context: records.map(r => [r.id, r.revision || 0]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))), roads: { version: roads?.ver || 0, at: roads?.at || 0 }, reviewAreas: areaScope };
     const data = { modelVersion: MODEL_VERSION, reviewedAt: now, minute: review.minute, mode: review.mode, dong: review.dong || '', facilityKind: review.kind || '', registryCount: lights.length, contextCount: records.length, roadCount: roads?.ways?.length || 0, candidateCount: candidates.length, inputDigest: await digest({ lights, records, roads: roads || null, model, calibration: calibration || null, areaScope }), inputVersionsJson: JSON.stringify(versions), settingsJson: JSON.stringify({ model, calibration: calibration || null }), candidatesJson: JSON.stringify(candidates), evaluationJson: JSON.stringify(evaluation) };
     return normalizeRun(data);
@@ -146,5 +171,5 @@
     }
     return { batchId, at: now, agency, dataset, total: rows.length, rows, counts: Object.fromEntries(['new', 'protected', 'duplicate', 'invalid'].map(status => [status, rows.filter(r => r.status === status).length])) };
   }
-  return Object.freeze({ MODEL_VERSION, RUN_BYTES, IMPORT_BYTES, IMPORT_ROWS, fail, text, number, id, canonical, bytes, digest, distance, normalizeTask, checkCompletion, normalizeRun, evaluateObservations, buildRun, parseImport, previewImport, importIdentity });
+  return Object.freeze({ MODEL_VERSION, RUN_BYTES, IMPORT_BYTES, IMPORT_ROWS, fail, text, number, id, canonical, bytes, digest, distance, normalizeTask, checkCompletion, normalizeRun, evaluateObservations, buildRun, archiveCandidate, splitReview, parseImport, previewImport, importIdentity });
 });
