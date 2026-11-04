@@ -42,6 +42,25 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072 };
     assert.deepEqual(await page.evaluate(() => [DEV.kind, DEV.field, document.documentElement.dataset.device]), ['desktop', false, 'desktop']);
     assert.equal(await page.evaluate(() => S.tab), 'admin', 'an administrator on a PC starts on 관리 현황');
     assert.ok(await page.locator('.todaystrip button').count() >= 5);
+    // overdue / due-today counts come from their own query over all open work, independent of 보수 작업's filter or paging
+    await page.evaluate(async () => {
+      const now = Date.now(), base = { schemaVersion: 1, lightId: S.lights[0].id, code: S.lights[0].code, dong: S.lights[0].dong, title: '시험', description: '', type: '수리', priority: '보통', assignedTo: S.me, createdBy: S.me, createdAt: now, updatedAt: now };
+      const kstMidnight = Date.parse(new Date(now + 9 * 36e5).toISOString().slice(0, 10) + 'T00:00:00+09:00');
+      const rows = [['o1', { status: 'assigned', dueAt: now - 86400000 }], ['o2', { status: 'in_progress', dueAt: now - 3600000 }], ['t1', { status: 'assigned', dueAt: kstMidnight + 86399000 }], ['v1', { status: 'verified', dueAt: now - 86400000 }]];
+      for (const [id, x] of rows) await db.doc('workOrders/' + id).set({ ...base, ...x });
+      DGOperations.state.filter = 'all'; todayStrip.at = 0; render();
+    });
+    await page.waitForFunction(() => { const b = [...document.querySelectorAll('.todaystrip [data-asec="works"] b')].map(x => x.textContent); return b.length === 2 && !b.includes('…'); });
+    const tc = await page.evaluate(() => [...document.querySelectorAll('.todaystrip [data-asec="works"]')].map(b => b.querySelector('span').textContent + ':' + b.querySelector('b').textContent));
+    assert.ok(tc.some(x => /기한 초과/.test(x) && /:2$/.test(x)), 'two open overdue orders (verified excluded), with 보수 작업 on another filter: ' + tc.join(','));
+    assert.ok(tc.some(x => /오늘 기한/.test(x) && /:[12]$/.test(x)), 'the order due later today is counted: ' + tc.join(','));
+    // a re-inspection request counts as 점검 필요 like the 미점검 list
+    const needBefore = await page.evaluate(() => +document.querySelector('.todaystrip [data-asec="due"] b').textContent.replace(/,/g, ''));
+    await page.evaluate(() => { const l = S.lights.find(x => !x.removed); l.lastInspected = Date.now(); l.redoNote = '재확인'; l.status = '점검필요'; render(); });
+    assert.equal(await page.evaluate(() => +document.querySelector('.todaystrip [data-asec="due"] b').textContent.replace(/,/g, '')), needBefore, 'a fresh inspection with a redo request stays 점검 필요');
+    // the sync chip stays a small pill and speaks its state
+    const chip = await page.evaluate(() => { const r = document.querySelector('#sync').getBoundingClientRect(); return { h: r.height, label: document.querySelector('#sync').getAttribute('aria-label') }; });
+    assert.ok(chip.h <= 30, 'sync chip height ' + chip.h); assert.match(chip.label, /동기화: .+ · 저장 대기함 열기/);
     assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.menugroup')].map(h => h.textContent)).then(g => g.slice(0, 2)), ['접수·조치', '대장·등록']);
     assert.equal(await page.locator('.todaystrip [data-asec="works"]').first().isVisible(), true);
     assert.ok(await page.evaluate(() => document.querySelector('[data-asec="works"]').getBoundingClientRect().bottom < innerHeight), '보수 작업 is above the fold');
@@ -146,14 +165,31 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072 };
     assert.equal(await page.locator('details.deskmenu').count(), 1, 'desk work is folded under PC 업무');
     assert.ok(await page.evaluate(() => [...document.querySelectorAll('details.deskmenu [data-asec]')].map(b => b.dataset.asec).includes('backup')));
     assert.equal(await page.evaluate(() => document.querySelector('details.deskmenu').open), false);
+    assert.equal(await page.evaluate(() => !!document.querySelector('details.deskmenu [data-asec="outbox"]')), true, 'an empty outbox stays reachable under PC 업무');
+    await page.evaluate(() => { DGOperations.state.drafts = [{ kind: 'draft', id: 'x', updatedAt: Date.now() }]; DGOperations.state.jobs = []; render(); });
+    assert.equal(await page.evaluate(() => !!document.querySelector('.menu:not(details .menu) [data-asec="outbox"]')), true, 'drafts put 저장 대기함 among the field items');
+    await page.evaluate(() => { DGOperations.state.drafts = []; render(); });
     await page.evaluate(() => openAdminSection('backup')); await page.locator('.deskonly').waitFor();
     assert.equal(await page.evaluate(() => document.querySelector('#sheet').classList.contains('wide')), false);
+    await settle(page);
+    // AR: a coarse fix stays explained whatever filter is tapped; a refused compass keeps its own reason
+    await page.evaluate(() => { window.DeviceOrientationEvent.requestPermission = async () => 'denied'; openAR(); });
+    await page.locator('#arList').waitFor();
+    await page.evaluate(() => onPosition({ coords: { latitude: 35.1530952, longitude: 126.9217072, accuracy: 900, heading: null, speed: 0 } }));
+    assert.match(await page.locator('#arList').textContent(), /GPS를 잡는 중/);
+    await page.evaluate(() => { ar.range = 100; arList(true); });
+    assert.match(await page.locator('#arList').textContent(), /GPS를 잡는 중/, 'a filter tap does not replace the explanation with "no lights"');
+    await page.waitForTimeout(3400);
+    assert.equal(await page.locator('#arHead').textContent(), '나침반 권한 없음', 'the refused permission is not relabelled as a missing compass');
+    await page.evaluate(() => { delete window.DeviceOrientationEvent.requestPermission; arStop(); });
     await settle(page);
     // a real GPS fix still judges the position
     const id2 = await page.evaluate(() => S.lights.find(l => Number.isFinite(l.lat)).id);
     await page.evaluate(id => { openLight(id); posCheckStart(id); }, id2);
     await page.waitForFunction(() => /등록 좌표/.test(document.querySelector('#posTxt')?.textContent || ''));
     assert.equal(await page.evaluate(() => typeof draft.posDist), 'number');
+    await page.evaluate(() => { PK.pos = { lat: 35.16, lng: 126.93, acc: 400 }; posDraw(); });
+    assert.equal(await page.evaluate(() => draft.pos && draft.pos.acc), 8, 'a later coarse fix does not erase the good one on the inspection');
     await context.close();
 
     // 7. iPad (iPadOS reports as a Mac): a field tablet, even at PC width

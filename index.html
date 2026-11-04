@@ -117,7 +117,7 @@ header.top>div:last-child{flex:none;display:flex;flex-direction:row!important;al
 header h1{font-size:17px;line-height:1.2;margin:0;font-weight:800;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 header p{margin:0;color:var(--ink-2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:430px){header p{display:none}}
-.sync{font:inherit;cursor:pointer;font-size:11px;color:var(--ink-2);white-space:nowrap;height:28px;display:flex;align-items:center;gap:5px;padding:0 9px 0 7px;border-radius:99px;border:1px solid var(--line);background:var(--card)}
+.sync{font:inherit;cursor:pointer;min-height:28px;min-width:28px;font-size:11px;color:var(--ink-2);white-space:nowrap;height:28px;display:flex;align-items:center;gap:5px;padding:0 9px 0 7px;border-radius:99px;border:1px solid var(--line);background:var(--card)}
 .sync.dot{padding:0;width:28px;justify-content:center}.sync.dot span{display:none}
 @media(max-width:360px){.sync span{display:none}.sync{padding:0;width:28px;justify-content:center}}
 .themebtn{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--card);display:flex;align-items:center;justify-content:center;padding:0}.themebtn svg{width:16px;height:16px}
@@ -802,7 +802,7 @@ async function boot(){
   sub(db.collection("roles"),"roles");
   db.collection("lightFields").onSnapshot(onLightFields,()=>setSync(false,"연결 끊김"));
 }
-function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);const short={"실시간":"","이 기기에만 저장":"체험","연결 끊김":"오프라인","저장 불가":"저장 불가","연결 중":"연결 중"};const t=txt in short?short[txt]:txt;s.querySelector("span").textContent=t;s.classList.toggle("dot",!t);s.title=txt}
+function setSync(on,txt){const s=$("#sync");s.classList.toggle("on",on);const short={"실시간":"","이 기기에만 저장":"체험","연결 끊김":"오프라인","저장 불가":"저장 불가","연결 중":"연결 중"};const t=txt in short?short[txt]:txt;s.querySelector("span").textContent=t;s.classList.toggle("dot",!t);s.title=txt;s.setAttribute("aria-label",`동기화: ${txt} · 저장 대기함 열기`)}
 /* PWA: service worker on real hosting (GitHub Pages); the artifact viewer runs in a frame without one */
 const PWA={prompt:null,canInstall:false,iosHint:false,waiting:null,standalone:matchMedia("(display-mode: standalone)").matches||navigator.standalone===true};
 (function(){
@@ -903,9 +903,9 @@ async function devModeChoose(){
     {value:"auto",label:"자동",hint:`기기에 맞춰요 — 지금은 ${L(DEV.auto)}`},
     {value:"desktop",label:"PC 화면",hint:"관리 업무 중심 · 현장 도구는 PC용 대체 기능으로"},
     {value:"phone",label:"휴대폰 화면",hint:"현장 도구 중심 · 순찰·주변 찾기·카메라 스캔"}]});
-  if(v==null||v===DEV.mode)return;DongguDevice.set(v);toast(`${L(DEV.kind)} 화면으로 바꿨어요.`);render();
+  if(v==null||v===DEV.mode)return;const before=DEV.kind;DongguDevice.set(v);toast(`${L(DEV.kind)} 화면으로 바꿨어요.`);if(DEV.kind===before)render(); // a kind change already re-rendered via dgdevice
 }
-window.addEventListener("dgdevice",()=>{try{render()}catch(e){}});
+window.addEventListener("dgdevice",()=>{try{const sh=$("#sheet");if(sh&&sh.classList.contains("open"))sh.classList.toggle("wide",sheetWide(navTop()&&navTop().key));render()}catch(e){}});
 /* Desk screens (tables, maps, reports) open across the whole PC workspace instead of the 860px side panel. */
 const WIDE_SECTIONS=new Set(["works","due","hist","inbox","dashboard","report","registryupdate","audit","light","lightinghistory","lightingareas","lightingimport","lightingcontext","lightingtasks","map","dong","kind","open","pend","np","edit","inventory","qr","patrol","health"]);
 function sheetWide(key){if(DEV.field||!key)return false;if(/^(map|ptmap):/.test(key))return true;const m=/^asec:(.+)$/.exec(key);return !!(m&&WIDE_SECTIONS.has(m[1]))}
@@ -1128,8 +1128,9 @@ function menuBtn(k){const x=ADMIN_SECTIONS[k];if(!x)return"";const n=x.n?x.n():n
 function adminMenu(keys){
   const have=new Set(keys),grouped=new Set(MENU_GROUPS.flatMap(g=>g.keys)),rest=keys.filter(k=>!grouped.has(k));
   if(DEV.field){
-    const field=[...FIELD_ORDER.filter(k=>have.has(k)&&!DESK_ONLY.has(k)&&(k!=="outbox"||ADMIN_SECTIONS.outbox.n?.())),...rest.filter(k=>!DESK_ONLY.has(k))];
-    const desk=keys.filter(k=>!field.includes(k)&&k!=="outbox");
+    const pending=k=>k!=="outbox"||!!(ADMIN_SECTIONS.outbox.n?.()||window.DGOperations&&DGOperations.state.drafts&&DGOperations.state.drafts.length);
+    const field=[...FIELD_ORDER.filter(k=>have.has(k)&&!DESK_ONLY.has(k)&&pending(k)),...rest.filter(k=>!DESK_ONLY.has(k))];
+    const desk=keys.filter(k=>!field.includes(k)); // an empty outbox still sits under PC 업무, never lost
     return `<h2>현장 업무</h2><div class="menu">${field.map(menuBtn).join("")}</div>${desk.length?`<details class="deskmenu"><summary>PC 업무 <span class="muted">${desk.length}</span><small>보고서·백업·대장 비교·감사 기록 등은 큰 화면에서 쓰기 좋아요</small></summary><div class="menu">${desk.map(menuBtn).join("")}</div></details>`:""}`;
   }
   return MENU_GROUPS.map(g=>({t:g.t,ks:g.keys.filter(k=>have.has(k))})).concat(rest.length?[{t:"기타",ks:rest}]:[]).filter(g=>g.ks.length).map(g=>`<h3 class="menugroup">${esc(g.t)}</h3><div class="menu">${g.ks.map(menuBtn).join("")}</div>`).join("");
@@ -1137,21 +1138,24 @@ function adminMenu(keys){
 /* PC: today's work as one row of counts, each a single click into its screen. Work orders are read once in the
    background with the default filter (open work), so the counts match what 보수 작업 shows. */
 function todayStrip(){
-  const op=window.DGOperations&&DGOperations.state,now=Date.now(),day=new Date(now+9*36e5).toISOString().slice(0,10);
-  const defaultFilter=op&&op.filter==="open"&&!op.mine&&op.deadline==="all"&&!op.urgent&&(op.workDong||"전체")==="전체";
-  if(op&&!op.loaded&&!todayStrip.asked&&S.canWrite&&ADMIN_SECTIONS.works){todayStrip.asked=true;DGOperations.load().then(()=>{if(S.tab==="admin")render()}).catch(()=>{})}
-  const orders=op&&op.loaded&&defaultFilter?op.orders:null;
-  const kstDay=t=>new Date(t+9*36e5).toISOString().slice(0,10);
-  const overdue=orders?orders.filter(w=>w.dueAt&&w.dueAt<now&&!["verified","cancelled"].includes(w.status)).length:null;
-  const today=orders?orders.filter(w=>w.dueAt&&kstDay(w.dueAt)===day&&!["verified","cancelled"].includes(w.status)).length:null;
+  const now=Date.now(),T=todayStrip;
+  // counts of open work orders due today / overdue, read on their own (all pages) so a filter on 보수 작업 or paging never skews them
+  if(ADMIN_SECTIONS.works&&window.DGOperationsCore&&window.DGData&&db&&(!T.at||now-T.at>60000)&&!T.loading){
+    T.loading=true;T.at=now;const C=DGOperationsCore,req={requireServer:!!FB&&navigator.onLine!==false};
+    const count=async deadline=>{let n=0,cursor=null,more=true;const q=C.workQuery({status:"open",deadline,mine:false,urgent:false},S.me,now);while(more){const page=await DGData.readPage(db,"workOrders",{...req,...q,cursor,pageSize:200});n+=page.rows.filter(w=>C.filterOrders([w],{status:"open",deadline,mine:false,urgent:false},{user:S.me,now}).length).length;cursor=page.nextCursor;more=page.hasMore}return n};
+    Promise.all([count("overdue"),count("today")]).then(([o,t])=>{T.overdue=o;T.today=t;T.failed=false}).catch(()=>{T.failed=true;T.at=0}).finally(()=>{T.loading=false;if(S.tab==="admin"&&!DEV.field)render()});
+  }
+  const shown=n=>T.failed?"!":n;
+  const days=window.DGOperations?Number(DGOperations.state.settings.inspectionDays)||90:90;
+  const needed=window.DGOperationsCore?S.lights.filter(l=>!l.removed&&DGOperationsCore.inspectionState(l,days,now).key!=="current").length:S.lights.filter(l=>!l.removed&&(!l.lastInspected||isDue(l))).length;
   const items=[
     ["inbox","미처리 신고",ADMIN_SECTIONS.inbox?.n?.()||0],
-    ["works","보수 작업 기한 초과",overdue,"bad"],
-    ["works","오늘 기한 작업",today],
+    ["works","보수 작업 기한 초과",shown(T.overdue),"bad"],
+    ["works","오늘 기한 작업",shown(T.today)],
     ["hist","검수 대기 점검",ADMIN_SECTIONS.hist?.n?.()||0],
-    ["due","점검 필요 시설",S.lights.filter(l=>!l.removed&&(!l.lastInspected||isDue(l))).length],
+    ["due","점검 필요 시설",needed],
     ["outbox","미전송",ADMIN_SECTIONS.outbox?.n?.()||0,"warn"]].filter(([k])=>ADMIN_SECTIONS[k]&&adminKeys().includes(k));
-  return `<h2 style="margin-top:6px">오늘 할 일</h2><div class="todaystrip">${items.map(([k,t,n,tone])=>`<button type="button" data-asec="${k}" class="${n?tone||"":"zero"}"><b>${n==null?"…":Number(n).toLocaleString()}</b><span>${esc(t)}</span></button>`).join("")}</div>`;
+  return `<h2 style="margin-top:6px">오늘 할 일</h2><div class="todaystrip">${items.map(([k,t,n,tone])=>`<button type="button" data-asec="${k}" class="${n==="!"?"":n?tone||"":"zero"}"${n==="!"?` title="불러오지 못했어요. 연결을 확인하세요."`:""}><b>${n==null?"…":n==="!"?"–":Number(n).toLocaleString()}</b><span>${esc(t)}</span></button>`).join("")}</div>`;
 }
 function vAdmin(){
   const open=S.lights.filter(l=>l.status!=="정상").sort((a,b)=>({"고장":0,"수리중":1,"점검필요":2}[a.status]-{"고장":0,"수리중":1,"점검필요":2}[b.status]));
@@ -2423,7 +2427,7 @@ function posDraw(){
   const has=typeof l.lat==="number";const dist=has?distM(pos,l):null;
   // a position coarser than ±50m (PC Wi-Fi/IP estimate) cannot judge or correct a light's coordinate, nor be stored on the inspection
   if(!Number.isFinite(pos.acc)||pos.acc>POSITION_INPUT_MAX_M){
-    if(draft&&draft.lightId===l.id){draft.pos=null;draft.posDist=null}
+    if(draft&&draft.lightId===l.id&&!(draft.pos&&draft.pos.acc<=POSITION_INPUT_MAX_M)){draft.pos=null;draft.posDist=null} // keep an earlier good fix
     t.textContent=`현재 위치가 추정치예요 (±${Number.isFinite(pos.acc)?pos.acc:"?"}m) — ${DEV.gps?"GPS가 잡힐 때까지 기다리거나 실외에서 다시 시도하세요":"이 기기에서는 위치로 등을 확인할 수 없어요. 지도에서 확인하세요"}.`;
     d.textContent="";d.className="d";if(fx)fx.hidden=true;if(PK.map)posMapDraw();return}
   if(draft&&draft.lightId===l.id){draft.pos=pos;draft.posDist=dist==null?null:Math.round(dist)}
@@ -3401,7 +3405,7 @@ function openAR(){
   arStart();
 }
 async function arStart(){
-  arBindGuide();arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;ar.offset=0;ar.raw=null;ar.courseDiff=null;ar.lastEvt=0;ar.cacc=null;ar.badSince=0;ar.goodSince=0;ar.calMuted=0;
+  arBindGuide();arStop(false);ar.on=true;ar.stream=null;ar.heading=null;ar.pitch=null;ar.compassOk=null;ar.watch=null;ar.lastDraw=0;ar.markerKeys=null;ar.listKey=null;ar.frozen=false;ar.offset=0;ar.raw=null;ar.courseDiff=null;ar.lastEvt=0;ar.coarse=false;ar.cacc=null;ar.badSince=0;ar.goodSince=0;ar.calMuted=0;
   clearInterval(ar.staleTimer);ar.staleTimer=setInterval(()=>{if(ar.on)arCalCheck()},2500);
   const v=$("#arCam"),wrap=$("#arwrap");if(!v||!wrap){arStop();return}
   const run=ar.run,current=()=>ar.on&&ar.run===run&&$("#arCam")===v;
@@ -3417,7 +3421,7 @@ async function arStart(){
   if(window.DeviceOrientationEvent){
     if(!current())return;
     // browsers without a compass (PCs) expose the API but never send a heading
-    setTimeout(()=>{if(current()&&!ar.lastEvt){const h=$("#arHead");if(h)h.textContent="이 기기에는 나침반이 없어요"}},3000);
+    if(ok)setTimeout(()=>{if(current()&&!ar.lastEvt){const h=$("#arHead");if(h)h.textContent="이 기기에는 나침반이 없어요"}},3000);
     if(ok){if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",onHeading);window.addEventListener("deviceorientation",onHeading)}
     else{const h=$("#arHead");if(h)h.textContent="나침반 권한 없음"}
   }
@@ -3458,7 +3462,8 @@ function onPosition(p){
   else{const d=distM(ar.pos,nl);if(d<Math.max(3,ar.acc*.15))return;const k=d>25?1:.4;ar.pos={lat:ar.pos.lat+(nl.lat-ar.pos.lat)*k,lng:ar.pos.lng+(nl.lng-ar.pos.lng)*k}}
   const g=$("#arGps");if(g)g.textContent=`GPS ±${Math.round(ar.acc)}m${ar.acc>25?" (정확도 낮음)":""}`;
   // a PC Wi-Fi/IP estimate cannot rank lights by distance: say so and point to the map instead of listing "54m" guesses
-  if(!Number.isFinite(ar.acc)||ar.acc>POSITION_MAP_FOLLOW_MAX_M){ar.pos=null;const l=$("#arList");if(l)l.innerHTML=`<div class="empty">현재 위치가 추정치(±${Math.round(ar.acc||0)}m)라 주변 등을 고를 수 없어요.<br><button class="btn sm" data-mapscope="filtered" style="margin-top:8px">지도에서 찾기</button></div>`;return}
+  ar.coarse=!Number.isFinite(ar.acc)||ar.acc>POSITION_MAP_FOLLOW_MAX_M;
+  if(ar.coarse){ar.pos=null;arList();return}
   arList();arDraw();
 }
 function arNear(){
@@ -3468,6 +3473,8 @@ function arNear(){
 /* the list below the camera: rebuilt only when the set of lights changes; arrows and distances update in place */
 function arList(force){
   const box=$("#arList"),c=$("#arCount");if(!box)return;
+  // too coarse a position to rank lights (PC estimate, or a phone whose GPS is still settling): say so, whatever filter is tapped
+  if(ar.coarse){ar.listKey=null;if(c)c.textContent="";box.innerHTML=DEV.field?`<div class="empty">GPS를 잡는 중이에요 (±${Math.round(ar.acc||0)}m). 하늘이 트인 곳에서 잠시 기다리세요.</div>`:`<div class="empty">현재 위치가 추정치(±${Math.round(ar.acc||0)}m)라 주변 등을 고를 수 없어요.<br><button class="btn sm" data-mapscope="filtered" style="margin-top:8px">지도에서 찾기</button></div>`;return}
   const near=arNear();if(c)c.textContent=`${near.length}개 (${ar.range}m 이내${ar.onlyOpen?", 조치 필요":""})`;
   const H=ar.heading;const top=near.slice(0,15);const key=top.map(x=>x.l.id).join(",");
   if(force||key!==ar.listKey){
