@@ -1015,8 +1015,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v56-report-plate";
+const APP_VER="v57-qr-badge";
 const RELEASE_NOTES=[
+  {v:"v57-qr-badge",d:"2026-11-05",t:"새 QR 신고 건수가 관리 현황·오늘 할 일에 보이고, 신고함을 열면 자동으로 가져와요"},
   {v:"v56-report-plate",d:"2026-11-05",t:"주민 신고: 표찰 번호를 대장에서 찾아 골라요 · 동구 밖에서도 위치만 빼고 접수"},
   {v:"v55-direct-report",d:"2026-11-05",t:"주민 고장 신고가 신고 페이지에서 바로 접수돼요(신고함 › QR 신고 가져오기)"},
   {v:"v54-resident-entry",d:"2026-11-04",t:"로그인 전·직원 승인 전에도 주민 고장 신고로 바로 갈 수 있어요"},
@@ -1288,7 +1289,7 @@ const ADMIN_SECTIONS={
   removed:{t:"철거된 등",d:"목록·지도에서 숨긴 등 · 이력 보기",n:()=>removedList().length||null,body:()=>removedSection()},
   edit:{t:"정보 수정된 등",d:"변경 내역·CSV",n:()=>editedList().length||null,write:true,body:()=>editedSection()},
   report:{t:"보고서",d:"기간별 점검 보고서 · 인쇄/PDF",n:null,body:()=>reportSection()},
-  inbox:{t:"신고함",d:"전화·문자·QR로 들어온 신고",n:()=>S.reports.filter(r=>r.status!=="완료").length||null,write:true,body:()=>inboxSection()},
+  inbox:{t:"신고함",d:"전화·문자·QR로 들어온 신고",n:()=>(S.reports.filter(r=>r.status!=="완료").length+(QRNEW.n||0))||null,write:true,body:()=>inboxSection()},
   qr:{t:"QR 라벨",d:"표찰용 신고 QR 인쇄",n:null,admin:true,body:()=>qrSection()},
   backup:{t:"백업·이전",d:"전체 기록 JSON 내보내기·가져오기",n:null,admin:true,body:()=>backupSection()},
   roles:{t:"사용자·권한",d:"관리자·점검자 지정",n:()=>S.roles.length||null,admin:true,body:()=>roleSection()}
@@ -1297,6 +1298,7 @@ function adminKeys(){return Object.keys(ADMIN_SECTIONS).filter(k=>{const x=ADMIN
 function openAdminSection(key){
   const x=ADMIN_SECTIONS[key];if(!x)return;if((x.admin&&!can("admin"))||(x.write&&!S.canWrite)){toast("이 화면을 볼 권한이 없어요.");return}S.asec=key;
   navRoute("asec:"+key,()=>openAdminSection(key),{guard:fdKind("asec:"+key)?()=>fdGuard("asec:"+key):null});
+  if(key==="inbox"&&QRNEW.n&&!IB.importing&&FB&&can("inspect")&&fsReady())setTimeout(()=>importCitizenReports(),0); // new QR reports come in as the inbox opens
   const deskNote=DEV.field&&DESK_ONLY.has(key)?`<div class="notice slim deskonly"><b>PC에서 쓰기 좋아요</b> 표·인쇄·파일이 많은 업무예요. 휴대폰에서도 그대로 쓸 수 있어요.</div>`:"";
   openSheet(`<div class="sheet-head"><div><h3>${esc(x.t)}</h3><div class="muted">${esc(x.d)}</div></div><button class="x" aria-label="뒤로" data-close>×</button></div>${deskNote}<div id="asecBody">${x.body()}</div>`);
   if(fdKind("asec:"+key))fdArm("asec:"+key);
@@ -1343,7 +1345,8 @@ function todayStrip(){
   const days=window.DGOperations?Number(DGOperations.state.settings.inspectionDays)||90:90;
   const needed=window.DGOperationsCore?S.lights.filter(l=>!l.removed&&DGOperationsCore.inspectionState(l,days,now).key!=="current").length:S.lights.filter(l=>!l.removed&&(!l.lastInspected||isDue(l))).length;
   const items=[
-    ["inbox","미처리 신고",ADMIN_SECTIONS.inbox?.n?.()||0],
+    ...(QRNEW.n?[["inbox","새 QR 신고",QRNEW.n,"warn"]]:[]),
+    ["inbox","미처리 신고",S.reports.filter(r=>r.status!=="완료").length],
     ["works","보수 작업 기한 초과",shown(T.overdue),"bad"],
     ["works","오늘 기한 작업",shown(T.today)],
     ["hist","검수 대기 점검",ADMIN_SECTIONS.hist?.n?.()||0,"",'data-irunreviewed'],
@@ -1352,6 +1355,7 @@ function todayStrip(){
   return `<h2 style="margin-top:6px">오늘 할 일</h2><div class="todaystrip">${items.map(([k,t,n,tone,attr])=>`<button type="button" data-asec="${k}" ${attr||""} class="${n==="!"?"":n?tone||"":"zero"}"${n==="!"?` title="불러오지 못했어요. 연결을 확인하세요."`:""}><b>${n==null?"…":n==="!"?"–":(typeof n==="number"?n.toLocaleString():n)}</b><span>${esc(t)}</span></button>`).join("")}</div>`;
 }
 function vAdmin(){
+  qrCount(); // at most every 2 minutes; redraws only when the number changes
   const open=S.lights.filter(l=>l.status!=="정상").sort((a,b)=>({"고장":0,"수리중":1,"점검필요":2}[a.status]-{"고장":0,"수리중":1,"점검필요":2}[b.status]));
   const setupNotice=!FB&&S.me&&S.me!=="local"&&!rolesReady()?`<div class="notice"><b>권한 설정 전이에요.</b> 지금은 참여자 모두가 미등록 처리·등 정보 수정까지 할 수 있어요. 관리자를 지정하면 그때부터 관리자만 그 일을 하고, 나머지는 점검자·주민으로 나뉘어요.${S.canWrite?` <button class="btn sm" id="claimAdmin" style="margin-left:6px">내가 관리자 되기</button>`:""}</div>`:"";
   const keys=adminKeys().filter(k=>k!=="open"||!DEV.field);
@@ -2114,6 +2118,20 @@ async function fsApp(){
   if(!firebase.auth().currentUser){const prov=new firebase.auth.GoogleAuthProvider();try{await firebase.auth().signInWithPopup(prov)}catch(e){if(e&&/popup/.test(e.code||""))await firebase.auth().signInWithRedirect(prov);else throw e}}
   return firebase.firestore();
 }
+/* New QR reports waiting on the server (citizen_reports, imported==false), counted for staff every 2 minutes and when the
+   app comes back to the screen, so 관리 현황 can say "새 QR 신고 N건". Only a count is read — no report content or photos.
+   Opening 신고함 with new ones waiting brings them in at once. */
+const QRNEW={n:null,at:0,busy:false};
+async function qrCount(force){
+  if(!(FB&&FB.auth&&FB.auth.currentUser&&can("inspect")&&fsReady()))return;
+  if(QRNEW.busy||(!force&&Date.now()-QRNEW.at<120000))return;QRNEW.busy=true;
+  try{const q=FB.fs.collection(window.REPORT_CONFIG.firestore.collection||"citizen_reports").where("imported","==",false);
+    const n=typeof q.count==="function"?(await q.count().get()).data().count:(await q.limit(50).get()).size;
+    const changed=n!==QRNEW.n;QRNEW.n=n;QRNEW.at=Date.now();
+    if(changed){if(S.tab==="admin")render();if(n&&S.asec==="inbox"&&navTop()&&navTop().key==="asec:inbox"&&!IB.importing)importCitizenReports()}
+  }catch(e){}finally{QRNEW.busy=false}
+}
+try{setInterval(()=>{if(!document.hidden)qrCount()},30000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)qrCount()})}catch(e){}
 async function importCitizenReports(){
   if(IB.importing)return;IB.importing=true;IB.importMsg="";render();let n=0,skipped=0,failed=0;
   try{
@@ -2147,6 +2165,7 @@ async function importCitizenReports(){
       }catch(e){failed++;IB.importMsg=`가져오기 실패 ${failed}건: ${e.message||e.code||"연결 확인"}`}
     }
     IB.importMsg=`${n}건 가져옴 · 기존 ${skipped}건 연결 확인 · 실패 ${failed}건${failed?" (원본을 유지했어요. 다시 가져오면 이어서 처리돼요.)":""}`;toast(IB.importMsg);
+    if(typeof qrCount==="function"){QRNEW.n=failed?QRNEW.n:0;QRNEW.at=0;qrCount(true)}
   }catch(e){IB.importMsg="가져오지 못했어요: "+(e.message||e.code||"오류");toast(IB.importMsg)}
   IB.importing=false;render();
 }
