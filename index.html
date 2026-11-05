@@ -1113,7 +1113,7 @@ function chooseLandingTab(){
 function render(){
   if(typeof navRevalidate==="function")navRevalidate();
   if(typeof chooseLandingTab==="function")chooseLandingTab();
-  const roleWait=!!(typeof FB!=="undefined"&&FB&&S.me&&!S.fbSignedOut&&!S.fbError&&!S.rolesSeen);
+  const roleWait=!!(typeof FB!=="undefined"&&FB&&S.me&&S.me!=="local"&&!S.fbSignedOut&&!S.fbError&&!S.rolesSeen);
   const allowed={inspect:can("inspect"),admin:can("inspect"),report:FEATURES.reports};
   if(!roleWait&&!allowed[S.tab])S.tab=allowed.inspect?"inspect":allowed.report?"report":"none";
   document.querySelectorAll("nav.tabs button").forEach(b=>{const active=b.dataset.tab===S.tab;b.hidden=!allowed[b.dataset.tab];b.setAttribute("aria-selected",String(active));b.tabIndex=active?0:-1});
