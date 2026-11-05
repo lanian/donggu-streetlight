@@ -121,12 +121,13 @@ $("#orgLine").textContent=[C.org,C.dept].filter(Boolean).join(" ");$("#pdays").t
 function deliveryMode(){
   const local=C.allowLocalGateway===true&&/^http:\/\/(localhost|127\.0\.0\.1):\d+\//.test(C.gatewayUrl||"");
   if(C.backend==="gateway"&&(local||(/^https:\/\//.test(C.gatewayUrl||"")&&C.appCheckSiteKey&&C.firestore&&C.firestore.projectId&&C.firestore.apiKey&&C.firestore.appId)))return "gateway";
+  if(C.backend==="firestore"&&C.firestore&&/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(C.firestore.projectId||"")&&C.firestore.apiKey)return "direct";
   return String(C.sms||"").trim()||String(C.mail||"").trim()?"external":null;
 }
 function configureDelivery(){
   const mode=deliveryMode(),btn=$("#send"),notice=$("#deliveryNotice");
-  btn.disabled=!mode;btn.textContent=mode==="gateway"?"신고 보내기":mode==="external"?"신고 내용 준비하기":"신고 접수 준비 중";
-  notice.hidden=mode==="gateway";
+  btn.disabled=!mode;btn.textContent=mode==="gateway"||mode==="direct"?"신고 보내기":mode==="external"?"신고 내용 준비하기":"신고 접수 준비 중";
+  notice.hidden=mode==="gateway"||mode==="direct";
   notice.textContent=mode==="external"?"신고 내용을 준비한 뒤 문자·이메일 앱에서 직접 보내 주세요. 보내기 전에는 접수되지 않아요.":`현재 이 페이지의 신고 접수가 준비 중이에요. ${contactPhone?contactPhone+"로 문의해 주세요.":"담당 부서의 공식 연락처로 문의해 주세요."}`;
 }
 configureDelivery();
@@ -161,6 +162,25 @@ async function serverHeaders(url){
   if(!firebase.apps.length)firebase.initializeApp(C.firestore);if(!st.appCheck){firebase.appCheck().activate(C.appCheckSiteKey,true);st.appCheck=true;}
   /* a fresh limited-use token per request: the server consumes it, so it cannot be replayed */headers["X-Firebase-AppCheck"]=(await firebase.appCheck().getLimitedUseToken()).token;return headers;
 }
+/* Direct filing (free plan, no server function): one create-only Firestore REST write that the server rules check
+   field by field. The ID and receipt are fixed per report, so a retry after a dropped connection cannot file twice. */
+const hex=n=>[...crypto.getRandomValues(new Uint8Array(n))].map(b=>b.toString(16).padStart(2,"0")).join("");
+function kstStamp(ms){return new Date(ms+9*3600000).toISOString().slice(2,10).replace(/-/g,"")}
+function fsValue(v){if(typeof v==="string")return{stringValue:v};if(typeof v==="boolean")return{booleanValue:v};if(Number.isInteger(v))return{integerValue:String(v)};return{doubleValue:v}}
+async function sendDirect(rec){
+  const at=Date.now(),days=C.privacyDays,doc={schemaVersion:1,receipt:"",issue:rec.issue,consent:!!rec.contact,imported:false,at,privacyExpiresAt:at+days*86400000};
+  if(rec.code)doc.code=rec.code;if(rec.lightId)doc.lightId=rec.lightId;if(rec.desc)doc.desc=rec.desc;
+  if(rec.lat!=null&&rec.lng!=null){doc.lat=rec.lat;doc.lng=rec.lng;if(rec.acc!=null)doc.acc=rec.acc}
+  if(rec.photo)doc.photo=rec.photo;if(rec.contact){doc.contact=rec.contact;doc.consentDays=days}
+  const key=JSON.stringify({...doc,at:0,privacyExpiresAt:0});
+  if(!st.directJob||st.directJob.key!==key)st.directJob={key,id:"qr-"+hex(12),receipt:"R"+kstStamp(at)+"-"+hex(4).toUpperCase()};
+  doc.receipt=st.directJob.receipt;
+  const f=C.firestore,url=`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(f.projectId)}/databases/(default)/documents/${encodeURIComponent(f.collection||"citizen_reports")}?documentId=${st.directJob.id}&key=${encodeURIComponent(f.apiKey)}`;
+  const response=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({fields:Object.fromEntries(Object.entries(doc).map(([k,v])=>[k,fsValue(v)]))}),cache:"no-store"});
+  if(response.status===409)return{receipt:st.directJob.receipt}; // already filed by an earlier try of this same report
+  if(!response.ok)throw new Error(response.status===403?"신고 내용을 확인해 주세요(문제 유형, 내용 500자, 사진 크기, 위치가 동구 밖인지).":"접수 서버에 연결하지 못했어요.");
+  return{receipt:st.directJob.receipt};
+}
 async function sendGateway(rec){
   const payload={code:rec.code,lightId:rec.lightId||"",issue:rec.issue,desc:rec.desc,lat:rec.lat,lng:rec.lng,acc:rec.acc,photo:rec.photo||"",contact:rec.contact||"",consent:rec.consent,consentDays:C.privacyDays};
   const key=JSON.stringify(payload);if(!st.submitJob||st.submitJob.key!==key)st.submitJob={key,requestId:crypto.randomUUID()};
@@ -180,7 +200,8 @@ $("#send").onclick=async()=>{
   if(!rec.code&&!rec.lightId&&!rec.desc&&rec.lat==null){showErr("등 번호, 위치 설명 또는 현재 위치 중 하나는 알려 주세요.");return}
   const btn=$("#send");btn.disabled=true;btn.textContent="보내는 중…";
   try{
-    if(mode==="gateway"){const result=await sendGateway(rec);rec.receipt=result.receipt;rec.statusCode=typeof result.statusCode==="string"?result.statusCode:"";if(rec.statusCode)remember(rec.receipt,rec.statusCode);finish(rec,"담당 부서에 바로 전달됐어요.")}
+    if(mode==="direct"){const result=await sendDirect(rec);rec.receipt=result.receipt;finish(rec,"담당 부서에 바로 전달됐어요.")}
+    else if(mode==="gateway"){const result=await sendGateway(rec);rec.receipt=result.receipt;rec.statusCode=typeof result.statusCode==="string"?result.statusCode:"";if(rec.statusCode)remember(rec.receipt,rec.statusCode);finish(rec,"담당 부서에 바로 전달됐어요.")}
     else{
       const text=buildText(rec);const hasPhoto=!!rec.photo;
       finish(rec,`아직 접수되지 않았어요. 아래 버튼으로 문자·이메일 앱을 열고 직접 보내 주세요.${hasPhoto?" 사진은 메시지에 직접 첨부해 주세요.":""}`,text);

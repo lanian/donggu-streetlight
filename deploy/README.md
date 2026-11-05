@@ -64,7 +64,7 @@ npx firebase-tools@15.34.1 functions:secrets:set REPORT_RATE_SECRET --project PR
 npx firebase-tools@15.34.1 deploy --only firestore:rules,firestore:indexes,functions --project PROJECT_ID
 ```
 
-Functions 런타임은 Node.js 22, 지역은 `asia-northeast3`입니다. 직원 앱에서 서버 호출을 쓰려면 `functionsEnabled`, `functionsRegion`, `appCheckSiteKey`를 설정합니다. 주민 신고는 `report/config.js`의 `backend: "gateway"`, `gatewayUrl`, App Check와 같은 프로젝트의 Firebase 웹 앱 설정을 연결합니다. `backend: "firestore"` 직접 접수는 지원하지 않습니다.
+Functions 런타임은 Node.js 22, 지역은 `asia-northeast3`입니다. 직원 앱에서 서버 호출을 쓰려면 `functionsEnabled`, `functionsRegion`, `appCheckSiteKey`를 설정합니다. 주민 신고는 `report/config.js`의 `backend: "gateway"`, `gatewayUrl`, App Check와 같은 프로젝트의 Firebase 웹 앱 설정을 연결합니다. 무료 요금제에서는 `backend: "firestore"`로 신고 페이지가 Firestore에 직접 접수하고 서버 규칙이 항목을 검사합니다(횟수 제한 없음, [안내](../docs/citizen-report-plan.md)).
 
 서버 배포 후 공개 접수·초대·감사 트리거·만료 정리 예약 작업의 실제 실행과 로그를 확인합니다. 예약 함수와 클라이언트 설정만으로 과거 문서에 만료가 생기지는 않으므로 필요한 경우 보관 기간 이관 계획도 검토합니다. [서버 운영 안내](../docs/security-operations.md)에 상세 경계를 정리했습니다.
 

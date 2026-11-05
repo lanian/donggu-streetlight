@@ -65,11 +65,15 @@ const firebaseConfig = {
   firestore: { projectId: 'demo-donggu-streetlight', apiKey: 'offline-test-key' }
 };
 
-test('default unconfigured report cannot show a receipt or attempt a submission', async () => {
+function shippedConfig() {
   const configContext = { window: {} };
   vm.createContext(configContext);
   vm.runInContext(fs.readFileSync(path.join(root, 'report/config.js'), 'utf8'), configContext);
-  const page = reportPage(configContext.window.REPORT_CONFIG);
+  return configContext.window.REPORT_CONFIG;
+}
+
+test('an unconfigured report page cannot show a receipt or attempt a submission', async () => {
+  const page = reportPage({ ...shippedConfig(), backend: null, sms: '', mail: '', firestore: {} });
   assert.equal(page.nodes.get('#send').disabled, true);
   assert.match(page.nodes.get('#deliveryNotice').textContent, /준비 중/);
   assert.doesNotMatch(page.nodes.get('#phoneLine').textContent, /000-0000/);
@@ -178,4 +182,44 @@ test('admin edit map and custom light options escape database text', async () =>
   assert.doesNotMatch(tooltipContents[0], /<img|<script/i);
   assert.doesNotMatch(sheetHtml, /<img|<script/i);
   assert.ok(sheetHtml.includes('&lt;/option&gt;&lt;/select&gt;&lt;img src=x onerror=&quot;window.bad=true&quot;&gt;'));
+});
+
+test('the shipped page files directly: one create-only Firestore write with typed fields and a fixed receipt', async () => {
+  const config = shippedConfig();
+  assert.equal(config.backend, 'firestore');
+  let status = 200;
+  const page = reportPage(config, { response: () => ({ ok: status < 300, status, json: async () => ({}) }) });
+  page.run('st.photo = "data:image/jpeg;base64,dGVzdA=="; st.pos = null;');
+  page.nodes.get('#useGps').checked = false; page.nodes.get('#desc').value = '마트 앞';
+  assert.equal(page.nodes.get('#send').disabled, false);
+  await page.submit();
+  assert.equal(page.requests.length, 1);
+  const { url } = page.requests[0], fields = page.requests[0].body.fields;
+  assert.match(url, /^https:\/\/firestore\.googleapis\.com\/v1\/projects\/donggu-light\/databases\/\(default\)\/documents\/citizen_reports\?documentId=qr-[a-f0-9]{24}&key=/);
+  assert.equal(fields.imported.booleanValue, false); assert.equal(fields.schemaVersion.integerValue, '1');
+  assert.match(fields.at.integerValue, /^\d+$/); assert.ok(+fields.privacyExpiresAt.integerValue > +fields.at.integerValue);
+  assert.equal(fields.desc.stringValue, '마트 앞'); assert.equal(fields.photo.stringValue, 'data:image/jpeg;base64,dGVzdA==');
+  assert.equal('contact' in fields, false, 'no contact unless given');
+  assert.match(fields.receipt.stringValue, /^R\d{6}-[0-9A-F]{8}$/);
+  assert.equal(page.nodes.get('#receipt').textContent, fields.receipt.stringValue);
+  assert.equal(page.nodes.get('#doneTitle').textContent, '접수됐어요');
+});
+
+test('direct filing: a retry of the same report keeps its ID, and an earlier success (409) counts as filed', async () => {
+  let status = 503;
+  const page = reportPage(shippedConfig(), { response: () => ({ ok: status < 300, status, json: async () => ({}) }) });
+  page.nodes.get('#useGps').checked = false;
+  await page.submit();
+  assert.equal(page.nodes.get('#done').hidden, true); assert.match(page.nodes.get('#err').textContent, /보내지 못했어요/);
+  status = 409; await page.submit();
+  assert.equal(page.requests[0].url, page.requests[1].url, 'same document ID on retry');
+  assert.equal(page.requests[0].body.fields.receipt.stringValue, page.requests[1].body.fields.receipt.stringValue);
+  assert.equal(page.nodes.get('#doneTitle').textContent, '접수됐어요');
+});
+
+test('direct filing: a write the rules refuse explains what to check and shows no receipt', async () => {
+  const page = reportPage(shippedConfig(), { response: () => ({ ok: false, status: 403, json: async () => ({}) }) });
+  page.nodes.get('#useGps').checked = false;
+  await page.submit();
+  assert.equal(page.nodes.get('#done').hidden, true); assert.match(page.nodes.get('#err').textContent, /신고 내용을 확인/);
 });
