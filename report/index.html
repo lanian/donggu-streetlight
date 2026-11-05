@@ -40,6 +40,9 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
 .steps li.on,.steps li.now{color:var(--ink);font-weight:700}.steps li.on::before{background:var(--ok);border-color:var(--ok);color:#fff;content:"✓"}.steps li.now::before{background:var(--sodium);border-color:var(--sodium);color:#1B1300;content:counter(s)}
 .saved{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}.saved button{font:inherit;font-size:14px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:8px 10px;min-height:44px;font-variant-numeric:tabular-nums;cursor:pointer}
 .kcode{font-size:20px;font-weight:800;letter-spacing:.12em;font-variant-numeric:tabular-nums}
+.codehint{margin-top:6px;font-size:13px;color:var(--ink-2)}.codehint .pick{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.codehint .pick button{font:inherit;text-align:left;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:10px 12px;min-height:48px;cursor:pointer}
+.codehint .pick button b{font-size:16px}.codehint .pick button small{display:block;color:var(--ink-2);font-size:12px;margin-top:2px}.codehint .ok{color:var(--ok);font-weight:700}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -54,8 +57,8 @@ label.ck{display:flex;gap:10px;align-items:flex-start;font-size:14px;margin-top:
   <main id="form">
     <h2>어느 등인가요</h2>
     <div class="panel">
-      <div id="codeKnown" hidden><div class="muted">기둥 표찰 번호</div><div class="code" id="codeText"></div><button type="button" class="btn ghost" id="codeEdit" style="margin-top:8px;min-height:40px;padding:8px 14px;font-size:14px">번호가 다르면 고치기</button></div>
-      <div id="codeAsk"><label class="muted" for="codeIn">기둥에 붙은 표찰 번호 (예: 산수동 642, 지호로 65-5). 모르면 비워 두고 아래 위치를 적어 주세요.</label><input class="f-in" id="codeIn" placeholder="산수동 642" autocomplete="off" style="margin-top:6px"></div>
+      <div id="codeKnown" hidden><div class="muted">기둥 표찰 번호</div><div class="code" id="codeText"></div><div class="muted ok" id="codeConfirmed" hidden style="color:var(--ok);font-size:13px;margin-top:2px">✓ 가로등 대장에서 확인한 번호예요</div><button type="button" class="btn ghost" id="codeEdit" style="margin-top:8px;min-height:40px;padding:8px 14px;font-size:14px">번호가 다르면 고치기</button></div>
+      <div id="codeAsk"><label class="muted" for="codeIn">기둥에 붙은 표찰 번호 (예: 산수동 642, 지호로 65-5). 모르면 비워 두고 아래 위치를 적어 주세요.</label><input class="f-in" id="codeIn" placeholder="산수동 642" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-describedby="codeHint" style="margin-top:6px"><div id="codeHint" class="codehint" aria-live="polite"></div></div>
     </div>
 
     <h2>무슨 문제인가요</h2>
@@ -137,7 +140,33 @@ st.lightId=qrId&&/^[A-Za-z0-9_-]{1,120}$/.test(qrId)?qrId:null;
 function setCode(c){st.code=(c||"").trim().slice(0,40);$("#codeKnown").hidden=!st.code;$("#codeAsk").hidden=!!st.code;$("#codeText").textContent=st.code}
 setCode(q);
 $("#codeEdit").onclick=()=>{st.lightId=null;$("#codeIn").value=st.code;setCode("");$("#codeIn").focus()};
-$("#codeIn").addEventListener("input",e=>{st.lightId=null;st.code=e.target.value.trim().slice(0,40)});
+/* 표찰 번호 확인: 공개 가로등 대장(data/lights.json)에서 같은 번호를 찾아 보여 줘요. 띄어쓰기·하이픈 모양·앞자리 0·"동" 생략은
+   같은 번호로 봐요(예: "운림 63" = "운림동 063", "270 - 4" = "270-4"). 고르면 그 등으로 바로 연결되고, 못 찾아도 그대로 보낼 수 있어요. */
+let LIGHTS=null,LIGHTS_LOADING=null;
+function loadLights(){if(LIGHTS)return Promise.resolve(LIGHTS);return LIGHTS_LOADING||(LIGHTS_LOADING=fetch(new URL("../data/lights.json",location.href)).then(r=>r.json()).then(j=>{const at=k=>j.cols.indexOf(k);
+  LIGHTS=j.rows.filter(r=>!r[at("removed")]&&r[at("code")]).map(r=>{const code=String(r[at("code")]);return{id:r[at("id")],code,kind:r[at("kind")]||"",place:r[at("addr")]||r[at("jibun")]||[r[at("dong")],r[at("road")]].filter(Boolean).join(" "),key:codeKey(code)}});return LIGHTS}).catch(()=>(LIGHTS=[])))}
+function codeKey(v){return String(v||"").normalize("NFKC").replace(/[‐-―−~]/g,"-").replace(/\s+/g,"").replace(/\d+/g,n=>String(+n))}
+function codeParts(key){const m=/^([^\d-]*)(.*)$/.exec(key);return{letters:m[1],rest:m[2]}}
+function findCodes(text){
+  const key=codeKey(text);if(!key||!LIGHTS)return[];
+  const exact=LIGHTS.filter(l=>l.key===key);if(exact.length)return exact.slice(0,5);
+  const q=codeParts(key);if(!q.rest)return LIGHTS.filter(l=>l.key.startsWith(key)).slice(0,5);
+  return LIGHTS.filter(l=>{const p=codeParts(l.key);return p.rest===q.rest&&(!q.letters||p.letters.startsWith(q.letters.replace(/동$/,"")))}).slice(0,5);
+}
+async function codeLookup(){
+  const hint=$("#codeHint"),text=$("#codeIn").value;if(codeKey(text).length<2){hint.replaceChildren();return}
+  if(!LIGHTS){hint.textContent="번호 확인 중…";await loadLights();if($("#codeIn").value!==text)return}
+  const found=findCodes(text);hint.replaceChildren();
+  if(!found.length){hint.textContent="대장에서 이 번호를 찾지 못했어요. 표찰에 적힌 그대로라면 이대로 보내도 돼요.";return}
+  const lead=document.createElement("div");lead.textContent=found.length===1&&found[0].key===codeKey(text)?"이 등이 맞나요? 누르면 이 등으로 신고해요.":"이 중에 있나요? 누르면 그 등으로 신고해요.";hint.appendChild(lead);
+  const box=document.createElement("div");box.className="pick";
+  for(const l of found){const b=document.createElement("button");b.type="button";const t=document.createElement("b");t.textContent=l.code;const sm=document.createElement("small");sm.textContent=[l.kind,l.place].filter(Boolean).join(" · ");b.append(t,sm);
+    b.onclick=()=>{st.lightId=/^[A-Za-z0-9_-]{1,120}$/.test(l.id)?l.id:null;setCode(l.code);$("#codeConfirmed").hidden=!st.lightId;hint.replaceChildren()};box.appendChild(b)}
+  hint.appendChild(box);
+}
+let codeTimer=null;
+$("#codeIn").addEventListener("focus",()=>{loadLights()},{once:true});
+$("#codeIn").addEventListener("input",e=>{st.lightId=null;st.code=e.target.value.trim().slice(0,40);if(typeof setTimeout!=="function")return;if(codeTimer)clearTimeout(codeTimer);codeTimer=setTimeout(codeLookup,250)});
 $("#issues").innerHTML=ISSUES.map(i=>`<button type="button" aria-pressed="false">${i}</button>`).join("");
 $("#issues").addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;st.issue=b.textContent;document.querySelectorAll("#issues button").forEach(x=>x.setAttribute("aria-pressed",x===b))});
 // photo: shrink to ~150 KB so it fits in one record
@@ -147,9 +176,12 @@ $("#photoBtn").onclick=()=>{$("#photo").value="";$("#photo").click()};$("#photoL
 for(const id of ["photo","photoLib"])$("#"+id).addEventListener("change",async e=>{const f=e.target.files&&e.target.files[0];if(!f)return;try{st.photo=await shrink(f);$("#prev").src=st.photo;$("#prev").hidden=false;$("#photoDel").hidden=false}catch(err){showErr("사진을 읽지 못했어요. 다른 사진을 골라 주세요.")}});
 $("#photoDel").onclick=()=>{st.photo=null;$("#prev").hidden=true;$("#photoDel").hidden=true};
 // location
+/* 현재 위치는 광주 동구 주변일 때만 신고에 붙여요(서버 규칙과 같은 범위). 동구 밖에서 신고해도 접수는 되고, 그때는 좌표만 빠져요. */
+const inArea=p=>!!p&&p.lat>=34.9&&p.lat<=35.3&&p.lng>=126.7&&p.lng<=127.1;
+const gpsText=p=>!p?"(위치를 못 잡았어요 — 꺼도 돼요)":inArea(p)?`(±${p.acc}m)`:"(지금 동구 밖이에요 — 위치는 빼고 보내요. 등 번호나 장소를 적어 주세요)";
 function getPos(){return new Promise(res=>{if(!navigator.geolocation)return res(null);navigator.geolocation.getCurrentPosition(p=>res({lat:+p.coords.latitude.toFixed(6),lng:+p.coords.longitude.toFixed(6),acc:Math.round(p.coords.accuracy)}),()=>res(null),{enableHighAccuracy:true,timeout:8000,maximumAge:30000})})}
-$("#useGps").addEventListener("change",async e=>{if(e.target.checked){$("#gpsState").textContent="(위치 잡는 중…)";st.pos=await getPos();$("#gpsState").textContent=st.pos?`(±${st.pos.acc}m)`:"(위치를 못 잡았어요)"}else{st.pos=null;$("#gpsState").textContent=""}});
-(async()=>{$("#gpsState").textContent="(위치 잡는 중…)";st.pos=await getPos();$("#gpsState").textContent=st.pos?`(±${st.pos.acc}m)`:"(위치를 못 잡았어요 — 꺼도 돼요)"})();
+$("#useGps").addEventListener("change",async e=>{if(e.target.checked){$("#gpsState").textContent="(위치 잡는 중…)";st.pos=await getPos();$("#gpsState").textContent=gpsText(st.pos)}else{st.pos=null;$("#gpsState").textContent=""}});
+(async()=>{$("#gpsState").textContent="(위치 잡는 중…)";st.pos=await getPos();$("#gpsState").textContent=gpsText(st.pos)})();
 function showErr(m){const e=$("#err");e.textContent=m;e.hidden=false;e.scrollIntoView({block:"center"})}
 function receiptNo(){const d=new Date();const r=Math.random().toString(36).slice(2,6).toUpperCase();return `R${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${r}`}
 function buildText(rec){return `[가로등 고장 신고 ${rec.receipt}]\n등 번호: ${rec.code||"(모름)"}\n문제: ${rec.issue}\n내용: ${rec.desc||"-"}\n위치: ${rec.lat?`${rec.lat}, ${rec.lng} (±${rec.acc}m)`:"-"}\n연락처: ${rec.contact||"-"}\n시각: ${new Date(rec.at).toLocaleString("ko-KR")}`}
@@ -195,9 +227,9 @@ $("#send").onclick=async()=>{
   const mode=deliveryMode();if(!mode){configureDelivery();showErr($("#deliveryNotice").textContent);return}
   if(!st.issue){showErr("무슨 문제인지 하나 골라 주세요.");return}
   const contact=$("#contact").value.trim();if(contact&&!$("#consent").checked){showErr("연락처를 남기려면 보관 동의에 체크해 주세요.");return}
-  const useGps=$("#useGps").checked;
+  const useGps=$("#useGps").checked&&inArea(st.pos);
   const rec={receipt:receiptNo(),code:st.code,lightId:st.lightId,issue:st.issue,desc:$("#desc").value.trim().slice(0,500),lat:useGps&&st.pos?st.pos.lat:null,lng:useGps&&st.pos?st.pos.lng:null,acc:useGps&&st.pos?st.pos.acc:null,photo:st.photo||null,contact:contact||null,consent:!!contact,at:Date.now(),ua:navigator.userAgent.slice(0,80),imported:false};
-  if(!rec.code&&!rec.lightId&&!rec.desc&&rec.lat==null){showErr("등 번호, 위치 설명 또는 현재 위치 중 하나는 알려 주세요.");return}
+  if(!rec.code&&!rec.lightId&&!rec.desc&&rec.lat==null){showErr($("#useGps").checked&&st.pos&&!inArea(st.pos)?"지금 위치가 동구 밖이라 위치로는 찾을 수 없어요. 등 번호나 장소(예: ○○마트 앞)를 적어 주세요.":"등 번호, 위치 설명 또는 현재 위치 중 하나는 알려 주세요.");return}
   const btn=$("#send");btn.disabled=true;btn.textContent="보내는 중…";
   try{
     if(mode==="direct"){const result=await sendDirect(rec);rec.receipt=result.receipt;finish(rec,"담당 부서에 바로 전달됐어요.")}

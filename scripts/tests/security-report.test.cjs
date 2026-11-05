@@ -223,3 +223,18 @@ test('direct filing: a write the rules refuse explains what to check and shows n
   await page.submit();
   assert.equal(page.nodes.get('#done').hidden, true); assert.match(page.nodes.get('#err').textContent, /신고 내용을 확인/);
 });
+
+test('a report filed from outside the district goes through without the position', async () => {
+  const page = reportPage(shippedConfig(), { response: () => ({ ok: true, status: 200, json: async () => ({}) }) });
+  page.run('st.pos = { lat: 37.5665, lng: 126.978, acc: 10 };');
+  page.nodes.get('#useGps').checked = true; page.nodes.get('#desc').value = '산수동 마트 앞';
+  await page.submit();
+  const fields = page.requests[0].body.fields;
+  assert.equal('lat' in fields, false); assert.equal('lng' in fields, false);
+  assert.equal(page.nodes.get('#doneTitle').textContent, '접수됐어요');
+  // with nothing else to go on, it asks for a plate or place instead of failing at the server
+  const bare = reportPage(shippedConfig(), { response: () => ({ ok: true, status: 200, json: async () => ({}) }) });
+  bare.run('st.pos = { lat: 37.5665, lng: 126.978, acc: 10 }; st.code = ""; st.lightId = null;'); bare.nodes.get('#useGps').checked = true; bare.nodes.get('#desc').value = '';
+  await bare.submit();
+  assert.equal(bare.requests.length, 0); assert.match(bare.nodes.get('#err').textContent, /동구 밖/);
+});
