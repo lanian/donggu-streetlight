@@ -779,12 +779,14 @@ async function fbBoot(cfg){
   db=fs;
   user={id:async()=>u.uid,can:async()=>true,profiles:async ids=>{const out={};await Promise.all(ids.map(async id=>{try{const d=await fs.collection("users").doc(id).get();if(d.exists)out[id]={name:d.data().name}}catch(e){}}));return out}};
   dl={save:async({filename,data})=>{const a=document.createElement("a");a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data],{type:"text/csv"}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)}};
-  const sub=(q,key,map)=>q.onSnapshot({includeMetadataChanges:true},snap=>{if(key==="lights")onLights(snap);else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));if(map)map();dataChanged(key);S.live=true;setSync(!snap.metadata.fromCache,snap.metadata.fromCache?"오프라인":"실시간");render();resolveNames()},err=>{if(err&&err.code==="permission-denied"){setSync(false,"권한 없음")}else setSync(false,"연결 끊김")});
+  const sub=(q,key,map)=>q.onSnapshot({includeMetadataChanges:true},snap=>{if(key==="roles"&&!(snap.metadata.fromCache&&snap.empty))S.rolesSeen=true;if(key==="lights")onLights(snap);else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));if(map)map();dataChanged(key);S.live=true;setSync(!snap.metadata.fromCache,snap.metadata.fromCache?"오프라인":"실시간");render();resolveNames()},err=>{if(key==="roles"&&!S.rolesSeen){S.rolesSeen=true;render()}if(err&&err.code==="permission-denied"){setSync(false,"권한 없음")}else setSync(false,"연결 끊김")});
   sub(fs.collection("lights"),"lights");
   sub(fs.collection("inspections").orderBy("date","desc").limit(40),"insp");
   sub(fs.collection("reports").orderBy("createdAt","desc"),"reports");
   sub(fs.collection("patrols").orderBy("start","desc").limit(30),"patrols",ptIndex);
   sub(fs.collection("roles"),"roles");
+  // Until the role list answers, the screen says it is checking instead of flashing the "직원 승인 전" page.
+  if(typeof setTimeout==="function")setTimeout(()=>{if(!S.rolesSeen){S.rolesSeen=true;render()}},8000);
 }
 async function fbSignIn(){const prov=new firebase.auth.GoogleAuthProvider();try{await FB.auth.signInWithPopup(prov);location.reload()}catch(e){if(e&&/popup/.test(e.code||"")){await FB.auth.signInWithRedirect(prov)}else toast("로그인하지 못했어요: "+(e&&e.code||""))}}
 async function fbSignOut(){
@@ -1015,8 +1017,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v57-qr-badge";
+const APP_VER="v58-role-wait";
 const RELEASE_NOTES=[
+  {v:"v58-role-wait",d:"2026-11-05",t:"새로 고칠 때 '직원 승인 전' 화면이 잠깐 보이던 문제 수정 — 역할을 확인하는 동안은 확인 중이라고 표시"},
   {v:"v57-qr-badge",d:"2026-11-05",t:"새 QR 신고 건수가 관리 현황·오늘 할 일에 보이고, 신고함을 열면 자동으로 가져와요"},
   {v:"v56-report-plate",d:"2026-11-05",t:"주민 신고: 표찰 번호를 대장에서 찾아 골라요 · 동구 밖에서도 위치만 빼고 접수"},
   {v:"v55-direct-report",d:"2026-11-05",t:"주민 고장 신고가 신고 페이지에서 바로 접수돼요(신고함 › QR 신고 가져오기)"},
@@ -1110,13 +1113,14 @@ function chooseLandingTab(){
 function render(){
   if(typeof navRevalidate==="function")navRevalidate();
   if(typeof chooseLandingTab==="function")chooseLandingTab();
+  const roleWait=!!(typeof FB!=="undefined"&&FB&&S.me&&S.me!=="local"&&!S.fbSignedOut&&!S.fbError&&!S.rolesSeen);
   const allowed={inspect:can("inspect"),admin:can("inspect"),report:FEATURES.reports};
-  if(!allowed[S.tab])S.tab=allowed.inspect?"inspect":allowed.report?"report":"none";
+  if(!roleWait&&!allowed[S.tab])S.tab=allowed.inspect?"inspect":allowed.report?"report":"none";
   document.querySelectorAll("nav.tabs button").forEach(b=>{const active=b.dataset.tab===S.tab;b.hidden=!allowed[b.dataset.tab];b.setAttribute("aria-selected",String(active));b.tabIndex=active?0:-1});
-  document.querySelector("nav.tabs").hidden=Object.values(allowed).filter(Boolean).length<2;
-  const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<select id="demoRole" aria-label="체험 역할" title="체험 역할 바꾸기">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v.replace(/\(.*\)/,"")}</option>`).join("")}</select>`:S.me?`<b title="${rolesReady()?"내 역할":"관리자를 아직 지정하지 않았어요"}">${rolesReady()?ROLE_LABEL[myRole()].replace(/\(.*\)/,""):"권한 설정 전"}</b>`:"";
+  document.querySelector("nav.tabs").hidden=roleWait||Object.values(allowed).filter(Boolean).length<2;
+  const rc=$("#roleChip");if(rc)rc.innerHTML=S.me==="local"?`<select id="demoRole" aria-label="체험 역할" title="체험 역할 바꾸기">${Object.entries(ROLE_LABEL).map(([k,v])=>`<option value="${k}" ${myRole()===k?"selected":""}>${v.replace(/\(.*\)/,"")}</option>`).join("")}</select>`:roleWait?"":S.me?`<b title="${rolesReady()?"내 역할":"관리자를 아직 지정하지 않았어요"}">${rolesReady()?ROLE_LABEL[myRole()].replace(/\(.*\)/,""):"권한 설정 전"}</b>`:"";
   const v=$("#view");
-  v.innerHTML=S.fbError?vConnectionError():S.fbSignedOut?vSignIn():S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():S.tab==="report"?vReport():vNoAccess();
+  v.innerHTML=S.fbError?vConnectionError():S.fbSignedOut?vSignIn():roleWait?`<div class="panel" style="margin-top:12px" role="status"><p class="muted" style="margin:0">내 역할을 확인하는 중이에요…</p></div>`:S.tab==="inspect"?vInspect():S.tab==="admin"?vAdmin():S.tab==="report"?vReport():vNoAccess();
   if(S.fbSignedOut||S.fbError)document.querySelector("nav.tabs").hidden=true;
   refreshAdminSection();
   DongguPWA.render();

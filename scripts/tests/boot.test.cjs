@@ -178,3 +178,48 @@ test('a failed script load rejects all waiters and permits a clean retry', async
   await retry;
   assert.equal(script.elements[1].removed, false);
 });
+
+test('after a refresh a signed-in staff member sees "checking role" until the role list answers, not the 직원 승인 전 page', async () => {
+  const listeners = [];
+  const firestore = {
+    enablePersistence: async () => {},
+    collection(name) {
+      return { doc: () => ({ set: async () => {} }), orderBy() { return this; }, limit() { return this; },
+        onSnapshot(options, next, error) { listeners.push({ name, next, error }); return () => {}; } };
+    }
+  };
+  const auth = { currentUser: { uid: 'admin-a' }, setPersistence: async () => {}, onAuthStateChanged(cb) { queueMicrotask(cb); return () => {}; }, getRedirectResult: async () => null };
+  const boot = () => {
+    const sandbox = { window: { DG_DEVICE_TRUSTED: true }, S: {}, FB: null, firebase: { apps: [{}], firestore: () => firestore, auth: () => auth },
+      loadScript: async () => {}, setSync() {}, render() {}, onLights() {}, ptIndex() {}, resolveNames() {}, dataChanged() {} };
+    vm.createContext(sandbox); vm.runInContext(firebaseSource, sandbox);
+    return sandbox;
+  };
+  let sandbox = boot(); listeners.length = 0;
+  await vm.runInContext('fbBoot({projectId:"demo"})', sandbox);
+  let roles = listeners.find(item => item.name === 'roles');
+  roles.next({ docs: [], empty: true, metadata: { fromCache: true } });
+  assert.notEqual(sandbox.S.rolesSeen, true, 'an empty cache is not an answer');
+  roles.next({ docs: [{ id: 'admin-a', data: () => ({ role: 'admin' }) }], empty: false, metadata: { fromCache: false } });
+  assert.equal(sandbox.S.rolesSeen, true);
+  // someone without a staff role cannot list roles: the refusal is an answer too
+  sandbox = boot(); listeners.length = 0;
+  await vm.runInContext('fbBoot({projectId:"demo"})', sandbox);
+  listeners.find(item => item.name === 'roles').error({ code: 'permission-denied' });
+  assert.equal(sandbox.S.rolesSeen, true);
+
+  const view = { innerHTML: '' }, nav = { hidden: false };
+  const ui = { S: { tab: 'admin', me: 'admin-a', roles: [] }, FB: { auth: {} }, FEATURES: { reports: true }, can: () => false,
+    rolesReady: () => false, myRole: () => 'resident', ROLE_LABEL: {}, esc: String,
+    $: selector => selector === '#view' ? view : null, document: { querySelectorAll: () => [], querySelector: () => nav },
+    refreshAdminSection() {}, DongguPWA: { render() {} }, vNoAccess: () => '직원 승인 전이에요', vReport: () => '주민 신고' };
+  vm.createContext(ui); vm.runInContext(between('function render(){', 'function vNoAccess(){'), ui);
+  vm.runInContext('render()', ui);
+  assert.match(view.innerHTML, /역할을 확인하는 중/);
+  assert.doesNotMatch(view.innerHTML, /직원 승인 전/);
+  assert.equal(ui.S.tab, 'admin', 'the last tab is kept while waiting');
+  assert.equal(nav.hidden, true);
+  ui.S.rolesSeen = true; vm.runInContext('render()', ui);
+  assert.doesNotMatch(view.innerHTML, /역할을 확인하는 중/, 'once known, a person without a staff role gets the resident screen');
+  assert.equal(ui.S.tab, 'report');
+});
