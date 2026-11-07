@@ -62,3 +62,4 @@ jobs:
           node scripts/work-improvements-browser-smoke.cjs
           node scripts/inventory-improvements-browser-smoke.cjs
           node scripts/patrol-functional-browser-smoke.cjs
+          node scripts/satellite-map-browser-smoke.cjs

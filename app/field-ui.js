@@ -35,6 +35,8 @@
   document.addEventListener('keydown', e => {
     const top = stack.at(-1);
     if (!top) return;
+    // Escape belongs to the native map-background selector while it has focus.
+    if (e.key === 'Escape' && top.el.contains(e.target) && e.target.closest?.('.dg-map-layers select')) return;
     if (e.key === 'Escape' && top.close) { e.preventDefault(); e.stopPropagation(); top.close(); return; }
     if (e.key !== 'Tab') return;
     const list = controls(top.el), first = list[0], last = list.at(-1);

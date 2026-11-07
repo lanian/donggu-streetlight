@@ -14,11 +14,13 @@
       const url = new URL(template, document.baseURI);
       if (!(url.protocol === 'https:' || url.origin === location.origin) || !['{z}', '{x}', '{y}'].every(k => template.includes(k))) throw new Error('template');
       const osm = /(^|\.)openstreetmap\.org$/.test(url.hostname);
-      return { ...p, urlTemplate: template, maxZoom: p.maxZoom || 19, offlineAllowed: !osm && p.offlineAllowed === true, reason: osm ? 'OSM 배경지도는 온라인 이용만 안내해요.' : p.offlineAllowed === true ? '이용 허가된 지도에서 현재 화면으로 본 타일만 보관해요. 지역 전체 다운로드 기능은 제공하지 않아요.' : '이 제공기관의 오프라인 저장 허가가 설정되지 않았어요.' };
+      const imagery = url.hostname === 'api.vworld.kr' && /^\/req\/wmts\/1\.0\.0\/[^/]+\/(Satellite|Hybrid)\//i.test(url.pathname);
+      return { ...p, urlTemplate: template, maxZoom: p.maxZoom || 19, offlineAllowed: !osm && !imagery && p.offlineAllowed === true, reason: osm ? 'OSM 배경지도는 온라인 이용만 안내해요.' : imagery ? '위성·항공사진 지도는 온라인으로 조회해요.' : p.offlineAllowed === true ? '이용 허가된 지도에서 현재 화면으로 본 타일만 보관해요. 지역 전체 다운로드 기능은 제공하지 않아요.' : '이 제공기관의 오프라인 저장 허가가 설정되지 않았어요.' };
     } catch (_) { return { ...fallback, reason: '지도 제공기관 설정이 올바르지 않아 온라인 기본 지도를 사용해요.' }; }
   }
   function tileLayer(L, extra = {}) {
     const p = provider();
+    if (globalThis.DongguMapLayers) return globalThis.DongguMapLayers.create(L, p, extra);
     return L.tileLayer(p.urlTemplate, { maxZoom: p.maxZoom, attribution: p.attribution || p.name || '', ...extra });
   }
   function panelHTML() {

@@ -87,7 +87,15 @@ async function poll(page, predicate, argument, label) {
 
     await page.locator('[data-la="new"]').click(); await page.locator('#laLabel').fill('합성 다각형 산림'); await page.locator('#laShape').selectOption('polygon');
     await page.locator('#laMap.leaflet-container').waitFor();
-    for (const position of [{ x: 70, y: 70 }, { x: 170, y: 70 }, { x: 170, y: 170 }]) await page.locator('#laMap').click({ position });
+    // Click the editable canvas, keeping the map's background selector out of
+    // the fixture. A control click must never create a polygon vertex.
+    for (const position of [{ x: 60, y: 70 }, { x: 60, y: 170 }, { x: 120, y: 170 }]) {
+      assert.equal(await page.locator('#laMap').evaluate((map, point) => {
+        const frame = map.getBoundingClientRect(), x = frame.left + point.x, y = frame.top + point.y;
+        return [...map.querySelectorAll('.leaflet-control')].some(control => { const r = control.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; });
+      }, position), false, 'polygon fixture must click the map rather than a map control');
+      await page.locator('#laMap').click({ position });
+    }
     assert.equal((await page.locator('#laVertices').inputValue()).split('\n').length, 3);
     await page.locator('[data-la="undo-point"]').click(); assert.equal((await page.locator('#laVertices').inputValue()).split('\n').length, 2);
     const vertices = [{ lat: latitude - .0002, lng: lngAt(100) }, { lat: latitude + .0002, lng: lngAt(100) }, { lat: latitude + .0002, lng: lngAt(150) }, { lat: latitude - .0002, lng: lngAt(150) }];

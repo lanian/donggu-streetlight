@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v60-workflows";
+const APP_VER="v63-vworld";
 const RELEASE_NOTES=[
+  {v:"v63-vworld",d:"2026-11-08",t:"일반·위성/항공사진·사진+도로명 지도 전환, 브이월드 개발키 연결, 위치·시설 표시 유지와 영상 오류 복귀"},
   {v:"v60-workflows",d:"2026-11-07",t:"순찰·GPS·복구·보고서 오류 개선, 작업 정보·일괄 수정, 자재 부족 예상, 좌표 정비와 순찰 목표 관리"},
   {v:"v59-reliability",d:"2026-11-07",t:"원본·이관 신고의 보관 만료 파기, 검증 서버 접수, 로컬 체험 분리와 좌표 품질 안내 개선"},
   {v:"v58-role-wait",d:"2026-11-05",t:"새로 고칠 때 '직원 승인 전' 화면이 잠깐 보이던 문제 수정 — 역할을 확인하는 동안은 확인 중이라고 표시"},
@@ -2723,7 +2724,9 @@ function openMap(scope,one){
   if(gmap){gmap.remove();gmap=null}
   gmap=L.map("gmap",{zoomControl:true,attributionControl:true,tap:true,preferCanvas:true});
   const tiles=DongguPWA.tileLayer(L).addTo(gmap);
-  let errs=0;tiles.on("tileerror",()=>{if(++errs===4)$("#mapNote").textContent="지도 배경을 불러올 수 없어요. 마커 위치만 표시돼요."});
+  const mapOwner=gmap,mapActive=()=>gmap===mapOwner&&!mapOwner._dgClosing&&$("#gmap")===mapOwner.getContainer();
+  let errs=0;tiles.on("tileerror",event=>{const note=$("#mapNote");if(!mapActive()||!note||(event.mode&&event.mode!=="street"))return;if(++errs===4)note.textContent="지도 배경을 불러올 수 없어요. 마커 위치만 표시돼요."});
+  tiles.on("mapmodechange",()=>{if(!mapActive())return;errs=0;const note=$("#mapNote");if(note)note.textContent=""});
   gmapLayer=L.layerGroup().addTo(gmap);gmapPts=pts;
   const back=NAV.mapView||pre;NAV.mapView=null;
   if(back&&back.center)gmap.setView(back.center,back.zoom); // coming back from a screen opened on this map: same view as before

@@ -126,6 +126,43 @@ test('activation by another tab does not reload this tab, and missing provider k
   const p = c.DongguPWA.provider(); assert.equal(p.offlineAllowed, false); assert.match(p.reason, /키가 없어/);
 });
 
+test('the map entry point delegates to the background controller without losing the ordinary provider or caller options', async () => {
+  const { c } = await pwaContext(false), calls = [], layer = {}, extra = { maxZoom: 20, pane: 'tilePane' };
+  const leaflet = { tileLayer() { assert.fail('the configured background controller must own tile construction'); } };
+  c.DongguMapLayers = { create(...args) { calls.push(args); return layer; } };
+  assert.equal(c.DongguPWA.tileLayer(leaflet, extra), layer);
+  assert.equal(calls.length, 1); assert.equal(calls[0][0], leaflet); assert.equal(calls[0][2], extra);
+  assert.equal(calls[0][1].urlTemplate, 'https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+  assert.equal(calls[0][1].offlineAllowed, false);
+});
+
+test('imagery configuration preserves the existing ordinary provider and online-only policy', () => {
+  const context = vm.createContext({}); vm.runInContext(readSource(path.join(root, 'app/map-config.js')), context);
+  assert.equal(context.DONGGU_MAP_PROVIDER, null);
+  assert.ok(context.DONGGU_SATELLITE_CONFIG, 'optional imagery configuration must be declared separately');
+  assert.equal(typeof context.DONGGU_SATELLITE_CONFIG.apiKey, 'string');
+  assert.equal(context.DONGGU_SATELLITE_CONFIG.offlineAllowed, false);
+  assert.equal(context.DONGGU_SATELLITE_CONFIG.maxNativeZoom, 18);
+});
+
+test('an imagery override is described as online only even if its ordinary-provider cache flag is enabled', async () => {
+  const { c } = await pwaContext(false);
+  c.DONGGU_MAP_PROVIDER = { name: 'VWorld', requiresKey: true, apiKey: 'synthetic-key', offlineAllowed: true, urlTemplate: 'https://api.vworld.kr/req/wmts/1.0.0/{key}/Satellite/{z}/{y}/{x}.jpeg' };
+  const provider = c.DongguPWA.provider(); assert.equal(provider.offlineAllowed, false); assert.match(provider.reason, /온라인/);
+});
+
+test('satellite and label tiles are not intercepted or stored by the service worker', () => {
+  const { context, listeners } = swContext();
+  context.DONGGU_SATELLITE_CONFIG = { apiKey: 'synthetic-key', offlineAllowed: true };
+  for (const layer of ['Satellite/18/10/20.jpeg', 'Hybrid/18/10/20.png']) {
+    listeners.fetch({ request: { url: 'https://api.vworld.kr/req/wmts/1.0.0/synthetic-key/' + layer, method: 'GET', destination: 'image' }, respondWith() { assert.fail('VWorld imagery is online only, including a mistakenly enabled new-config cache flag'); } });
+  }
+  context.DONGGU_MAP_PROVIDER = { requiresKey: true, apiKey: 'synthetic-key', offlineAllowed: true, urlTemplate: 'https://api.vworld.kr/req/wmts/1.0.0/{key}/Satellite/{z}/{y}/{x}.jpeg' };
+  const request = { url: 'https://api.vworld.kr/req/wmts/1.0.0/synthetic-key/Satellite/18/10/20.jpeg', method: 'GET', destination: 'image' };
+  assert.equal(context.providerTile(request, new URL(request.url)), false, 'an ordinary-provider override must not archive online imagery');
+  listeners.fetch({ request, respondWith() { assert.fail('online imagery must bypass the optional provider cache'); } });
+});
+
 test('with the app pre-check, the update goes only on its yes, and an approved update reloads even with kept drafts', async () => {
   const answer = { ok: false }, asked = { n: 0 };
   const { c, flags, calls, listeners } = await pwaContext(true, { prepareUpdate: async () => { asked.n++; return answer.ok; } });

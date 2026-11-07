@@ -2,7 +2,9 @@
 
 동구의 가로등·보안등 현장 점검, 야간 순찰, 주민 신고, 보수 작업과 자재 관리를 위한 모바일 웹앱입니다. 직원 화면은 `index.html`·`app/staff-app.js`와 `app/` 기능 모듈, 주민 신고 화면은 `report/`로 구성됩니다.
 
-로컬 개발 버전 v60의 [기능 수정·추가 내용과 검증 기록](docs/functional-implementation-2026-11-07.md)을 확인할 수 있습니다. 기존 운영 연결 설정은 유지하며 배포는 진행하지 않았습니다.
+v63-vworld는 일반·위성/항공사진·사진＋도로명을 전환하는 지도 개선 버전입니다. [사용법과 검증 범위](docs/satellite-map-v62.md)를 확인하세요. 기존 Firebase·주민 접수 설정과 업무 저장 형식은 유지합니다. 별도 개발 중인 v61 유지보수 기능은 서버 규칙을 함께 준비한 뒤 반영합니다.
+
+기존 v60의 [업무 기능 개선 내용과 검증 기록](docs/functional-implementation-2026-11-07.md)도 확인할 수 있습니다. v63은 이 업무 동작을 유지하면서 지도 배경 전환을 추가합니다.
 
 **localhost·loopback 실행은 이 기기에만 저장하는 체험 모드입니다.** 호스팅된 직원 앱은 `firebase-config.js`에 명시된 `donggu-light` Firebase 프로젝트를 사용합니다. 현재 직원 서버 관리 호출은 `functionsEnabled: false`이며, 주민 접수는 검증 게이트웨이 URL·App Check가 연결되기 전까지 준비 중으로 표시합니다. 실제 인증·규칙·Functions·예약 작업의 배포 상태는 코드 검사나 Pages 배포만으로 확인되지 않습니다.
 
