@@ -1,10 +1,11 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
-const source = name => fs.readFileSync(path.join(__dirname, '../..', name), 'utf8');
+const source = name => readSource(path.join(__dirname, '../..', name), 'utf8');
 
 function fixture({ enabled = true, oversized = false, loseReply = false } = {}) {
   const calls = [], writes = [], records = new Map();

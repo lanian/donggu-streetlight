@@ -8,12 +8,17 @@ import { spawnSync } from 'node:child_process';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = path => readFileSync(resolve(root, path), 'utf8');
 for (const file of ['index.html', 'report/index.html']) {
-  let count = 0;
+  const scripts = [];
   for (const match of read(file).matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
-    if (/\bsrc\s*=/.test(match[1]) || /\btype\s*=\s*["']application\//.test(match[1])) continue;
-    new Script(match[2], { filename: `${file}:inline-${++count}` });
+    if (/\btype\s*=\s*["']application\//.test(match[1])) continue;
+    const src = /\bsrc=["']([^"']+)["']/.exec(match[1]);
+    if (src && /^(?:https?:|\/\/)/.test(src[1])) continue;
+    const code = src ? read(resolve(dirname(file), src[1].split('?')[0])) : match[2];
+    new Script(code, { filename: src ? src[1] : `${file}:inline-${scripts.length + 1}` });
+    scripts.push(code);
   }
-  assert.ok(count > 0, `${file}: inline application script is missing`);
+  assert.ok(scripts.length > 0, `${file}: application scripts are missing`);
+  new Script(scripts.join('\n;\n'), { filename: `${file}:combined-global-scope` });
 }
 for (const file of ['sw.js', 'firebase-config.js', 'report/config.js', ...(existsSync(resolve(root, 'security.js')) ? ['security.js'] : []), ...readdirSync(resolve(root, 'app')).filter(name => name.endsWith('.js')).map(name => 'app/' + name)]) {
   new Script(read(file), { filename: file });

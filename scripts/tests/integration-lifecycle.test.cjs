@@ -1,3 +1,4 @@
+const { readSource } = require('./source.cjs');
 /* VM regression tests for the legacy-to-module ownership boundary. No network or real storage. */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -5,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = process.env.DONGGU_TEST_ROOT || path.resolve(__dirname, '../..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => readSource(path.join(root, file), 'utf8');
 const html = read('index.html');
 const sources = ['app/operations-core.js', 'app/operations.js', 'app/workflows.js', 'app/integration.js', 'app/legacy-bridge.js'].map(file => [file, read(file)]);
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -32,7 +33,7 @@ function harness() {
     inspectionDraftKey: snapshotKey, suggestResult() {},
     newInspectionJob: (light, d) => ({ id: 'inspection-' + ++sequence, key: snapshotKey(d), rec: { lightId: light.id, photos: copy(d.photos) } }),
     commitInspectionJob: async () => {}, commitPatrolJob: async () => {},
-    DGData: { clone: copy, newId: prefix => prefix + '-' + ++sequence, readPage: async () => ({ rows: [], hasMore: false, nextCursor: null, source: 'local', complete: true, fetchedAt: 1 }) },
+    DGData: { ...require('../../app/data.js'), clone: copy, newId: prefix => prefix + '-' + ++sequence, readPage: async () => ({ rows: [], hasMore: false, nextCursor: null, source: 'local', complete: true, fetchedAt: 1 }) },
     DGManagement: { attach() {} }, DGWorkCommands: { execute: async () => {} },
     openSheet() {}, openMap() {}, renderPhotoStrip() {}, openAdminSection() {}, refreshAdminSection() {}, saveInspection() {}, ptSave() {}, ptFinish() {}, reportCard: () => '<div></div>', ptDraw() {},
     stashDraft() { if (context.draft && context.draftDirty(context.draft)) context.DRAFTS[context.draft.lightId] = context.draft; },

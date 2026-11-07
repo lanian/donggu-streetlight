@@ -153,6 +153,29 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
     await page.evaluate(() => { S.demoRole = 'admin'; S.tab = 'admin'; render(); openAdminSection('due'); }); await page.locator('.dg-plan').waitFor();
     assert.deepEqual(await page.evaluate(() => DGOperations.state.plan.stops.map(s => s.id + ':' + s.visited)), saved);
 
+    checks.push('legacy plans recheck current position quality before routing');
+    const legacy = await page.evaluate(async () => {
+      const precise = S.lights.filter(l => !l.posApprox && Number.isFinite(l.lat) && Number.isFinite(l.lng)).slice(0, 3);
+      const approximate = S.lights.find(l => l.posApprox);
+      const stop = (l, visited) => ({ id: l.id, code: l.code, lat: l.lat, lng: l.lng, visited });
+      await DGOffline.put('plan', 'current', { createdAt: Date.now(), stops: [stop(precise[0], true), stop(precise[1], false), stop(precise[2], false), stop(approximate, false)], distance: 0 });
+      await DGOperations.ready();
+      return { kept: precise.map(l => l.id), excluded: approximate.id };
+    });
+    assert.deepEqual(await stops(), legacy.kept);
+    assert.equal(await page.evaluate(() => DGOperations.state.plan.stops[0].visited), true);
+    assert.equal(await page.evaluate(() => DGOperations.state.plan.excludedApproximate[0].id), legacy.excluded);
+    await page.evaluate(() => { window.__opened = []; window.open = u => { window.__opened.push(u); return null; }; openAdminSection('due'); });
+    await page.locator('[data-dg="plan-route-ahead"]').click();
+    await page.locator('#dgDialog:not([hidden]) [data-dgdlg-choice]').first().waitFor();
+    await page.evaluate(id => { byId(id).posApprox = true; }, legacy.kept[1]);
+    await page.locator('#dgDialog [data-dgdlg-choice]', { hasText: '구글 지도 · 도보' }).click();
+    await page.waitForFunction(() => DGOperations.state.plan.stops.length === 2);
+    assert.deepEqual(await page.evaluate(() => window.__opened), []);
+    await page.evaluate(() => { DGOperations.state.plan.stops = []; openAdminSection('due'); });
+    assert.doesNotMatch(await page.locator('.dg-plan').textContent(), /모든 방문지를 마쳤어요/);
+    assert.match(await page.locator('.dg-plan').textContent(), /시설/);
+
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ results: checks, browserErrors: errors }, null, 2));
   } finally { await context.close(); await browser.close(); server.close(); }

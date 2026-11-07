@@ -5,10 +5,11 @@
   const C = root.DGOperationsCore;
   let api, loading = null, reloadRequested = false, attached = false, detailToken = 0, editorRequest = 0;
   let draftWrites = Promise.resolve();
-  const draftVersions = new WeakMap(), editorTokens = new WeakMap();
+  const draftVersions = new WeakMap(), editorTokens = new WeakMap(), draftOwners = new WeakMap();
   let subscriptions = null, watchedWorkKey = '', watchedReportId = '';
+  let editConflict = null;
   const clone = value => JSON.parse(JSON.stringify(value));
-  const state = { orders: [], inventory: [], reports: [], settings: { inspectionDays: 90, privacyDays: 90 }, loaded: false, error: '', at: 0, filter: 'open', mine: false, deadline: 'all', urgent: false, workDong: '전체', show: 40, cursor: null, hasMore: false, workQueryKey: '', queryAt: Date.now(), workMeta: null, draft: null, completion: null, currentOrder: null, reportVersions: {}, lightVersion: null, plan: null, dueFilter: 'needed', dueDong: '전체', dueShow: 60, dueSort: 'priority', pos: null, planPick: new Set(), jobs: [], drafts: [] };
+  const state = { orders: [], inventory: [], reports: [], settings: { inspectionDays: 90, privacyDays: 90 }, loaded: false, error: '', at: 0, filter: 'open', mine: false, deadline: 'all', urgent: false, workDong: '전체', show: 40, cursor: null, hasMore: false, workQueryKey: '', queryAt: Date.now(), workMeta: null, draft: null, completion: null, edit: null, currentOrder: null, reportVersions: {}, lightVersion: null, plan: null, dueFilter: 'needed', dueDong: '전체', dueShow: 60, dueSort: 'priority', pos: null, planPick: new Set(), workPick: new Map(), bulk: null, jobs: [], drafts: [] };
   const uuid = prefix => prefix + '-' + (root.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
   const E = value => api.esc(value), Q = selector => document.querySelector(selector);
   const time = value => value ? api.fmtDT(value) : '미지정';
@@ -17,10 +18,18 @@
   const label = id => api.state().names[id] || (api.state().roles.find(r => r.id === id) || {}).name || (id === 'local' ? '이 기기 관리자' : id || '미배정');
   const options = (values, selected) => values.map(v => '<option value="' + E(v) + '"' + (v === selected ? ' selected' : '') + '>' + E(v) + '</option>').join('');
   const heading = (title, subtitle) => '<div class="sheet-head"><div><h3>' + E(title) + '</h3><div class="muted">' + E(subtitle || '') + '</div></div><button type="button" class="x" data-close aria-label="닫기">×</button></div>';
-  const staffOptions = selected => '<option value="">미배정</option>' + [...new Map([{ id: api.state().me, role: admin() ? 'admin' : 'inspector' }, ...api.state().roles].filter(r => ['admin', 'inspector'].includes(r.role)).map(r => [r.id, r])).values()].map(r => '<option value="' + E(r.id) + '"' + (r.id === selected ? ' selected' : '') + '>' + E(label(r.id)) + '</option>').join('');
+  const staffOptions = selected => {
+    const rows = [...new Map([{ id: api.state().me, role: admin() ? 'admin' : 'inspector' }, ...api.state().roles].filter(r => ['admin', 'inspector'].includes(r.role)).map(r => [r.id, r])).values()];
+    if (selected && !rows.some(row => row.id === selected)) rows.push({ id: selected });
+    return '<option value="">미배정</option>' + rows.map(row => '<option value="' + E(row.id) + '"' + (row.id === selected ? ' selected' : '') + '>' + E(label(row.id)) + '</option>').join('');
+  };
   function dateInput(ms) { return ms ? C.kstDateKey(ms) : ''; }
   function dueValue(value) { return value ? Date.parse(value + 'T23:59:59.999+09:00') : 0; }
   function notify() { if (api) api.render(); }
+  function captureOwner() { return { api, actor: api.state().me, database: api.database(), firebase: api.firebase(), offline: root.DGOffline, namespace: root.DGOffline.namespace }; }
+  function ownsContext(owner) { return !!owner && api === owner.api && api.state().me === owner.actor && api.database() === owner.database && api.firebase() === owner.firebase && root.DGOffline === owner.offline && root.DGOffline.ready && root.DGOffline.namespace === owner.namespace; }
+  function requireOwner(owner) { if (!ownsContext(owner)) throw Object.assign(new Error('계정이나 저장소가 바뀌어 이전 작업을 현재 계정에서 처리하지 않았어요.'), { code: 'account-changed' }); }
+  function draftOwner(d) { let owner = draftOwners.get(d); if (!owner) { owner = captureOwner(); draftOwners.set(d, owner); } return owner; }
   function workFilters() { return { status: state.filter, mine: state.mine, deadline: state.deadline, urgent: state.urgent, dong: state.workDong }; }
   function filterKey() { return JSON.stringify(workFilters()); }
   function selectedOrders(rows = state.orders) { return C.filterOrders(rows, workFilters(), { user: api.state().me, byId: api.byId, inDong: api.inDong, now: state.queryAt }); }
@@ -118,6 +127,7 @@
   }
   function hasActiveDraft() {
     const d = state.draft, c = state.completion;
+    if (state.edit && !state.edit.cancelled && ownerForm(state.edit, 'workEdit')) return true;
     if (d && !d.cancelled && ownerForm(d, 'workDraft') && (d.pending || d.photoTasks || Q('#woTitle')?.value || Q('#woDescription')?.value || d.photos?.length)) return true;
     return !!(c && !c.cancelled && ownerForm(c, 'workCompletion') && (c.pending || c.photoTasks || Q('#woCompletionNote')?.value || c.photos?.length));
   }
@@ -129,8 +139,15 @@
       '<div class="grid2"><select class="f-in" id="woDeadline" aria-label="완료 기한">' + Object.entries({ all: '기한 전체', today: '오늘 기한 (KST)', overdue: '기한 초과' }).map(([v,t]) => '<option value="' + v + '"' + (state.deadline === v ? ' selected' : '') + '>' + t + '</option>').join('') + '</select><select class="f-in" id="woDong" aria-label="작업 대상 동">' + api.dongOptions(state.workDong) + '</select></div><label class="f"><input type="checkbox" id="woUrgent"' + (state.urgent ? ' checked' : '') + '> 긴급 작업만</label>' +
       '<label class="f"><input type="checkbox" id="woMine"' + (state.mine ? ' checked' : '') + '> 내 담당만</label><p class="muted">' + (state.loaded && state.workQueryKey === filterKey() ? sourceText(state.workMeta) + ' · 조회된 ' + rows.length + '건' + (state.hasMore ? ' · 뒤에 자료가 더 있어요' : ' · 조회 범위 끝까지 확인') : '불러오는 중…') + (pending ? ' · 저장 대기 ' + pending + '건' : '') + '</p><div class="split"><button class="btn ghost" data-dg="work-map">조건 전체 지도</button><button class="btn ghost" data-dg="work-plan">조건 전체 방문 계획</button></div><p class="muted">목록은 페이지로 읽고 지도·CSV·방문 계획은 같은 조건의 전체 작업을 조회해요. 오늘 기한은 한국 시간 기준이에요.</p></div>' +
       (state.error ? '<div class="notice" role="alert">' + E(state.error) + '</div>' : '') +
-      '<div class="list">' + rows.slice(0, state.show).map(w => '<button class="light-row dg-work-row" data-dg="open-work" data-id="' + E(w.id) + '"><span><b>' + E(w.title) + '</b><small>' + E(w.code) + ' · ' + E(label(w.assignedTo)) + '</small><small>기한 ' + time(w.dueAt) + '</small></span><span class="chip">' + E(C.STATES[w.status] || w.status) + '</span><span class="dg-priority' + (w.priority === '긴급' ? ' urgent' : '') + '">' + E(w.priority) + '</span>' + (w.dueAt && w.dueAt < Date.now() && !['verified', 'cancelled'].includes(w.status) ? '<span class="due">기한 초과</span>' : '') + '</button>').join('') + '</div>' +
+      bulkControl() + '<div class="list">' + rows.slice(0, state.show).map(workRow).join('') + '</div>' +
       (state.loaded && state.workQueryKey === filterKey() && !rows.length ? '<div class="empty">선택한 조건의 작업이 없어요.</div>' : '') + (rows.length > state.show || state.hasMore ? '<button class="btn ghost block" data-dg="more-work">다음 작업 더 보기</button>' : '');
+  }
+  function workRow(w) {
+    const choice = admin() && supported(), picked = state.workPick.has(w.id);
+    return (choice ? '<div class="dg-work-choice' + (picked ? ' picked' : '') + '"><label><input type="checkbox" data-work-pick="' + E(w.id) + '" aria-label="' + E(w.title + ' 선택') + '"' + (picked ? ' checked' : '') + (!editable(w) ? ' disabled' : '') + '></label>' : '') + '<button class="light-row dg-work-row" data-dg="open-work" data-id="' + E(w.id) + '"><span><b>' + E(w.title) + '</b><small>' + E(w.code) + ' · ' + E(label(w.assignedTo)) + '</small><small>기한 ' + time(w.dueAt) + '</small></span><span class="chip">' + E(C.STATES[w.status] || w.status) + '</span><span class="dg-priority' + (w.priority === '긴급' ? ' urgent' : '') + '">' + E(w.priority) + '</span>' + (w.dueAt && w.dueAt < Date.now() && editable(w) ? '<span class="due">기한 초과</span>' : '') + '</button>' + (choice ? '</div>' : '');
+  }
+  function bulkControl() {
+    return admin() && supported() ? '<div class="panel dg-work-select"><span id="woPickCount">직접 선택한 작업 ' + state.workPick.size + '건</span><div class="split"><button class="btn ghost" data-dg="bulk-work"' + (!state.workPick.size ? ' disabled' : '') + '>선택 작업 일괄 수정</button><button class="btn ghost" data-dg="clear-work-pick"' + (!state.workPick.size ? ' disabled' : '') + '>선택 해제</button></div><small class="muted">화면에 보이는 작업을 하나씩 선택해요. 완료·취소 기록은 일괄 수정에서 제외해요.</small></div>' : '';
   }
   function lightMatch(value) { return (api.state().allLights || api.state().lights).find(l => l.id === value || l.code + ' [' + l.id + ']' === value); }
   function lightSuggestions(query) {
@@ -142,28 +159,32 @@
     d.photoTasks = 0;
     draftVersions.set(d, exists ? d.draftRevision || 0 : null);
     editorTokens.set(d, uuid('editor'));
+    draftOwners.set(d, captureOwner());
     return d;
   }
   function ownerForm(d, kind) {
-    const form = Q(kind === 'workDraft' ? '#woNewForm' : '#woDetail');
+    const form = Q(kind === 'workDraft' ? '#woNewForm' : kind === 'workEdit' ? '#woEditForm' : '#woDetail');
     return d && form && form.dataset.editorToken === editorTokens.get(d) ? form : null;
   }
   function writeDraft(d, kind) {
     if (!d || d.cancelled || !root.DGOffline.ready) return draftWrites;
-    const value = clone(d), namespace = root.DGOffline.namespace;
+    const value = clone(d), owner = draftOwner(d);
     draftWrites = draftWrites.catch(() => {}).then(async () => {
       if (d.cancelled) return;
-      if (namespace !== root.DGOffline.namespace) throw new Error('계정이 바뀌어 이전 초안을 현재 계정에 저장하지 않았어요.');
+      requireOwner(owner);
       let key = d.storageId, expected = draftVersions.get(d);
       if (expected === undefined) expected = d.draftRevision || 0;
       try {
-        const saved = await root.DGOffline.putIfCurrent(kind, key, { ...value, storageId: key, ...(d.recoveryOf ? { recoveryOf: d.recoveryOf } : {}) }, expected);
+        const saved = await owner.offline.putIfCurrent(kind, key, { ...value, storageId: key, ...(d.recoveryOf ? { recoveryOf: d.recoveryOf } : {}) }, expected);
+        requireOwner(owner);
         d.draftRevision = saved.draftRevision; draftVersions.set(d, saved.draftRevision);
       } catch (error) {
         if (error.code !== 'conflict') throw error;
+        requireOwner(owner);
         // Each recovery copy still targets the original work's server revision.
         key = uuid('work-recovery');
-        const saved = await root.DGOffline.putIfCurrent(kind, key, { ...value, storageId: key, recoveryOf: d.storageId }, null);
+        const saved = await owner.offline.putIfCurrent(kind, key, { ...value, storageId: key, recoveryOf: d.storageId }, null);
+        requireOwner(owner);
         d.recoveryOf = d.storageId; d.storageId = key; d.draftRevision = saved.draftRevision; draftVersions.set(d, saved.draftRevision);
         api.toast('다른 탭의 변경을 유지하고 현재 내용은 별도 복구 초안에 보관했어요.');
         const form = ownerForm(d, kind); if (form) form.dataset.draftId = key;
@@ -171,33 +192,56 @@
     });
     return draftWrites;
   }
-  function clearWorkDraft(d, kind) {
+  function clearWorkDraft(d, kind, options = {}) {
     if (!d) return draftWrites;
+    const owner = draftOwner(d);
     d.cancelled = true;
     const key = d.storageId || (kind === 'workDraft' ? d.id : d.workId), pending = d.pending;
     if (kind === 'workDraft' && state.draft === d) state.draft = null;
     if (kind === 'workCompletion' && state.completion === d) state.completion = null;
+    if (kind === 'workEdit' && state.edit === d) state.edit = null;
     draftWrites = draftWrites.catch(() => {}).then(async () => {
-      const stored = await root.DGOffline.get(kind, key);
-      if (stored && stored.pending === pending) await root.DGOffline.removeIfCurrent(kind, key, d.draftRevision ?? stored.draftRevision ?? 0);
+      if (!ownsContext(owner)) return;
+      const stored = await owner.offline.get(kind, key);
+      if (!ownsContext(owner)) return;
+      const matching = stored && stored.pending === pending;
+      if (matching) await owner.offline.removeIfCurrent(kind, key, d.draftRevision ?? stored.draftRevision ?? 0);
+      if (matching && kind === 'workEdit' && options.delivered) {
+        let source = d.recoverySource || stored?.recoverySource;
+        const seen = new Set([key]);
+        while (source && !seen.has(source.id) && ownsContext(owner)) {
+          seen.add(source.id);
+          const previous = await owner.offline.get('workEdit', source.id);
+          if (!ownsContext(owner) || !previous || (previous.draftRevision || 0) !== source.revision) break;
+          await owner.offline.removeIfCurrent('workEdit', source.id, source.revision);
+          source = previous.recoverySource;
+        }
+      }
     });
     return draftWrites;
   }
-  async function persistActive() { await persistNew(); await persistCompletion(); }
+  async function persistActive() { await persistNew(); await persistCompletion(); await persistEdit(); }
   async function newWork(lightId, reportId, resumeId) {
     if (!admin() || !supported()) return api.toast('작업 지시는 관리자와 지원되는 저장소에서 등록할 수 있어요.');
-    const request = ++editorRequest;
-    await persistActive(); await load(); if (lightId) await loadReports(lightId);
-    let d = resumeId ? await root.DGOffline.get('workDraft', resumeId) : null;
-    if (request !== editorRequest) return;
+    const request = ++editorRequest, owner = captureOwner(), current = () => request === editorRequest && ownsContext(owner);
+    await persistActive(); if (!current()) return;
+    await load(); if (!current()) return;
+    if (lightId) await loadReports(lightId); if (!current()) return;
+    if (!resumeId && reportId) {
+      const ids = Array.isArray(reportId) ? reportId : [reportId], linked = await linkedReport(ids);
+      if (!current()) return;
+      if (linked) { api.toast('이미 진행 중인 작업에 연결된 신고예요. 연결된 작업을 열어요.'); return openWork(linked.id); }
+    }
+    let d = resumeId ? await owner.offline.get('workDraft', resumeId) : null;
+    if (!current()) return;
     if (resumeId && !d) return api.toast('이어 쓸 초안을 찾을 수 없어요. 저장 대기함을 새로고침해 주세요.');
     if (d) adoptDraft(d, 'workDraft', resumeId);
     else {
-      d = { id: uuid('work'), lightId: lightId || '', title: '', description: '', type: '수리', priority: '보통', assignedTo: '', dueAt: 0, beforePhotos: [], reportIds: Array.isArray(reportId) ? [...new Set(reportId)] : reportId ? [reportId] : [], photos: [] };
+      d = { id: uuid('work'), lightId: lightId || '', title: '', description: '', type: '수리', priority: '보통', assignedTo: '', dueAt: 0, parts: [], beforePhotos: [], reportIds: Array.isArray(reportId) ? [...new Set(reportId)] : reportId ? [reportId] : [], photos: [] };
       adoptDraft(d, 'workDraft', d.id, false);
     }
     state.draft = d; if (!resumeId) await writeDraft(d, 'workDraft');
-    if (request === editorRequest && state.draft === d) renderNew();
+    if (current() && state.draft === d) renderNew();
   }
   function renderNew() {
     const d = state.draft, light = api.byId(d.lightId);
@@ -209,7 +253,7 @@
       '<div class="grid2"><div><label class="f" for="woAssignee">담당자</label><select class="f-in" id="woAssignee">' + staffOptions(d.assignedTo) + '</select></div><div><label class="f" for="woDue">완료 기한</label><input class="f-in" type="date" id="woDue" value="' + dateInput(d.dueAt) + '"></div></div>' +
       '<label class="f" for="woDescription">작업 내용</label><textarea class="f-in" id="woDescription" maxlength="2000">' + E(d.description) + '</textarea>' +
       '<label class="f">연결할 미완료 신고</label><div id="woReportLinks">' + (reports.length ? reports.map(r => '<label class="dg-option"><input type="checkbox" data-work-report="' + E(r.id) + '"' + (d.reportIds.includes(r.id) ? ' checked' : '') + '> ' + E(r.issue + ' · ' + (r.desc || r.location || '')) + '</label>').join('') : '<p class="muted">이 시설에 연결된 미완료 신고가 없어요.</p>') + '</div>' +
-      '<label class="f" for="woBefore">조치 전 사진 (최대 6장)</label><input type="file" id="woBefore" accept="image/*" multiple><div id="woBeforePreview" class="pstrip">' + photoPreviews(d.photos) + '</div>' +
+      plannedEditor(d.parts || []) + '<label class="f" for="woBefore">조치 전 사진 (최대 6장)</label><input type="file" id="woBefore" accept="image/*" multiple><div id="woBeforePreview" class="pstrip">' + photoPreviews(d.photos) + '</div>' +
       '<p class="muted" id="woPhotoNotice" role="status"></p><button class="btn sodium block" data-dg="create-work">작업 지시 저장</button></fieldset><p id="woSaveState" class="muted" role="status">' + (d.pending ? '저장 대기함에서 전송 결과를 확인 중이에요. 입력은 전송 완료까지 잠겨요.' : d.recoveryOf ? '다른 탭과 내용이 달라 별도로 보관한 복구 초안이에요.' : '작업별로 초안을 자동 보관해요.') + '</p></div>', { key: 'work:new', reopen: () => renderNew() });
   }
   function readNew() {
@@ -241,10 +285,12 @@
   function lockForm(form, locked) { const fieldset = form && form.querySelector('fieldset'); if (fieldset) fieldset.disabled = locked; }
   async function createWork(button) {
     const d = readNew(), form = ownerForm(d, 'workDraft'); if (!form || d.cancelled) return;
+    const owner = draftOwner(d); requireOwner(owner);
     const light = lightMatch(Q('#woLight').value); if (!light || light.id !== d.lightId) return api.toast('목록에서 시설을 선택해 주세요.');
     if (d.pending) return api.toast('이 작업은 저장 대기함에서 처리 중이에요.');
     if (d.photoTasks) return api.toast('첨부 사진을 처리한 뒤 저장해 주세요.');
     const input = Object.fromEntries(['title', 'description', 'type', 'priority', 'assignedTo', 'dueAt', 'reportIds'].map(key => [key, clone(d[key])]));
+    input.parts = clone(d.parts || []);
     input.beforePhotos = d.photos.map(p => p.id);
     C.createOrder(input, light, api.state().me, Date.now());
     const job = { id: uuid('command'), kind: 'create', workId: d.id, actor: api.state().me, at: Date.now(), light: { id: light.id, code: light.code, dong: light.dong || '' }, input, photos: clone(d.photos), draftKey: d.storageId };
@@ -252,15 +298,18 @@
     d.pending = job.id; lockForm(form, true); button.disabled = true;
     try {
       await writeDraft(d, 'workDraft'); job.draftKey = d.storageId;
+      requireOwner(owner);
       const result = await submit(job, '작업 등록 · ' + input.title);
+      if (!ownsContext(owner)) return;
       if (result.state === 'synced') await clearWorkDraft(d, 'workDraft');
       if (form.isConnected && Q('#woNewForm') === form) api.closeSheet();
       await load(true);
     } catch (error) {
-      const queued = (await root.DGOffline.jobs().catch(() => [])).some(j => j.id === job.id);
-      if (!queued) { d.pending = null; await writeDraft(d, 'workDraft').catch(() => {}); }
+      if (!ownsContext(owner)) throw error;
+      await recoverRejected(job, d, 'workDraft', form);
+      if (ownerForm(d, 'workDraft') === form && Q('#woSaveState')) Q('#woSaveState').textContent = error.message + ' 입력을 유지했어요. 연결할 신고를 다시 선택하거나 기존 작업을 확인해 주세요.';
       throw error;
-    } finally { if (form.isConnected) { lockForm(form, !!d.pending); button.disabled = !!d.pending; } }
+    } finally { if (ownsContext(owner) && form.isConnected) { lockForm(form, !!d.pending); button.disabled = !!d.pending; } }
   }
   async function submit(job, summary) {
     if (!root.DGOffline.ready) throw new Error('저장 대기함을 준비하는 중이에요.');
@@ -270,6 +319,153 @@
     else api.toast(root.DGOffline.durable ? '기기에 보관했어요. 연결되면 전송해요.' : '전송을 기다리고 있어요. 완료 전에는 이 창을 닫지 마세요.');
     await refreshQueue(); return result;
   }
+  const editable = order => !!order && ['draft', 'assigned', 'in_progress', 'completed'].includes(order.status);
+  async function linkedReport(ids) {
+    for (const id of ids) {
+      const snap = await api.database().doc('reports/' + id).get(), report = snap?.exists !== false && snap?.data();
+      if (!report?.workId) continue;
+      const work = await readOrder(report.workId);
+      if (work && editable(work)) return work;
+    }
+    return null;
+  }
+  function plannedRows(values) {
+    return values.map((part, index) => '<tr><td>' + E(part.name) + (part.inventoryId ? '<small>재고 연동</small>' : '') + '</td><td>' + part.qty + '</td><td>' + Number(part.unitCost).toLocaleString() + '</td><td><button type="button" class="btn ghost sm" data-dg="remove-planned-part" data-index="' + index + '">빼기</button></td></tr>').join('');
+  }
+  function plannedEditor(values) {
+    return '<h3>예정 자재</h3><p class="muted">준비할 자재와 수량을 기록해요. 실제 사용량은 완료 요청에서 확인하며, 재고는 검수 승인 때만 차감돼요.</p><label class="f" for="woPlanStockPart">등록 자재</label><select class="f-in" id="woPlanStockPart"><option value="">직접 입력</option>' + state.inventory.map(item => '<option value="' + E(item.id) + '">' + E(item.name) + ' · 재고 ' + item.quantity + E(item.unit) + '</option>').join('') + '</select><label class="f" for="woPlanPartName">자재명</label><input class="f-in" id="woPlanPartName" maxlength="100"><div class="grid2"><div><label class="f" for="woPlanPartQty">예정 수량</label><input class="f-in" id="woPlanPartQty" type="number" min="0.001" step="0.001" value="1"></div><div><label class="f" for="woPlanPartCost">단가 (원)</label><input class="f-in" id="woPlanPartCost" type="number" min="0" value="0"></div></div><button type="button" class="btn ghost sm" data-dg="add-planned-part">예정 자재 추가</button><div class="dg-table"><table><thead><tr><th>자재</th><th>예정 수량</th><th>단가</th><th>관리</th></tr></thead><tbody id="woPlannedParts">' + plannedRows(values) + '</tbody></table></div>';
+  }
+  function readEdit() {
+    const d = state.edit; if (!d || d.pending || !ownerForm(d, 'workEdit')) return d;
+    Object.assign(d, { title: Q('#woEditTitle').value, description: Q('#woEditDescription').value, type: Q('#woEditType').value, priority: Q('#woEditPriority').value, assignedTo: Q('#woEditAssignee').value, dueAt: dueValue(Q('#woEditDue').value) });
+    return d;
+  }
+  async function persistEdit() { const d = state.edit; if (d && !d.pending && ownerForm(d, 'workEdit')) await writeDraft(readEdit(), 'workEdit'); }
+  async function openEdit(id, resumeId) {
+    if (!admin() || !supported()) return api.toast('작업 정보는 관리자만 수정할 수 있어요.');
+    const request = ++editorRequest, owner = captureOwner(), current = () => request === editorRequest && ownsContext(owner);
+    await persistActive(); if (!current()) return;
+    await load(); if (!current()) return;
+    const order = await readOrder(id); if (!current()) return;
+    const saved = await owner.offline.get('workEdit', resumeId || id); if (!current()) return;
+    if (!editable(order)) return saved && order ? showEditConflict(saved, order, resumeId || id, owner) : api.toast('미완료 작업의 정보만 수정할 수 있어요.');
+    if (saved && saved.expectedRevision !== order.revision) return showEditConflict(saved, order, resumeId || id, owner);
+    const d = saved || editFromOrder(order);
+    adoptDraft(d, 'workEdit', saved ? resumeId || id : id, !!saved);
+    state.edit = d; state.editOrder = order; editConflict = null;
+    if (!saved) await writeDraft(d, 'workEdit');
+    if (!current()) return;
+    renderEdit(d, order);
+  }
+  function editFromOrder(order) {
+    return { workId: order.id, lightId: order.lightId, expectedRevision: order.revision, title: order.title, description: order.description || '', type: order.type, priority: order.priority, assignedTo: order.assignedTo, dueAt: order.dueAt, parts: clone(order.parts || []), orderStatus: order.status };
+  }
+  function renderEdit(d, order) {
+    const id = order.id;
+    api.navigate(heading('작업 정보 수정', order.code + ' · ' + C.STATES[order.status] + ' 상태를 유지해요.') + '<div class="panel" id="woEditForm" data-draft-id="' + E(d.storageId) + '" data-editor-token="' + E(editorTokens.get(d)) + '"><fieldset style="border:0;padding:0;margin:0;min-width:0"' + (d.pending ? ' disabled' : '') + '><label class="f" for="woEditTitle">작업 제목</label><input class="f-in" id="woEditTitle" maxlength="120" value="' + E(d.title) + '"><label class="f" for="woEditDescription">작업 내용</label><textarea class="f-in" id="woEditDescription" maxlength="2000">' + E(d.description) + '</textarea><div class="grid2"><div><label class="f" for="woEditType">작업 종류</label><select class="f-in" id="woEditType">' + options(C.TYPES, d.type) + '</select></div><div><label class="f" for="woEditPriority">우선순위</label><select class="f-in" id="woEditPriority">' + options(C.PRIORITIES, d.priority) + '</select></div></div><label class="f" for="woEditAssignee">담당자</label><select class="f-in" id="woEditAssignee">' + staffOptions(d.assignedTo) + '</select><label class="f" for="woEditDue">완료 기한 (비우면 기한 해제)</label><input class="f-in" type="date" id="woEditDue" value="' + dateInput(d.dueAt) + '">' + (order.status !== 'completed' ? plannedEditor(d.parts || []) : '<p class="muted">검수 대기 중인 작업의 실제 자재 내역은 보완 요청 후 변경할 수 있어요.</p>') + '<button class="btn sodium block" data-dg="save-work-edit">정보 수정 저장</button></fieldset><p class="muted" id="woEditState" role="status">' + (d.pending ? '저장 대기함에서 전송 결과를 확인 중이에요.' : '입력 내용을 자동 보관해요. 시설·신고·사진·처리 상태는 유지돼요.') + '</p><button class="btn ghost block" data-dg="open-work" data-id="' + E(id) + '">작업 상세 확인</button></div>', { key: 'work:edit:' + id, reopen: () => openEdit(id, d.storageId) });
+  }
+  function showEditConflict(saved, order, key, owner) {
+    if (!ownsContext(owner)) return;
+    const token = uuid('work-edit-compare');
+    editConflict = { token, saved: clone(saved), order: clone(order), key, owner };
+    state.edit = null;
+    const fields = [['title', '제목'], ['description', '작업 내용'], ['type', '종류'], ['priority', '우선순위'], ['assignedTo', '담당자'], ['dueAt', '완료 기한'], ['parts', '자재 내역']];
+    const value = (record, field) => field === 'assignedTo' ? label(record[field]) : field === 'dueAt' ? time(record[field]) : field === 'parts' ? (record.parts || []).map(part => part.name + ' · ' + part.qty + ' × ' + part.unitCost + '원').join('\n') || '없음' : String(record[field] || '없음');
+    const rows = fields.map(([field, title]) => { const previous = value(saved, field), latest = value(order, field); return '<tr><th scope="row">' + E(title) + (previous !== latest ? '<small class="dg-conflict">다름</small>' : '') + '</th><td class="dg-pre">' + E(previous) + '</td><td class="dg-pre">' + E(latest) + '</td></tr>'; }).join('');
+    api.navigate(heading('이전 입력과 최신 작업 비교', order.code + ' · 현재 ' + C.STATES[order.status]) + '<div class="panel" id="woEditConflict" data-token="' + E(token) + '"><p class="notice">작성한 뒤 작업이 변경됐어요. 보관된 입력과 최신 내용을 비교해 주세요. 이전 입력으로 이어 수정하면 아래의 이전 값들을 새 수정안으로 사용하며, 저장하기 전까지 실제 작업에는 반영되지 않아요.</p><div class="dg-table"><table><thead><tr><th>항목</th><th>보관된 이전 입력</th><th>최신 저장 내용</th></tr></thead><tbody>' + rows + '</tbody></table></div><p class="muted">이전 초안은 새 수정안이 저장될 때까지 유지해요.' + (order.status === 'completed' ? ' 검수 대기 작업의 실제 자재 내역은 최신 내용을 유지해요.' : '') + (!editable(order) ? ' 완료·취소된 작업은 현재 상태에서 수정할 수 없어요.' : '') + '</p><div class="split"><button class="btn sodium" data-dg="resume-stale-work-edit"' + (!editable(order) ? ' disabled' : '') + '>이전 입력으로 이어 수정</button><button class="btn ghost" data-dg="edit-latest-work"' + (!editable(order) ? ' disabled' : '') + '>최신 내용으로 새로 수정</button><button class="btn ghost" data-dg="open-work" data-id="' + E(order.id) + '">작업 상세 확인</button></div></div>', { key: 'work:compare:' + order.id, reopen: () => openEdit(order.id, key) });
+  }
+  async function resumeStaleEdit(previousValues) {
+    const comparison = editConflict, form = Q('#woEditConflict');
+    if (!comparison || !form || form.dataset.token !== comparison.token || !ownsContext(comparison.owner)) return;
+    const request = ++editorRequest, { owner, key } = comparison;
+    const current = () => editConflict === comparison && request === editorRequest && ownsContext(owner) && form.isConnected;
+    const order = await readOrder(comparison.order.id); if (!current()) return;
+    const saved = await owner.offline.get('workEdit', key); if (!current()) return;
+    if (!saved) return api.toast('이전 초안이 정리됐어요. 저장 대기함을 새로고침해 주세요.');
+    if (order?.revision !== comparison.order.revision || (saved.draftRevision || 0) !== (comparison.saved.draftRevision || 0)) return openEdit(comparison.order.id, key);
+    if (!editable(order)) return openEdit(order.id, key);
+    if (saved.pending) {
+      const jobs = await owner.offline.jobs(); if (!current()) return;
+      if (jobs.some(job => job.id === saved.pending && job.state !== 'synced')) return api.toast('이전 초안의 저장 대기 작업을 먼저 확인하거나 폐기해 주세요.');
+    }
+    const sourceRevision = saved.draftRevision || 0, recoveryKey = 'work-edit-recovery:' + key + ':d' + sourceRevision + ':r' + order.revision + ':' + (previousValues ? 'previous' : 'latest');
+    const existing = await owner.offline.get('workEdit', recoveryKey); if (!current()) return;
+    const d = existing || editFromOrder(order);
+    if (!existing && previousValues) for (const field of ['title', 'description', 'type', 'priority', 'assignedTo', 'dueAt', ...(order.status === 'completed' ? [] : ['parts'])]) if (saved[field] !== undefined) d[field] = clone(saved[field]);
+    d.recoverySource = { id: key, revision: sourceRevision };
+    adoptDraft(d, 'workEdit', recoveryKey, !!existing);
+    state.edit = d; state.editOrder = order;
+    if (!existing) await writeDraft(d, 'workEdit');
+    if (!current()) return;
+    editConflict = null;
+    renderEdit(d, order);
+  }
+  async function recoverRejected(job, d, kind, form) {
+    const owner = draftOwner(d); if (!ownsContext(owner)) return;
+    const queued = (await owner.offline.jobs().catch(() => [])).find(row => row.id === job.id);
+    if (!ownsContext(owner)) return;
+    if (queued?.state === 'conflict') { await owner.offline.discard(job.id); if (!ownsContext(owner)) return; }
+    if (!queued || queued.state === 'conflict') { d.pending = null; await writeDraft(d, kind).catch(() => {}); if (form.isConnected) lockForm(form, false); }
+  }
+  async function saveEdit(button) {
+    const d = readEdit(), form = ownerForm(d, 'workEdit'), order = state.editOrder;
+    if (!form || d.pending || !order || order.id !== d.workId) return;
+    const owner = draftOwner(d); requireOwner(owner);
+    const request = editorRequest;
+    const input = Object.fromEntries(['title', 'description', 'type', 'priority', 'assignedTo', 'dueAt'].map(key => [key, d[key]]));
+    input.expectedRevision = d.expectedRevision;
+    if (order.status !== 'completed') input.parts = clone(d.parts || []);
+    C.updateOrder(order, input, api.state().me, admin(), Date.now());
+    const job = { id: uuid('work-update'), kind: 'update', workId: d.workId, actor: api.state().me, at: Date.now(), input, draftKey: d.storageId };
+    d.pending = job.id; lockForm(form, true);
+    try {
+      await writeDraft(d, 'workEdit'); job.draftKey = d.storageId;
+      requireOwner(owner);
+      const result = await submit(job, '작업 정보 수정 · ' + d.title);
+      if (!ownsContext(owner)) return;
+      if (result.state === 'synced') { await clearWorkDraft(d, 'workEdit', { delivered: true }); await load(true); if (request === editorRequest && form.isConnected && Q('#woEditForm') === form) await openWork(d.workId); }
+      else if (form.isConnected && Q('#woEditState')) Q('#woEditState').textContent = '저장 대기함에서 전송 결과를 확인해 주세요.';
+    } catch (error) {
+      if (!ownsContext(owner)) throw error;
+      await recoverRejected(job, d, 'workEdit', form);
+      if (ownerForm(d, 'workEdit') === form && Q('#woEditState')) Q('#woEditState').textContent = error.message + ' 입력은 유지했어요. 작업 상세에서 최신 내용을 확인해 주세요.';
+      throw error;
+    } finally { if (ownsContext(owner) && form.isConnected) { lockForm(form, !!d.pending); button.disabled = !!d.pending; } }
+  }
+  function bulkResults(batch) {
+    return batch.results.map(row => '<div class="hist"><b>' + E(row.title) + '</b><p>' + E(row.result) + '</p><button class="btn ghost sm" data-dg="open-work" data-id="' + E(row.id) + '">작업 상세 확인</button></div>').join('');
+  }
+  async function openBulk() {
+    if (!admin() || !supported() || !state.workPick.size) return api.toast('수정할 작업을 목록에서 선택해 주세요.');
+    await persistActive();
+    const batch = state.bulk = { actor: api.state().me, namespace: root.DGOffline.namespace, orders: [...state.workPick.values()].map(clone), results: [], pending: false };
+    api.navigate(heading('선택 작업 일괄 수정', batch.orders.length + '건 · 담당자 지정 시 배정 대기는 배정 처리해요.') + '<div class="panel" id="woBulkForm"><fieldset style="border:0;padding:0;margin:0;min-width:0"><p>' + batch.orders.map(order => E(order.title)).join('<br>') + '</p><label class="f" for="woBulkAssignee">담당자</label><select class="f-in" id="woBulkAssignee"><option value="__keep__">변경하지 않음</option>' + staffOptions('') + '</select><label class="f" for="woBulkPriority">우선순위</label><select class="f-in" id="woBulkPriority"><option value="">변경하지 않음</option>' + options(C.PRIORITIES, '') + '</select><label class="f" for="woBulkDueMode">완료 기한</label><select class="f-in" id="woBulkDueMode"><option value="keep">변경하지 않음</option><option value="set">날짜 지정</option><option value="clear">기한 해제</option></select><label class="f" for="woBulkDue">지정할 날짜</label><input class="f-in" type="date" id="woBulkDue"><p class="muted">선택한 버전으로 작업별 저장해요. 충돌한 작업은 상세를 확인하고 목록에서 다시 선택해 주세요.</p><button class="btn sodium block" data-dg="save-bulk-work">선택 작업에 적용</button></fieldset><div id="woBulkResults" role="status"></div></div>', { key: 'work:bulk', reopen: () => openBulk() });
+  }
+  async function saveBulk(button) {
+    const batch = state.bulk, form = Q('#woBulkForm'); if (!batch || batch.pending || !form || !admin()) return;
+    const input = {}, assignee = Q('#woBulkAssignee').value, priority = Q('#woBulkPriority').value, dueMode = Q('#woBulkDueMode').value;
+    if (assignee !== '__keep__') input.assignedTo = assignee;
+    if (priority) input.priority = priority;
+    if (dueMode === 'clear') input.dueAt = 0;
+    if (dueMode === 'set') { if (!Q('#woBulkDue').value) throw new Error('완료 기한 날짜를 선택해 주세요.'); input.dueAt = dueValue(Q('#woBulkDue').value); }
+    if (!Object.keys(input).length) throw new Error('변경할 담당자·기한·우선순위 중 하나를 선택해 주세요.');
+    batch.pending = true; batch.results = []; lockForm(form, true);
+    try {
+      for (const order of batch.orders) {
+        if (batch.actor !== api.state().me || batch.namespace !== root.DGOffline.namespace) throw new Error('계정이 바뀌어 나머지 작업을 중단했어요.');
+        const job = { id: uuid('work-bulk'), kind: order.status === 'draft' && input.assignedTo ? 'assign' : 'update', workId: order.id, actor: batch.actor, at: Date.now(), input: { ...input, expectedRevision: order.revision } };
+        let result;
+        try {
+          C.updateOrder(order, job.input, batch.actor, admin(), job.at);
+          result = await submit(job, '일괄 정보 수정 · ' + order.title);
+          batch.results.push({ id: order.id, title: order.title, result: result.state === 'synced' ? '저장 완료' : '저장 대기함에 보관 · 전송 결과 확인 필요' });
+          state.workPick.delete(order.id);
+        } catch (error) { batch.results.push({ id: order.id, title: order.title, result: '미반영 · 충돌 또는 입력 확인: ' + error.message }); }
+        if (state.bulk === batch && form.isConnected && Q('#woBulkResults')) Q('#woBulkResults').innerHTML = bulkResults(batch);
+      }
+      await load(true);
+    } finally { batch.pending = false; if (form.isConnected) { lockForm(form, true); button.disabled = true; } }
+  }
   function partRows(values) {
     return (values || []).map((p, i) => '<tr><td>' + E(p.name) + (p.inventoryId ? '<small>재고 연동</small>' : '') + '</td><td>' + p.qty + '</td><td>' + p.unitCost.toLocaleString() + '</td><td><button class="btn ghost sm" data-dg="remove-part" data-index="' + i + '">삭제</button></td></tr>').join('');
   }
@@ -277,7 +473,7 @@
     const owned = () => !navigation.isCurrent || navigation.isCurrent();
     if (!owned()) return;
     const gen = api.navGen ? api.navGen() : null, alive = () => gen === null || api.navAlive(gen);
-    const request = ++editorRequest, current = () => request === editorRequest && owned() && alive();
+    const request = ++editorRequest, owner = captureOwner(), current = () => request === editorRequest && owned() && alive() && ownsContext(owner);
     await persistActive(); if (!current()) return;
     await load(); if (!current()) return;
     const order = await readOrder(id); if (!current()) return;
@@ -298,9 +494,9 @@
     const allowed = C.actions(order, api.state().me, admin());
     api.navigate(heading(order.title, order.code + ' · ' + C.STATES[order.status]) + '<div class="panel dg-work-detail" id="woDetail" data-draft-id="' + E(completion.storageId) + '" data-editor-token="' + E(editorTokens.get(completion)) + '"><fieldset style="border:0;padding:0;margin:0;min-width:0"' + (completion.pending ? ' disabled' : '') + '>' +
       '<p>' + E(order.description || '추가 작업 내용 없음') + '</p><p><b>담당</b> ' + E(label(order.assignedTo)) + ' · <b>기한</b> ' + time(order.dueAt) + ' · <b>우선순위</b> ' + E(order.priority) + '</p>' +
-      '<button class="btn ghost sm" data-light="' + E(order.lightId) + '">시설 점검 열기</button><h3>조치 전·후 증빙</h3><div id="woEvidence" class="pstrip" aria-live="polite">사진 불러오는 중…</div>' +
+      (admin() && editable(order) ? '<button class="btn ghost sm" data-dg="edit-work" data-id="' + E(id) + '">작업 정보 수정</button>' : '') + '<button class="btn ghost sm" data-light="' + E(order.lightId) + '">시설 점검 열기</button><h3>조치 전·후 증빙</h3><div id="woEvidence" class="pstrip" aria-live="polite">사진 불러오는 중…</div>' +
       (order.completionNote ? '<h3>조치 내용</h3><p class="dg-pre">' + E(order.completionNote) + '</p>' : '') +
-      '<p>자재 비용 ' + Number(order.costTotal || 0).toLocaleString() + '원</p>' + (order.measurements || []).map(m => '<p>실측 조도 ' + E(m.lux) + ' lux · ' + time(m.at) + ' · ' + E(m.note) + '</p>').join('') +
+      ((order.parts || []).length ? '<h3>' + (['draft', 'assigned', 'in_progress'].includes(order.status) ? '예정 자재' : '기록한 사용 자재') + '</h3><div class="dg-table"><table><thead><tr><th>자재</th><th>수량</th><th>단가 (원)</th></tr></thead><tbody>' + order.parts.map(part => '<tr><td>' + E(part.name) + (part.inventoryId ? '<small>재고 연동</small>' : '') + '</td><td>' + E(part.qty) + '</td><td>' + Number(part.unitCost).toLocaleString() + '</td></tr>').join('') + '</tbody></table></div>' : '') + '<p>' + (['draft', 'assigned', 'in_progress'].includes(order.status) ? '예정 자재 비용 ' : '자재 비용 ') + Number(order.costTotal || 0).toLocaleString() + '원</p>' + (order.measurements || []).map(m => '<p>실측 조도 ' + E(m.lux) + ' lux · ' + time(m.at) + ' · ' + E(m.note) + '</p>').join('') +
       (order.verificationNote ? '<p class="notice">검수 의견: ' + E(order.verificationNote) + '</p>' : '') +
       (admin() && allowed.includes('assigned') ? '<label class="f" for="woReassign">담당자</label><select class="f-in" id="woReassign">' + staffOptions(order.assignedTo) + '</select><label class="f" for="woNewDue">완료 기한</label><input class="f-in" type="date" id="woNewDue" value="' + dateInput(order.dueAt) + '">' : '') +
       (allowed.includes('completed') ? '<h3>작업 완료 요청</h3><label class="f" for="woCompletionNote">조치 내용</label><textarea class="f-in" id="woCompletionNote" maxlength="2000">' + E(completion.note) + '</textarea><label class="f" for="woAfter">조치 후 사진 (필수, 최대 6장)</label><input type="file" id="woAfter" accept="image/*" multiple><div id="woAfterPreview" class="pstrip">' + photoPreviews(completion.photos) + '</div><p id="woPhotoNotice" class="muted" role="status"></p>' +
@@ -321,30 +517,36 @@
   async function transitionWork(button) {
     const order = state.currentOrder, d = state.completion, form = ownerForm(d, 'workCompletion');
     if (!order || order.id !== button.dataset.id || !form || d.pending) return;
+    const owner = draftOwner(d); requireOwner(owner);
     if (d.photoTasks) return api.toast('첨부 사진을 처리한 뒤 저장해 주세요.');
     const target = button.dataset.status;
     if (Q('#woCompletionNote')) await persistCompletion();
-    if (ownerForm(d, 'workCompletion') !== form || state.currentOrder !== order) return;
+    if (!ownsContext(owner) || ownerForm(d, 'workCompletion') !== form || state.currentOrder !== order) return;
     const input = { expectedRevision: order.revision, ...(Q('#woReassign') ? { assignedTo: Q('#woReassign').value, dueAt: dueValue(Q('#woNewDue').value) } : {}),
       completionNote: d.note, afterPhotos: [...(d.existingPhotos || []), ...d.photos.map(p => p.id)],
       parts: clone(d.parts), measurements: clone(d.measurements), verificationNote: Q('#woVerification') ? Q('#woVerification').value : '' };
     C.transition(order, target, input, api.state().me, admin(), Date.now());
     if (['cancelled', 'verified'].includes(target) && !await ask(target === 'verified' ? '조치 후 원본 사진과 조치 내용을 확인했나요? 검수 승인 시 연결된 자재 재고도 반영돼요.' : '이 작업을 취소해요. 처리 이력은 유지돼요.', target === 'verified' ? { title: '검수 승인', ok: '확인했어요, 승인' } : { title: '작업을 취소할까요?', ok: '작업 취소', cancel: '돌아가기', danger: true })) return;
-    const job = { id: uuid('command'), kind: 'transition', workId: order.id, target, actor: api.state().me, at: Date.now(), input, photos: target === 'completed' ? clone(d.photos) : [], facilityStatus: Q('#woFacilityStatus') ? Q('#woFacilityStatus').value : '', lightUpdatedAt: state.lightVersion, closeReports: !!(Q('#woCloseReports') && Q('#woCloseReports').checked), draftKey: d.storageId };
+    requireOwner(owner);
+    const job = { id: uuid('command'), kind: 'transition', workId: order.id, target, actor: owner.actor, at: Date.now(), input, photos: target === 'completed' ? clone(d.photos) : [], facilityStatus: Q('#woFacilityStatus') ? Q('#woFacilityStatus').value : '', lightUpdatedAt: state.lightVersion, closeReports: !!(Q('#woCloseReports') && Q('#woCloseReports').checked), draftKey: d.storageId };
     if (job.closeReports) job.reportVersions = { ...state.reportVersions };
     d.pending = job.id; lockForm(form, true); button.disabled = true;
     try {
       await writeDraft(d, 'workCompletion'); job.draftKey = d.storageId;
+      requireOwner(owner);
       const result = await submit(job, C.STATES[target] + ' · ' + order.title);
+      if (!ownsContext(owner)) return;
       if (result.state === 'synced') {
         await clearWorkDraft(d, 'workCompletion'); await load(true);
         if (form.isConnected && Q('#woDetail') === form) await openWork(order.id, undefined, { isCurrent: () => form.isConnected && Q('#woDetail') === form && Q('#sheet')?.classList.contains('open') && state.currentOrder === order });
       } else if (form.isConnected && Q('#woDetail') === form) api.closeSheet();
     } catch (error) {
+      if (!ownsContext(owner)) throw error;
       const queued = (await root.DGOffline.jobs().catch(() => [])).some(j => j.id === job.id);
+      if (!ownsContext(owner)) throw error;
       if (!queued) { d.pending = null; await writeDraft(d, 'workCompletion').catch(() => {}); }
       throw error;
-    } finally { if (form.isConnected) { lockForm(form, !!d.pending); button.disabled = !!d.pending; } }
+    } finally { if (ownsContext(owner) && form.isConnected) { lockForm(form, !!d.pending); button.disabled = !!d.pending; } }
   }
   function dueLights() {
     const now = Date.now(), days = Number(state.settings.inspectionDays) || 90;
@@ -374,6 +576,9 @@
   }
   /* 다음 N곳 경로: several stops as waypoints in one map app route, starting from the device's current position */
   async function routeAhead(plan) {
+    const field = !root.DEV || root.DEV.field;
+    if (field && !state.pos) await locate();
+    Object.assign(plan, C.reconcilePlan(plan, api.byId));
     const done = plan.stops.map(s => stopDone(plan, s)), ahead = plan.stops.filter((s, i) => !done[i]).slice(0, ROUTE_STOPS);
     if (!ahead.length) return api.toast('남은 방문지가 없어요.');
     const dest = ahead[ahead.length - 1], via = ahead.slice(0, -1), name = s => encodeURIComponent(s.code || '방문지'), ll = s => s.lat + ',' + s.lng;
@@ -381,8 +586,6 @@
     const google = mode => 'https://www.google.com/maps/dir/?api=1&destination=' + ll(dest) + (via.length ? '&waypoints=' + encodeURIComponent(via.map(ll).join('|')) : '') + '&travelmode=' + mode;
     // 카카오맵 app route: sp (start) is required and takes coordinates only, waypoints vp, vp2 … vp5 (none for public transit).
     // The start is my position when known; otherwise the first stop becomes the start and the rest stay waypoints.
-    const field = !root.DEV || root.DEV.field;
-    if (field && !state.pos) await locate();
     const start = state.pos || null, kVia = start ? via : via.slice(1), kStart = start || ahead[0];
     const kakao = mode => 'kakaomap://route?sp=' + ll(kStart) + kVia.map((s, i) => '&vp' + (i ? i + 1 : '') + '=' + ll(s)).join('') + '&ep=' + ll(dest) + '&by=' + mode;
     const kakaoHint = (start ? '내 위치에서 출발' : ahead.length > 1 ? '위치를 몰라 ' + (ahead[0].code || '첫 방문지') + '에서 출발' : '') + ' · 경유지 ' + kVia.length + '곳';
@@ -390,9 +593,13 @@
     const options = field ? [{ value: naver('car'), label: '네이버 지도 · 차량', hint: '앱이 설치된 경우 · 경유지 ' + via.length + '곳' }, ...(ahead.length > 1 ? [{ value: kakao('car'), label: '카카오맵 · 차량', hint: '앱이 설치된 경우 · ' + kakaoHint }, { value: kakao('foot'), label: '카카오맵 · 도보', hint: '앱이 설치된 경우 · ' + kakaoHint }] : []), { value: google('driving'), label: '구글 지도 · 차량' }, { value: google('walking'), label: '구글 지도 · 도보' }]
       : [{ value: google('driving'), label: '구글 지도 (웹) · 차량', hint: '경유지 ' + via.length + '곳 · 네이버·카카오 경유지 경로는 휴대폰 앱에서 열려요' }, { value: google('walking'), label: '구글 지도 (웹) · 도보' }];
     const url = root.DGDialog ? await root.DGDialog.choose(ahead.map(s => s.code).join(' → '), { title: '다음 ' + ahead.length + '곳을 한 경로로 열까요?', options }) : options.find(o => o.value.startsWith('https:')).value;
+    if (url && ahead.some(stop => { const current = api.byId(stop.id); return !current || current.removed || current.posApprox || current.lat !== stop.lat || current.lng !== stop.lng; })) {
+      Object.assign(plan, C.reconcilePlan(plan, api.byId)); await root.DGOffline.put('plan', 'current', plan); notify(); return api.toast('시설 위치가 바뀌었어요. 좌표 확인 후 경로를 다시 열어 주세요.');
+    }
     if (url) root.open(url, '_blank', 'noopener');
   }
   function dueView() {
+    if (state.plan) Object.assign(state.plan, C.reconcilePlan(state.plan, api.byId));
     ensure(); const rows = dueLights(), plan = state.plan, shown = rows.slice(0, state.dueShow);
     state.planPick = new Set([...state.planPick].filter(id => api.byId(id) && !api.byId(id).removed));
     const picked = state.planPick.size, near = state.dueSort === 'near' && !!state.pos;
@@ -400,30 +607,33 @@
       '<h2 id="dgDueTargets">점검 대상 고르기</h2><div class="panel"><p>점검 주기 ' + (Number(state.settings.inspectionDays) || 90) + '일 · 단순 순찰 통과는 항목별 점검과 구분해요.</p><div class="grid2"><select class="f-in" id="dgDueDong" aria-label="대상 행정동">' + api.dongOptions(state.dueDong) + '</select><select class="f-in" id="dgDueFilter" aria-label="점검 상태">' + Object.entries({ needed: '확인이 필요한 전체', never: '점검 기록 없음', overdue: '기한 초과', redo: '재점검 요청', all: '철거 제외 전체' }).map(([v, t]) => '<option value="' + v + '"' + (state.dueFilter === v ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>' +
       '<div class="split dg-quick"><button class="btn ghost sm" data-dg="due-sort" aria-pressed="' + near + '">' + (near ? '가까운 순 ✓' : '가까운 순으로') + '</button><button class="btn ghost sm" data-dg="pick-near">' + (near ? '가까운 10곳 선택' : '위 10곳 선택') + '</button><button class="btn ghost sm" data-dg="pick-all">보이는 ' + Math.min(shown.length, 200) + '곳 선택</button>' + (picked ? '<button class="btn ghost sm" data-dg="pick-none">선택 해제</button>' : '') + '</div>' +
       '<div class="split"><button class="btn ghost" data-dg="due-map">대상 지도</button><button class="btn sodium" data-dg="make-plan"' + (picked ? '' : ' disabled') + '>' + (picked ? '선택한 ' + picked + '곳 방문 계획' : '시설을 골라 방문 계획') + '</button></div><p class="muted">대상 ' + rows.length + '개 · 지도와 목록은 같은 조건을 사용해요.' + (near ? ' 내 위치(±' + Math.round(state.pos.acc || 0) + 'm) 기준 가까운 순이에요.' : '') + (picked > 200 ? ' 한 계획은 200곳까지라 앞의 200곳만 들어가요.' : '') + '</p></div>' +
-      '<div class="list">' + shown.map(({ light: l, inspection: ins, d }) => '<div class="dg-due-row' + (state.planPick.has(l.id) ? ' picked' : '') + '"><input type="checkbox" data-plan-light="' + E(l.id) + '"' + (state.planPick.has(l.id) ? ' checked' : '') + ' aria-label="' + E(l.code + ' 방문 계획에 선택') + '"><button class="light-row" data-light="' + E(l.id) + '"><b>' + E(l.code) + '</b><span class="chip st-' + E(l.status) + '">' + E(l.status) + '</span><small>' + E(ins.label) + ' · ' + E(l.dong) + '</small>' + (near && Number.isFinite(d) ? '<span class="dg-dist">' + fmtM(d) + '</span>' : '') + '</button></div>').join('') + '</div>' + (rows.length > state.dueShow ? '<button class="btn ghost block" data-dg="more-due">더 보기</button>' : '');
+      '<div class="list">' + shown.map(({ light: l, inspection: ins, d }) => '<div class="dg-due-row' + (state.planPick.has(l.id) ? ' picked' : '') + '"><input type="checkbox" data-plan-light="' + E(l.id) + '"' + (state.planPick.has(l.id) ? ' checked' : '') + ' aria-label="' + E(l.code + ' 방문 계획에 선택') + '"><button class="light-row" data-light="' + E(l.id) + '"><b>' + E(l.code) + '</b><span class="chip st-' + E(l.status) + '">' + E(l.status) + '</span><small>' + E(ins.label) + ' · ' + E(l.dong) + (l.posApprox ? ' · 좌표 확인 필요' : '') + '</small>' + (near && Number.isFinite(d) ? '<span class="dg-dist">' + fmtM(d) + '</span>' : '') + '</button></div>').join('') + '</div>' + (rows.length > state.dueShow ? '<button class="btn ghost block" data-dg="more-due">더 보기</button>' : '');
   }
   function planView(plan) {
     const done = plan.stops.map(s => stopDone(plan, s)), doneCount = done.filter(Boolean).length, nextIndex = done.indexOf(false), next = nextIndex >= 0 ? plan.stops[nextIndex] : null;
     const nextLight = next && api.byId(next.id), fromMe = next && state.pos ? C.distance(state.pos, next) : null;
     const pct = plan.stops.length ? Math.round(doneCount / plan.stops.length * 100) : 0, left = remaining(plan, done);
-    return '<h2>내 방문 계획 <span class="muted">' + doneCount + '/' + plan.stops.length + '곳</span></h2><div class="panel dg-plan">' +
+    const excluded = plan.excludedApproximate || [];
+    const positionNotice = excluded.length ? '<div class="notice"><b>좌표 확인 필요 ' + excluded.length + '곳</b><p>분전함 기준 추정 위치는 방문 순서에서 제외했어요. 시설 상세에서 실제 좌표를 확인한 뒤 다시 계획을 만들어 주세요.</p>' + excluded.slice(0, 10).map(l => '<button type="button" class="btn ghost sm" data-light="' + E(l.id) + '">' + E(l.code) + '</button>').join('') + (excluded.length > 10 ? '<p>제외 시설 전체 ' + excluded.length + '곳은 원래 대상 목록에서 확인할 수 있어요.</p>' : '') + '</div>' : '';
+    return positionNotice + ((plan.excludedUnavailable || []).length ? '<p class="notice">현재 대장 또는 좌표를 확인할 수 없는 시설 ' + plan.excludedUnavailable.length + '곳도 경로에서 제외했어요.</p>' : '') + '<h2>내 방문 계획 <span class="muted">' + doneCount + '/' + plan.stops.length + '곳</span></h2><div class="panel dg-plan">' +
       '<div class="dg-progress" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100" aria-label="방문 진행"><i style="width:' + pct + '%"></i></div>' +
       '<p>방문지 사이 직선 약 ' + fmtM(plan.distance) + (left.open.length && left.open.length < plan.stops.length || left.fromMe ? ' · 남은 ' + left.open.length + '곳 약 ' + fmtM(left.meters) + (left.fromMe ? '(내 위치부터)' : '') : '') + ' · ' + (plan.createdAt ? time(plan.createdAt) + ' 작성' : '') + (plan.filters ? ' · 보수 작업 조건에서 만든 계획' : '') + '</p>' +
-      (next ? '<div class="dg-plan-next"><small>다음 방문지 ' + (nextIndex + 1) + '/' + plan.stops.length + (fromMe != null ? ' · 내 위치에서 ' + fmtM(fromMe) : '') + '</small><b>' + E(next.code) + '</b> <span class="muted">' + E(next.dong) + (nextLight ? ' · ' + E(C.inspectionState(nextLight, Number(state.settings.inspectionDays) || 90, Date.now()).label) : '') + '</span><div class="split"><button class="btn sodium sm" data-light="' + E(next.id) + '">점검하기</button><button class="btn ghost sm" data-dg="plan-route" data-id="' + E(next.id) + '">길찾기</button><button class="btn ghost sm" data-dg="plan-visit" data-index="' + nextIndex + '">방문 완료</button></div></div>' : '<div class="dg-plan-next done"><b>모든 방문지를 마쳤어요.</b> <span class="muted">계획을 지우거나 새 계획을 만들 수 있어요.</span></div>') +
+      (next ? '<div class="dg-plan-next"><small>다음 방문지 ' + (nextIndex + 1) + '/' + plan.stops.length + (fromMe != null ? ' · 내 위치에서 ' + fmtM(fromMe) : '') + '</small><b>' + E(next.code) + '</b> <span class="muted">' + E(next.dong) + (nextLight ? ' · ' + E(C.inspectionState(nextLight, Number(state.settings.inspectionDays) || 90, Date.now()).label) : '') + '</span><div class="split"><button class="btn sodium sm" data-light="' + E(next.id) + '">점검하기</button><button class="btn ghost sm" data-dg="plan-route" data-id="' + E(next.id) + '">길찾기</button><button class="btn ghost sm" data-dg="plan-visit" data-index="' + nextIndex + '">방문 완료</button></div></div>' : (plan.stops.length ? '<div class="dg-plan-next done"><b>모든 방문지를 마쳤어요.</b> <span class="muted">계획을 지우거나 새 계획을 만들 수 있어요.</span></div>' : '<div class="dg-plan-next"><b>방문 순서를 만들 시설이 없어요.</b> <span class="muted">제외된 시설의 좌표를 확인하거나 대상을 다시 골라 주세요.</span></div>')) +
       '<p class="muted">직선 거리로 교차하는 구간을 줄여 제안한 방문 순서예요. 차량 통행·일방통행·도로 진입 경로는 현장에서 확인해 주세요. 방문 표시로 점검 결과가 바뀌지는 않아요. 계획을 만든 뒤 점검을 저장한 시설은 자동으로 완료로 표시돼요.</p>' +
-      '<div class="split">' + (left.open.length > 1 ? '<button class="btn ghost sm" data-dg="plan-route-ahead">다음 ' + Math.min(ROUTE_STOPS, left.open.length) + '곳 경로</button>' : '') + '<button class="btn ghost sm" data-dg="plan-map">계획 지도</button><button class="btn ghost sm" data-dg="plan-reorder">내 위치에서 다시 정렬</button><button class="btn ghost sm" data-dg="plan-csv">계획 CSV</button><button class="btn ghost sm" data-dg="clear-plan">계획 지우기</button></div>' +
+      '<div class="split">' + (left.open.length > 1 ? '<button class="btn ghost sm" data-dg="plan-route-ahead">다음 ' + Math.min(ROUTE_STOPS, left.open.length) + '곳 경로</button>' : '') + '<button class="btn ghost" data-ptplan>이 계획으로 야간 순찰</button><button class="btn ghost sm" data-dg="plan-map">계획 지도</button><button class="btn ghost sm" data-dg="plan-reorder">내 위치에서 다시 정렬</button><button class="btn ghost sm" data-dg="plan-csv">계획 CSV</button><button class="btn ghost sm" data-dg="clear-plan">계획 지우기</button></div>' +
       plan.stops.map((s, i) => '<div class="dg-plan-stop' + (done[i] ? ' done' : '') + (i === nextIndex ? ' next' : '') + '"><label><input type="checkbox" data-plan-visited="' + i + '"' + (s.visited ? ' checked' : '') + (done[i] && !s.visited ? ' disabled title="점검을 저장해 완료됐어요"' : '') + '> <span class="n">' + (i + 1) + '</span> <b>' + E(s.code) + '</b><small>' + E(s.dong) + (i ? (s.distanceFromPrevious < 15 ? ' · 앞 시설과 같은 자리' : ' · +' + fmtM(s.distanceFromPrevious)) : ' · 출발') + (done[i] && !s.visited ? ' · <span class="dg-auto">점검 완료</span>' : '') + '</small></label><span class="dg-plan-acts"><button class="btn ghost sm" data-light="' + E(s.id) + '">점검</button>' + (s.workIds || []).map((id, n) => '<button class="btn ghost sm" data-dg="open-work" data-id="' + E(id) + '">보수 ' + (n + 1) + '</button>').join('') + '<button class="btn ghost sm" data-dg="plan-up" data-index="' + i + '"' + (!i ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 위로">위로</button><button class="btn ghost sm" data-dg="plan-down" data-index="' + i + '"' + (i === plan.stops.length - 1 ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 아래로">아래로</button></span></div>').join('') + '</div>';
   }
   async function refreshQueue() {
     if (!root.DGOffline.ready) return;
-    state.jobs = await root.DGOffline.jobs();
-    const kinds = await Promise.all(['draft', 'patrol', 'workDraft', 'workCompletion', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(kind => root.DGOffline.list(kind)));
-    state.drafts = kinds.flat(); notify();
+    const owner = captureOwner(), jobs = await owner.offline.jobs(); if (!ownsContext(owner)) return;
+    const kinds = await Promise.all(['draft', 'patrol', 'patrolTargets', 'inventoryDraft', 'workDraft', 'workCompletion', 'workEdit', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(kind => owner.offline.list(kind)));
+    if (!ownsContext(owner)) return;
+    state.jobs = jobs; state.drafts = kinds.flat(); notify();
   }
   function queueView() {
     const statuses = { queued: '전송 대기', sending: '서버 확인 중', failed: '실패 · 재시도 가능', conflict: '변경 충돌 · 확인 필요', synced: '서버/저장소 반영 완료' };
     return '<div class="panel"><p>' + (root.DGOffline.durable ? '이 기기에 초안과 미전송 작업을 보관해요.' : '공유 기기 모드: 현재 창에서만 대기해요. 전송 완료를 확인한 뒤 닫아 주세요.') + '</p><div class="split"><button class="btn sodium" data-dg="retry-all">대기 작업 전송</button><button class="btn ghost" data-dg="queue-refresh">새로고침</button></div></div><h3>저장 작업 ' + state.jobs.filter(j => j.state !== 'synced').length + '건 대기</h3>' + (state.jobs.length ? state.jobs.map(j => '<div class="panel"><b>' + E(j.summary) + '</b><p>' + statuses[j.state] + ' · ' + time(j.updatedAt) + '</p>' + (j.error ? '<p class="notice">' + E(j.error) + '</p>' : '') + '<div class="split">' + (['queued', 'failed', 'conflict'].includes(j.state) ? '<button class="btn ghost sm" data-dg="retry-job" data-id="' + E(j.id) + '">재시도</button>' : '') + (j.state !== 'sending' ? '<button class="btn ghost sm" data-dg="discard-job" data-id="' + E(j.id) + '">' + (j.state === 'synced' ? '완료 목록에서 지우기' : '대기 작업 폐기') + '</button>' : '') + '</div></div>').join('') : '<div class="empty">대기 중인 저장 작업이 없어요.</div>') +
-      '<h3>작성 중인 초안</h3>' + state.drafts.map(d => '<div class="panel"><b>' + E(d.kind === 'draft' ? (api.byId(d.id) || {}).code || d.id : d.kind === 'patrol' ? '이전 순찰' : d.kind === 'lightingDraft' ? '외부 광원·현장 밝기 초안' : d.kind === 'lightingAreaDraft' ? '밝기 검토 구역 초안' : d.kind === 'lightingTaskDraft' ? '밝기 재확인 업무 초안' : (d.value?.title || (api.byId(d.value?.lightId) || {}).code || '보수 작업 초안')) + '</b><p class="muted">' + time(d.updatedAt) + '</p><div class="split"><button class="btn ghost sm" data-dg="recover-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '">이어 쓰기</button><button class="btn ghost sm" data-dg="discard-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '">초안 폐기</button></div></div>').join('');
+      '<h3>작성 중인 초안</h3>' + state.drafts.map(d => '<div class="panel"><b>' + E(d.kind === 'draft' ? (api.byId(d.id) || {}).code || d.id : d.kind === 'patrol' ? '이전 순찰' : d.kind === 'patrolTargets' ? '다음 순찰 대상' : d.kind === 'inventoryDraft' ? '자재 정보 수정 · ' + (d.value?.name || d.id) : d.kind === 'lightingDraft' ? '외부 광원·현장 밝기 초안' : d.kind === 'lightingAreaDraft' ? '밝기 검토 구역 초안' : d.kind === 'lightingTaskDraft' ? '밝기 재확인 업무 초안' : (d.value?.title || (api.byId(d.value?.lightId) || {}).code || '보수 작업 초안')) + '</b><p class="muted">' + time(d.updatedAt) + '</p><div class="split"><button class="btn ghost sm" ' + (d.kind === 'patrolTargets' ? 'data-ptnext' : 'data-dg="recover-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '"') + '>이어 쓰기</button><button class="btn ghost sm" data-dg="discard-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '">초안 폐기</button></div></div>').join('');
   }
   async function download(name, rows) {
     const cell = root.DGSecurity ? root.DGSecurity.csvCell : v => '"' + (/^[=+@\-\t\r\n]/.test(String(v || '')) ? "'" : '') + String(v == null ? '' : v).replace(/"/g, '""') + '"';
@@ -432,12 +642,28 @@
   async function handle(button) {
     const action = button.dataset.dg;
     if (action === 'new-work') return newWork(button.dataset.lightId, button.dataset.reportId);
+    if (action === 'resume-stale-work-edit') return resumeStaleEdit(true);
+    if (action === 'edit-latest-work') return resumeStaleEdit(false);
+    if (action === 'edit-work') return openEdit(button.dataset.id);
+    if (action === 'save-work-edit') return saveEdit(button);
+    if (action === 'bulk-work') return openBulk();
+    if (action === 'save-bulk-work') return saveBulk(button);
+    if (action === 'clear-work-pick') { state.workPick.clear(); return notify(); }
     if (action === 'open-work') return openWork(button.dataset.id);
     if (action === 'refresh') return load(true);
     if (action === 'more-work') { state.show += 60; if (state.hasMore) await load(false, true); return notify(); }
     if (action === 'create-work') return createWork(button);
     if (action === 'transition-work') return transitionWork(button);
     if (action === 'remove-work-photo') { const source = Q('#woNewForm') ? state.draft : state.completion; if (!source || source.pending) return; source.photos = source.photos.filter(p => p.id !== button.dataset.id); const box = Q(Q('#woNewForm') ? '#woBeforePreview' : '#woAfterPreview'); if (box) box.innerHTML = photoPreviews(source.photos); return Q('#woNewForm') ? persistNew() : persistCompletion(); }
+    if (action === 'add-planned-part' || action === 'remove-planned-part') {
+      const edit = !!Q('#woEditForm'), kind = edit ? 'workEdit' : 'workDraft', d = edit ? readEdit() : readNew();
+      if (!d || d.pending || !ownerForm(d, kind)) return;
+      if (edit && state.editOrder?.status === 'completed') return;
+      d.parts ||= [];
+      if (action === 'remove-planned-part') d.parts.splice(+button.dataset.index, 1);
+      else { const item = state.inventory.find(row => row.id === Q('#woPlanStockPart').value), name = item ? item.name : Q('#woPlanPartName').value; if (!name.trim()) throw new Error('자재명을 입력해 주세요.'); d.parts = C.parts([...d.parts, { name, qty: Number(Q('#woPlanPartQty').value), unitCost: Number(Q('#woPlanPartCost').value), ...(item ? { inventoryId: item.id } : {}) }]); }
+      Q('#woPlannedParts').innerHTML = plannedRows(d.parts); return writeDraft(d, kind);
+    }
     if (action === 'add-part') { const d = state.completion, item = state.inventory.find(x => x.id === Q('#woStockPart').value), value = { name: item ? item.name : Q('#woPartName').value, qty: Number(Q('#woPartQty').value), unitCost: Number(Q('#woPartCost').value), ...(item ? { inventoryId: item.id } : {}) }; if (!value.name.trim()) throw new Error('자재명을 입력해 주세요.'); d.parts = C.parts([...d.parts, value]); Q('#woParts').innerHTML = partRows(d.parts); return persistCompletion(); }
     if (action === 'remove-part') { state.completion.parts.splice(+button.dataset.index, 1); Q('#woParts').innerHTML = partRows(state.completion.parts); return persistCompletion(); }
     if (action === 'add-lux') { if (Q('#woLux').value === '') throw new Error('측정한 조도를 입력해 주세요.'); state.completion.measurements = C.measurements([...state.completion.measurements, { lux: Number(Q('#woLux').value), at: Date.now(), by: api.state().me, note: Q('#woLuxNote').value }]); Q('#woMeasurements').innerHTML = measureRows(state.completion.measurements); Q('#woLux').value = ''; return persistCompletion(); }
@@ -481,21 +707,27 @@
     if (action === 'retry-all') { await root.DGOffline.flush({ retry: true }); return refreshQueue(); }
     if (action === 'retry-job') { const result = await root.DGOffline.retry(button.dataset.id); api.toast(result.state === 'synced' ? '저장했어요.' : result.error || '전송을 기다리고 있어요.'); return refreshQueue(); }
     if (action === 'discard-job') {
+      const owner = captureOwner();
       if (!await ask('이 대기 항목을 지워요. 이미 서버에 반영된 기록은 삭제하지 않아요.', { title: '대기 항목을 지울까요?', ok: '지우기', danger: true })) return;
+      if (!ownsContext(owner)) return;
       const job = state.jobs.find(j => j.id === button.dataset.id);
       await root.DGOffline.discard(button.dataset.id);
       if (job && job.kind === 'work' && job.payload) await releasePending(job);
       return refreshQueue();
     }
-    if (action === 'recover-draft') { if (button.dataset.kind === 'lightingAreaDraft') return root.DGLightingAreas.openEditor(null, button.dataset.id, true); if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return api.openLight(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
+    if (action === 'recover-draft') { if (button.dataset.kind === 'inventoryDraft') return root.DGManagement.resumeInventoryDraft(button.dataset.id); if (button.dataset.kind === 'lightingAreaDraft') return root.DGLightingAreas.openEditor(null, button.dataset.id, true); if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return api.openLight(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workEdit') { const saved = await root.DGOffline.get('workEdit', button.dataset.id); return saved ? openEdit(saved.workId, button.dataset.id) : refreshQueue(); } if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
     if (action === 'discard-draft') {
+      const owner = captureOwner();
       if (!await ask('작성 중인 이 초안을 폐기할까요?', { ok: '폐기', danger: true })) return;
-      const kind = button.dataset.kind, id = button.dataset.id, saved = await root.DGOffline.get(kind, id);
+      if (!ownsContext(owner)) return;
+      const kind = button.dataset.kind, id = button.dataset.id, saved = await owner.offline.get(kind, id);
+      if (!ownsContext(owner)) return;
+      if (kind === 'inventoryDraft') { await root.DGManagement.discardInventoryDraft(id, { confirmed: true }); return refreshQueue(); }
       if (kind === 'lightingAreaDraft') { await root.DGLightingAreas.discardDraft(id); return refreshQueue(); }
       if (kind === 'lightingTaskDraft') { await root.DGLightingWorkflows.discardDraft(id); return refreshQueue(); }
       if (kind === 'lightingDraft') { const active = root.DGLighting.state.draft; await root.DGLighting.clearDraft(active?.recordId === id ? active : saved); return refreshQueue(); }
       if (kind === 'patrol' && saved) api.removePatrolDraft(saved.sessionId);
-      if (['workDraft', 'workCompletion'].includes(kind)) { const active = kind === 'workDraft' ? state.draft : state.completion; const owner = active?.storageId === id ? active : saved; if (owner) { owner.storageId = id; await clearWorkDraft(owner, kind); } return refreshQueue(); }
+      if (['workDraft', 'workCompletion', 'workEdit'].includes(kind)) { const active = kind === 'workDraft' ? state.draft : kind === 'workEdit' ? state.edit : state.completion; const owner = active?.storageId === id ? active : saved; if (owner) { owner.storageId = id; await clearWorkDraft(owner, kind); } return refreshQueue(); }
       await root.DGOffline.remove(kind, id); if (kind === 'draft') await api.removeDraft(id); return refreshQueue();
     }
   }
@@ -507,6 +739,7 @@
     document.addEventListener('input', e => {
       if (e.target.id === 'woLight') { const dl = Q('#woLightChoices'); if (dl) dl.innerHTML = lightSuggestions(e.target.value); }
       if (e.target.closest('#woNewForm') === ownerForm(state.draft, 'workDraft')) persistNew().catch(error => api.toast(error.message));
+      if (e.target.closest('#woEditForm') === ownerForm(state.edit, 'workEdit')) persistEdit().catch(error => api.toast(error.message));
       if (e.target.id === 'woCompletionNote') persistCompletion().catch(error => api.toast(error.message));
     });
     document.addEventListener('change', e => {
@@ -518,6 +751,7 @@
           state[names[e.target.id]] = ['woMine', 'woUrgent'].includes(e.target.id) ? e.target.checked : e.target.value;
           state.show = 40; state.error = ''; notify(); await load(true); return;
         }
+        if (e.target.dataset.workPick) { const id = e.target.dataset.workPick, order = state.orders.find(row => row.id === id); if (e.target.checked && editable(order)) state.workPick.set(id, clone(order)); else state.workPick.delete(id); const count = Q('#woPickCount'); if (count) count.textContent = '직접 선택한 작업 ' + state.workPick.size + '건'; for (const button of document.querySelectorAll('[data-dg="bulk-work"], [data-dg="clear-work-pick"]')) button.disabled = !state.workPick.size; e.target.closest('.dg-work-choice')?.classList.toggle('picked', e.target.checked); return; }
         if (e.target.id === 'woLight') {
           const d = readNew(), selected = lightMatch(e.target.value);
           if (!d || d.pending || !ownerForm(d, 'workDraft')) return;
@@ -527,6 +761,8 @@
           }
         }
         if (e.target.closest('#woNewForm') === ownerForm(state.draft, 'workDraft')) await persistNew();
+        if (e.target.closest('#woEditForm') === ownerForm(state.edit, 'workEdit')) await persistEdit();
+        if (e.target.id === 'woPlanStockPart') { const item = state.inventory.find(row => row.id === e.target.value); if (item) { Q('#woPlanPartName').value = item.name; Q('#woPlanPartCost').value = item.unitCost; } }
         if (e.target.id === 'woStockPart') { const item = state.inventory.find(x => x.id === e.target.value); if (item) { Q('#woPartName').value = item.name; Q('#woPartCost').value = item.unitCost; } }
         if (e.target.id === 'dgDueDong') { state.dueDong = e.target.value; state.dueShow = 60; notify(); }
         if (e.target.id === 'dgDueFilter') { state.dueFilter = e.target.value; state.dueShow = 60; notify(); }
@@ -537,10 +773,10 @@
     root.DGOffline.subscribe(event => {
       if (event.type === 'synced' && event.job.kind === 'work') {
         const payload = event.job.payload;
-        if (payload && (payload.kind === 'create' || payload.kind === 'transition')) {
-          const kind = payload.kind === 'create' ? 'workDraft' : 'workCompletion', active = kind === 'workDraft' ? state.draft : state.completion;
+        if (payload && (payload.kind === 'create' || payload.kind === 'transition' || payload.kind === 'update')) {
+          const kind = payload.kind === 'create' ? 'workDraft' : payload.kind === 'update' ? 'workEdit' : 'workCompletion', active = kind === 'workDraft' ? state.draft : kind === 'workEdit' ? state.edit : state.completion;
           const owner = active?.pending === event.job.id ? active : { id: payload.workId, workId: payload.workId, storageId: payload.draftKey || (kind === 'workDraft' ? 'new' : payload.workId), pending: event.job.id };
-          clearWorkDraft(owner, kind).catch(error => api.toast(error.message));
+          clearWorkDraft(owner, kind, { delivered: true }).catch(error => api.toast(error.message));
         }
         load(true);
       }
@@ -549,9 +785,11 @@
     });
   }
   async function releasePending(job) {
-    for (const kind of ['workDraft', 'workCompletion']) for (const entry of await root.DGOffline.list(kind)) {
+    const owner = captureOwner();
+    for (const kind of ['workDraft', 'workCompletion', 'workEdit']) for (const entry of await owner.offline.list(kind)) {
+      if (!ownsContext(owner)) return;
       if (entry.value?.pending !== job.id) continue;
-      const active = kind === 'workDraft' ? state.draft : state.completion;
+      const active = kind === 'workDraft' ? state.draft : kind === 'workEdit' ? state.edit : state.completion;
       const d = active?.storageId === entry.id ? active : adoptDraft(entry.value, kind, entry.id);
       d.pending = null; await writeDraft(d, kind);
       const form = ownerForm(d, kind); if (form) lockForm(form, false);
@@ -559,17 +797,21 @@
   }
   async function ready() {
     if (!root.DGOffline.ready) return;
-    state.plan = await root.DGOffline.get('plan', 'current');
-    const jobs = new Map((await root.DGOffline.jobs()).map(job => [job.id, job]));
-    for (const kind of ['workDraft', 'workCompletion']) for (const entry of await root.DGOffline.list(kind)) {
+    const owner = captureOwner(), savedPlan = await owner.offline.get('plan', 'current'); if (!ownsContext(owner)) return;
+    state.plan = savedPlan ? C.reconcilePlan(savedPlan, api.byId) : null;
+    if (savedPlan && JSON.stringify(savedPlan) !== JSON.stringify(state.plan)) await owner.offline.put('plan', 'current', state.plan);
+    if (!ownsContext(owner)) return;
+    const jobs = new Map((await owner.offline.jobs()).map(job => [job.id, job])); if (!ownsContext(owner)) return;
+    for (const kind of ['workDraft', 'workCompletion', 'workEdit']) for (const entry of await owner.offline.list(kind)) {
+      if (!ownsContext(owner)) return;
       const d = adoptDraft(entry.value, kind, entry.id); d.photoTasks = 0;
       if (!d.pending) continue;
       const job = jobs.get(d.pending);
-      if (job?.kind === 'work' && job.state === 'synced') await clearWorkDraft(d, kind);
+      if (job?.kind === 'work' && job.state === 'synced') await clearWorkDraft(d, kind, { delivered: true });
       else if (!job) { d.pending = null; await writeDraft(d, kind); }
     }
-    await refreshQueue();
+    if (ownsContext(owner)) await refreshQueue();
   }
-  root.DGOperations = { attach, ready, load, view, dueView, queueView, openWork, newWork, submit, download, refreshQueue, state, uuid, workFilters, selectedOrders, fullSelectedOrders, workLights, loadReports, readOrder, sourceText, subscribeUpdates, hasActiveDraft, persistActive, persistNew, persistCompletion, writeDraft, clearWorkDraft,
+  root.DGOperations = { attach, ready, load, view, dueView, queueView, openWork, openEdit, newWork, submit, download, refreshQueue, state, uuid, workFilters, selectedOrders, fullSelectedOrders, workLights, loadReports, readOrder, sourceText, subscribeUpdates, hasActiveDraft, persistActive, persistNew, persistCompletion, persistEdit, writeDraft, clearWorkDraft,
     inspectionState: light => C.inspectionState(light, Number(state.settings.inspectionDays) || 90, Date.now()) };
 })(globalThis);

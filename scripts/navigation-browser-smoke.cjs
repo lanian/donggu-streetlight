@@ -27,7 +27,7 @@ const PIXEL_NODE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAA
   const sheetOpen = page => page.evaluate(() => document.querySelector('#sheet').classList.contains('open'));
   const depth = page => page.evaluate(() => NAV.stack.map(e => e.key));
   const back = async (page, expect) => { await page.goBack(); await page.waitForFunction(expect); await page.waitForTimeout(80); };
-  const poll = async (page, fn, label) => { for (let i = 0; i < 100; i++) { if (await page.evaluate(fn)) return; await page.waitForTimeout(100); } throw new Error('timed out waiting for ' + label); };
+  const poll = async (page, fn, label, arg) => { for (let i = 0; i < 100; i++) { if (await page.evaluate(fn, arg)) return; await page.waitForTimeout(100); } throw new Error('timed out waiting for ' + label); };
   async function scenario(name, run) {
     const page = await context.newPage();
     page.on('pageerror', e => errors.push(name + ': ' + e.message)); page.on('dialog', dialog => dialog.accept()); await page.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
@@ -41,9 +41,11 @@ const PIXEL_NODE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAA
     const lightId = await page.evaluate(() => S.lights.find(l => Number.isFinite(l.lat) && l.kind === '보안등' && l.num).id);
     await page.evaluate(id => DGOperations.newWork(id), lightId);
     await page.locator('#woTitle').fill('탐색 검증 작업'); await page.locator('#woAssignee').selectOption('local');
+    const workId = await page.evaluate(() => DGOperations.state.draft.id);
     await page.locator('[data-dg="create-work"]').click();
-    await poll(page, async () => (await db.collection('workOrders').get()).docs.length === 1, 'the new work order');
-    const workId = await page.evaluate(async () => (await db.collection('workOrders').get()).docs[0].id);
+    // Scenarios share one browser storage scope; wait for this draft's commit rather than a global row count.
+    await poll(page, async id => (await db.doc('workOrders/' + id).get()).exists, 'the submitted work order', workId);
+    assert.equal(await page.evaluate(async id => (await db.doc('workOrders/' + id).get()).data()?.title, workId), '탐색 검증 작업');
     await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
     return { lightId, workId };
   }

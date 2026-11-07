@@ -1,3 +1,4 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -26,7 +27,7 @@ function swContext() {
     caches: { open: async name => cache(name), keys: async () => [...stores.keys()], delete: async name => stores.delete(name) },
     fetch: async () => { counts.network++; return new Response('fresh', { headers: { 'Cache-Control': 'max-age=3600' } }); }
   });
-  vm.runInContext(fs.readFileSync(path.join(root, 'sw.js'), 'utf8'), context);
+  vm.runInContext(readSource(path.join(root, 'sw.js'), 'utf8'), context);
   return { context, listeners, stores, cache, counts };
 }
 
@@ -103,7 +104,7 @@ async function pwaContext(dirty = false, extra = {}) {
     navigator: { serviceWorker: { controller: {}, addEventListener(type, fn) { listeners[type] = fn; }, register: async () => ({ waiting, addEventListener() {} }) } },
     DONGGU_MAP_PROVIDER: null
   }); c.window = c;
-  vm.runInContext(fs.readFileSync(path.join(root, 'app/pwa.js'), 'utf8'), c);
+  vm.runInContext(readSource(path.join(root, 'app/pwa.js'), 'utf8'), c);
   const flags = { dirty };
   c.DongguPWA.start({ hasPendingWork: async () => flags.dirty, notice: () => { calls.notices++; }, ...extra });
   await new Promise(setImmediate);
@@ -137,8 +138,8 @@ test('with the app pre-check, the update goes only on its yes, and an approved u
 });
 
 test('the version shown in the app is the service-worker release, and its release note is on top', () => {
-  const sw = /const VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(root, 'sw.js'), 'utf8'))[1];
-  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const sw = /const VERSION = '([^']+)'/.exec(readSource(path.join(root, 'sw.js'), 'utf8'))[1];
+  const html = readSource(path.join(root, 'index.html'), 'utf8');
   const app = /const APP_VER="([^"]+)"/.exec(html)[1];
   assert.equal(app, sw, 'bump APP_VER in index.html together with VERSION in sw.js');
   const first = /const RELEASE_NOTES=\[\s*\{v:"([^"]+)",d:"(\d{4}-\d{2}-\d{2})"/.exec(html);

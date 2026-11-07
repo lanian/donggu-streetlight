@@ -4,8 +4,11 @@
   const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   const C = root.DGOperationsCore;
   let api, attached = false, loading = null, registryLoad = 0;
+  let inventoryRequest = 0, inventoryEditRequest = 0, inventoryWrites = Promise.resolve();
+  const inventoryDrafts = new Map();
   const today = new Date(), localDate = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const state = { from: localDate(new Date(today.getFullYear(), today.getMonth(), 1)), to: localDate(today), analytics: null, loadedRange: '', error: '', at: 0, registry: null, source: '', registryError: '', registryProgress: '', dashboardSource: 'unknown', dashboardComplete: false, audit: [], auditLoaded: false, auditLoading: false, auditAttempted: false, auditError: '', auditCursor: null, auditMore: false, auditAt: 0, health: null, healthLoading: false, healthAttempted: false, healthError: '' };
+  Object.assign(state, { inventoryOwner: '', inventoryForecast: null, inventoryForecastOrders: {}, inventoryForecastLoading: false, inventoryForecastAttempted: false, inventoryForecastError: '', inventoryForecastSource: 'unknown', inventoryForecastComplete: false, inventoryForecastAt: 0 });
   const E = v => api.esc(v), Q = s => document.querySelector(s), notify = () => api.render();
   const heading = (title, sub) => '<div class="sheet-head"><div><h3>' + E(title) + '</h3><p class="muted">' + E(sub || '') + '</p></div><button class="x" data-close aria-label="닫기">×</button></div>';
   const bounds = () => ({ from: new Date(state.from + 'T00:00:00').getTime(), to: new Date(state.to + 'T23:59:59.999').getTime() });
@@ -100,23 +103,169 @@
   function inventoryView() {
     const O = root.DGOperations;
     if (!O.state.loaded) setTimeout(() => O.load(), 0);
-    return '<div class="panel"><p>입출고는 수량 충돌을 확인한 뒤 기록해요. 보수 작업의 사용 자재는 완료 검수 때 한 번만 출고돼요.</p><button class="btn sodium" data-mgmt="inventory-new"' + (!supported() ? ' disabled' : '') + '>자재 등록</button><button class="btn ghost" data-mgmt="inventory-refresh">새로고침</button><button class="btn ghost" data-mgmt="inventory-csv">CSV</button></div>' + (O.state.error ? '<p class="notice">' + E(O.state.error) + '</p>' : '') + '<div class="list">' + O.state.inventory.map(item => '<div class="panel"><div class="split"><b>' + E(item.name) + '</b><strong>' + item.quantity.toLocaleString() + ' ' + E(item.unit) + '</strong></div><p class="muted">단가 ' + item.unitCost.toLocaleString() + '원 · 수정 ' + api.fmtDT(item.updatedAt) + '</p><button class="btn ghost" data-mgmt="inventory-open" data-id="' + E(item.id) + '">입출고 / 이력</button></div>').join('') + '</div>' + (O.state.loaded && !O.state.inventory.length ? '<p class="empty">등록한 자재가 없어요.</p>' : '');
+    inventoryOwner();
+    if (!state.inventoryForecastAttempted && !state.inventoryForecastLoading) { state.inventoryForecastAttempted = true; setTimeout(loadInventoryForecast, 0); }
+    return '<div class="panel"><p>입출고는 수량 충돌을 확인한 뒤 기록해요. 보수 작업의 사용 자재는 완료 검수 때 한 번만 출고돼요.</p><button class="btn sodium" data-mgmt="inventory-new"' + (!supported() ? ' disabled' : '') + '>자재 등록</button><button class="btn ghost" data-mgmt="inventory-refresh"' + (state.inventoryForecastLoading ? ' disabled' : '') + '>새로고침</button><button class="btn ghost" data-mgmt="inventory-csv">CSV</button></div>' + inventoryForecastView() + (O.state.error ? '<p class="notice">' + E(O.state.error) + '</p>' : '') + '<div class="list">' + O.state.inventory.map(item => '<div class="panel"><div class="split"><b>' + E(item.name) + '</b><strong>' + item.quantity.toLocaleString() + ' ' + E(item.unit) + '</strong></div><p class="muted">단가 ' + item.unitCost.toLocaleString() + '원 · 수정 ' + api.fmtDT(item.updatedAt) + '</p><button class="btn ghost" data-mgmt="inventory-open" data-id="' + E(item.id) + '">정보 수정 / 입출고 / 이력</button></div>').join('') + '</div>' + (O.state.loaded && !O.state.inventory.length ? '<p class="empty">등록한 자재가 없어요.</p>' : '');
+  }
+  function inventoryOwner() {
+    const owner = api.state().me + '/' + (!!api.firebase());
+    if (state.inventoryOwner !== owner) {
+      inventoryRequest++; state.inventoryOwner = owner;
+      Object.assign(state, { inventoryForecast: null, inventoryForecastOrders: {}, inventoryForecastAttempted: false, inventoryForecastLoading: false, inventoryForecastError: '', inventoryForecastSource: 'unknown', inventoryForecastComplete: false, inventoryForecastAt: 0 });
+    }
+    return owner;
+  }
+  async function loadInventoryForecast() {
+    const owner = inventoryOwner(); if (state.inventoryForecastLoading) return;
+    const request = ++inventoryRequest, current = () => request === inventoryRequest && owner === api.state().me + '/' + (!!api.firebase());
+    state.inventoryForecastAttempted = true; state.inventoryForecastLoading = true; state.inventoryForecastError = ''; notify();
+    try {
+      const metadata = [], options = { requireServer: !!api.firebase(), onMetadata: value => metadata.push(value) };
+      const [inventory, orders] = await Promise.all([api.readAll('inventory', options), api.readAll('workOrders', { ...options, where: [['status', 'in', ['draft', 'assigned', 'in_progress', 'completed']]] })]);
+      if (!current()) return;
+      state.inventoryForecast = C.inventoryForecast(inventory, orders);
+      state.inventoryForecastOrders = Object.fromEntries(orders.map(order => [order.id, order.title || order.id]));
+      const sources = [...new Set(metadata.map(value => value.source))];
+      state.inventoryForecastSource = sources.length === 1 ? sources[0] : sources.length > 1 ? 'mixed' : api.state().me === 'local' ? 'local' : options.requireServer ? 'server' : 'unknown';
+      state.inventoryForecastComplete = metadata.length ? metadata.every(value => value.complete) : ['local', 'server'].includes(state.inventoryForecastSource);
+      state.inventoryForecastAt = Date.now();
+    } catch (error) { if (current()) state.inventoryForecastError = error.message || '예정 자재 소요를 불러오지 못했어요.'; }
+    finally { if (current()) { state.inventoryForecastLoading = false; notify(); } }
+  }
+  function inventoryForecastView() {
+    const result = state.inventoryForecast;
+    return '<div class="panel"><h3>예정 자재 소요 · 부족 예상</h3><p class="muted">전체 미완료 작업에 저장된 자재를 합산해요. 완료 전에는 예정량, 검수 대기 중에는 실제 기록량이에요. 재고를 예약하거나 차감하지 않으며, 아직 입력하지 않은 자재는 포함되지 않아요.</p>' +
+      (state.inventoryForecastLoading ? '<p role="status">전체 작업과 재고를 조회하는 중…</p>' : '') +
+      (state.inventoryForecastError ? '<p class="notice" role="alert">' + E(state.inventoryForecastError) + ' 새로고침하면 다시 조회해요.</p>' : '') +
+      (result ? '<p class="muted">조회 ' + api.fmtDT(state.inventoryForecastAt) + ' · ' + E(sourceLabel(state.inventoryForecastSource)) + (!state.inventoryForecastComplete ? ' · 참고용 예상' : '') + (state.inventoryForecastError || state.inventoryForecastLoading ? ' · 이전 조회 결과' : '') + '</p>' +
+        (result.rows.length ? '<div class="dg-table"><table><thead><tr><th>자재</th><th>현재</th><th>예정 소요</th><th>사용 후 예상</th><th>부족 예상</th></tr></thead><tbody>' + result.rows.map(row => '<tr><td><button class="btn ghost sm" data-mgmt="inventory-open" data-id="' + E(row.id) + '">' + E(row.name) + '</button><small>' + E(row.unit) + '</small>' + (row.workIds.length ? '<details><summary>예정 작업 ' + row.workIds.length + '건</summary>' + row.workIds.map(id => '<button class="btn ghost sm" data-dg="open-work" data-id="' + E(id) + '">' + E(state.inventoryForecastOrders[id] || id) + '</button>').join('') + '</details>' : '') + '</td><td>' + row.quantity.toLocaleString() + '</td><td>' + row.planned.toLocaleString() + '</td><td>' + row.available.toLocaleString() + '</td><td>' + (row.shortage > 0 ? '<strong class="dg-conflict">' + row.shortage.toLocaleString() + ' 부족</strong>' : '충분') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="empty">조회된 자재가 없어요.</p>') +
+        (result.unlinked.length ? '<p class="notice">재고와 연결되지 않은 자재 ' + result.unlinked.length + '건은 부족 수량을 계산할 수 없어요.</p><details><summary>자재 연결이 필요한 작업</summary>' + result.unlinked.map(part => '<p><button class="btn ghost sm" data-dg="open-work" data-id="' + E(part.workId) + '">' + E(state.inventoryForecastOrders[part.workId] || part.workId) + '</button> ' + E(part.name) + ' · ' + part.qty + '</p>').join('') + '</details>' : '') : '') + '</div>';
   }
   function newInventory() {
     api.navigate(heading('자재 등록', '초기 수량과 기준 단가를 기록해요.') + '<div class="panel"><label class="f" for="dgItemName">자재명</label><input class="f-in" id="dgItemName" maxlength="100"><label class="f" for="dgItemUnit">단위</label><input class="f-in" id="dgItemUnit" maxlength="20" value="개"><label class="f" for="dgItemQty">초기 수량</label><input class="f-in" id="dgItemQty" type="number" min="0" step="0.001" value="0"><label class="f" for="dgItemCost">단가 (원)</label><input class="f-in" id="dgItemCost" type="number" min="0" value="0"><button class="btn sodium block" data-mgmt="inventory-create">등록</button></div>', { key: 'inv:new', reopen: () => newInventory() });
   }
   async function openInventory(id) {
+    const owner = inventoryOwner(), request = ++inventoryEditRequest, gen = api.navGen?.();
+    const current = () => request === inventoryEditRequest && owner === api.state().me + '/' + (!!api.firebase()) && (gen == null || api.navAlive(gen));
     const item = root.DGOperations.state.inventory.find(x => x.id === id); if (!item) return;
-    api.navigate(heading(item.name, '현재 ' + item.quantity + item.unit) + '<div class="panel"><label class="f" for="dgMoveDelta">입출고 수량 (출고는 음수)</label><input class="f-in" id="dgMoveDelta" type="number" step="0.001" value="1"><label class="f" for="dgMoveReason">사유</label><input class="f-in" id="dgMoveReason" maxlength="300" placeholder="구매 입고, 반납, 실사 조정 등"><button class="btn sodium block" data-mgmt="inventory-move" data-id="' + E(id) + '" data-revision="' + item.revision + '">입출고 기록</button></div><h3>입출고 이력</h3><div id="dgStockHistory" data-id="' + E(id) + '">불러오는 중…</div>', { key: 'inv:' + id, reopen: () => openInventory(id) });
+    const draft = await inventoryDraft(item); if (!current()) return;
+    const pending = !!draft.jobId;
+    api.navigate(heading(item.name, '현재 ' + item.quantity + item.unit) + '<div class="panel" id="dgInventoryEdit" data-id="' + E(id) + '"><h3>기본정보 수정</h3><p class="muted">단위 ' + E(item.unit) + ' · 현재 수량과 과거 입출고·작업 단가는 유지돼요.</p>' +
+      (draft.expectedRevision !== item.revision ? '<p class="notice">자재 정보가 변경됐어요. 최신 내용과 비교한 뒤 수정해 주세요.</p>' : '') +
+      (draft.error ? '<p class="notice" role="alert">' + E(draft.error) + '</p>' : '') +
+      (pending ? '<p class="notice" role="status">저장 대기 작업이 있어요. 결과를 확인한 뒤 이어서 수정할 수 있어요.</p><button class="btn ghost" data-mgmt="inventory-edit-check" data-id="' + E(id) + '">저장 결과 확인</button><button class="btn ghost" data-asec="outbox">저장 대기함</button>' : '') +
+      ((draft.error || draft.expectedRevision !== item.revision) ? '<p class="muted">최신 기준: ' + E(item.name) + ' · 단가 ' + item.unitCost.toLocaleString() + '원</p><button class="btn ghost" data-mgmt="inventory-edit-refresh" data-id="' + E(id) + '">최신 정보와 비교하고 다시 수정</button>' : '') +
+      '<fieldset style="border:0;padding:0;margin:0;min-width:0"' + (pending ? ' disabled' : '') + '><label class="f" for="dgEditItemName">자재명</label><input class="f-in" id="dgEditItemName" maxlength="100" value="' + E(draft.name) + '"><label class="f" for="dgEditItemCost">기준 단가 (원)</label><input class="f-in" id="dgEditItemCost" type="number" min="0" max="1000000000" value="' + E(draft.unitCost) + '"><label class="f" for="dgEditItemReason">수정 사유</label><input class="f-in" id="dgEditItemReason" maxlength="300" value="' + E(draft.reason) + '" placeholder="품목명 오타, 구매 기준 단가 정정 등"><button class="btn sodium block" data-mgmt="inventory-update" data-id="' + E(id) + '"' + (draft.expectedRevision !== item.revision ? ' disabled' : '') + '>기본정보 저장</button></fieldset><button class="btn ghost block" data-mgmt="inventory-edit-discard" data-id="' + E(id) + '">수정 초안 버리기</button></div>' +
+      '<div class="panel"><h3>수량 입출고</h3><label class="f" for="dgMoveDelta">입출고 수량 (출고는 음수)</label><input class="f-in" id="dgMoveDelta" type="number" step="0.001" value="1"><label class="f" for="dgMoveReason">사유</label><input class="f-in" id="dgMoveReason" maxlength="300" placeholder="구매 입고, 반납, 실사 조정 등"><button class="btn sodium block" data-mgmt="inventory-move" data-id="' + E(id) + '" data-revision="' + item.revision + '">입출고 기록</button></div><h3>입출고 · 정보 수정 이력</h3><div id="dgStockHistory" data-id="' + E(id) + '">불러오는 중…</div>', { key: 'inv:' + id, reopen: () => openInventory(id) });
+    const historyGen = api.navGen?.();
     try {
       const rows = (await api.readAll('inventoryMoves', { where: [['itemId', '==', id]] })).sort((a, b) => b.at - a.at), box = Q('#dgStockHistory');
-      if (box && box.dataset.id === id) box.innerHTML = rows.length ? rows.map(r => '<div class="hist"><b>' + (r.delta > 0 ? '+' : '') + r.delta + E(item.unit) + '</b> ' + E(r.reason) + '<div class="muted">' + api.fmtDT(r.at) + ' · ' + E(api.state().names[r.by] || r.by) + '</div></div>').join('') : '<p class="empty">입출고 이력이 없어요.</p>';
-    } catch (error) { const box = Q('#dgStockHistory'); if (box && box.dataset.id === id) box.textContent = error.message; }
+      if (box && box.dataset.id === id && (historyGen == null || api.navAlive(historyGen))) box.innerHTML = rows.length ? rows.map(r => '<div class="hist"><b>' + (r.delta === 0 ? '기본정보 수정 / 수량 변동 없음' : (r.delta > 0 ? '+' : '') + r.delta + E(item.unit)) + '</b> ' + E(r.reason) + '<div class="muted">' + api.fmtDT(r.at) + ' · ' + E(api.state().names[r.by] || r.by) + '</div></div>').join('') : '<p class="empty">입출고 이력이 없어요.</p>';
+    } catch (error) { const box = Q('#dgStockHistory'); if (box && box.dataset.id === id && (historyGen == null || api.navAlive(historyGen)) && owner === api.state().me + '/' + (!!api.firebase())) box.textContent = error.message; }
+  }
+  async function inventoryDraft(item) {
+    const owner = api.state().me, key = owner + '/' + item.id;
+    if (inventoryDrafts.has(key)) return inventoryDrafts.get(key);
+    const stored = root.DGOffline.ready ? await root.DGOffline.get('inventoryDraft', item.id) : null;
+    const draft = stored?.actor === owner && stored.itemId === item.id ? stored : { actor: owner, itemId: item.id, expectedRevision: item.revision, name: item.name, unitCost: String(item.unitCost), reason: '', jobId: '', error: '', baselineName: item.name, baselineUnitCost: item.unitCost };
+    if (!Object.prototype.hasOwnProperty.call(draft, 'baselineName')) {
+      draft.baselineName = draft.expectedRevision === item.revision ? item.name : null;
+      draft.baselineUnitCost = draft.expectedRevision === item.revision ? item.unitCost : null;
+    }
+    inventoryDrafts.set(key, draft); return draft;
+  }
+  function captureInventoryDraft(draft) {
+    if (!draft.jobId) {
+      if (Q('#dgEditItemName')) draft.name = Q('#dgEditItemName').value;
+      if (Q('#dgEditItemCost')) draft.unitCost = Q('#dgEditItemCost').value;
+      if (Q('#dgEditItemReason')) draft.reason = Q('#dgEditItemReason').value;
+    }
+    return draft;
+  }
+  function persistInventoryDraft(draft) {
+    if (!root.DGOffline.ready) return Promise.resolve();
+    const snapshot = JSON.parse(JSON.stringify(draft)), namespace = root.DGOffline.namespace, backend = api.firebase();
+    const pending = inventoryWrites.catch(() => {}).then(() => {
+      if (api.state().me !== snapshot.actor || namespace !== root.DGOffline.namespace || backend !== api.firebase()) return;
+      if (!snapshot.jobId && snapshot.baselineName !== null && String(snapshot.name).trim() === snapshot.baselineName && snapshot.unitCost !== '' && Number(snapshot.unitCost) === snapshot.baselineUnitCost && !String(snapshot.reason).trim()) return root.DGOffline.remove('inventoryDraft', snapshot.itemId);
+      return root.DGOffline.put('inventoryDraft', snapshot.itemId, snapshot);
+    });
+    inventoryWrites = pending; return pending;
+  }
+  async function clearInventoryDraft(draft) {
+    const namespace = root.DGOffline.namespace, backend = api.firebase();
+    await inventoryWrites.catch(() => {}); inventoryDrafts.delete(draft.actor + '/' + draft.itemId);
+    if (root.DGOffline.ready && api.state().me === draft.actor && namespace === root.DGOffline.namespace && backend === api.firebase()) await root.DGOffline.remove('inventoryDraft', draft.itemId);
+    state.inventoryForecastAttempted = false; state.inventoryForecast = null;
+  }
+  async function updateInventory(button) {
+    const actor = api.state().me, backend = api.firebase(), namespace = root.DGOffline.namespace, gen = api.navGen?.();
+    const owned = () => actor === api.state().me && backend === api.firebase() && namespace === root.DGOffline.namespace;
+    const visible = () => owned() && (gen == null || api.navAlive(gen));
+    const id = button.dataset.id, item = root.DGOperations.state.inventory.find(x => x.id === id); if (!item) return;
+    const draft = await inventoryDraft(item); if (!visible()) return; if (draft.jobId) return api.toast('이미 저장 대기 중이에요. 저장 결과를 확인해 주세요.');
+    captureInventoryDraft(draft);
+    if (!draft.name.trim() || !draft.reason.trim() || draft.unitCost === '' || !Number.isFinite(Number(draft.unitCost)) || Number(draft.unitCost) < 0 || Number(draft.unitCost) > 1000000000) throw new Error('자재명·기준 단가·수정 사유를 확인해 주세요.');
+    const job = { id: root.DGOperations.uuid('stock-edit'), kind: 'inventory-update', itemId: id, input: { name: draft.name, unitCost: Number(draft.unitCost) }, expectedRevision: draft.expectedRevision, reason: draft.reason, actor: api.state().me, at: Date.now() };
+    draft.jobId = job.id; draft.error = ''; await persistInventoryDraft(draft); button.disabled = true;
+    if (!owned()) { button.disabled = false; return; }
+    try {
+      const result = await root.DGOperations.submit(job, '자재 기본정보 수정 · ' + draft.name);
+      if (result.state === 'synced' && owned()) { await clearInventoryDraft(draft); if (owned()) await root.DGOperations.load(true); }
+    } catch (error) { draft.error = error.message || '저장하지 못했어요.'; if (owned()) await persistInventoryDraft(draft); }
+    finally { button.disabled = false; }
+    if (visible()) await openInventory(id);
+  }
+  async function checkInventoryEdit(id, rebase) {
+    const actor = api.state().me, backend = api.firebase(), namespace = root.DGOffline.namespace, gen = api.navGen?.();
+    const owned = () => actor === api.state().me && backend === api.firebase() && namespace === root.DGOffline.namespace;
+    const visible = () => owned() && (gen == null || api.navAlive(gen));
+    const item = root.DGOperations.state.inventory.find(x => x.id === id); if (!item) return;
+    const draft = captureInventoryDraft(await inventoryDraft(item));
+    const job = draft.jobId && (await root.DGOffline.jobs()).find(value => value.id === draft.jobId);
+    if (!visible()) return;
+    if (job?.state === 'synced') { await clearInventoryDraft(draft); if (!owned()) return; await root.DGOperations.load(true); return visible() ? openInventory(id) : undefined; }
+    if (job && !['failed', 'conflict'].includes(job.state)) return api.toast('아직 저장 대기 중이에요. 전송이 끝난 뒤 결과를 확인해 주세요.');
+    if (rebase) {
+      await root.DGOperations.load(true);
+      if (!visible()) return;
+      const latest = root.DGOperations.state.inventory.find(x => x.id === id); if (!latest) throw new Error('자재를 찾을 수 없어요.');
+      if (job) await root.DGOffline.discard(job.id); if (!owned()) return;
+      draft.jobId = ''; draft.expectedRevision = latest.revision; draft.error = ''; draft.baselineName = latest.name; draft.baselineUnitCost = latest.unitCost;
+    } else draft.error = job?.error || '저장 대기 작업이 없어요. 최신 정보와 비교한 뒤 다시 수정해 주세요.';
+    await persistInventoryDraft(draft); return visible() ? openInventory(id) : undefined;
+  }
+  async function resumeInventoryDraft(id) {
+    if (!api.can('admin')) throw new Error('관리자 권한이 필요해요.');
+    const actor = api.state().me, backend = api.firebase(), namespace = root.DGOffline.namespace, gen = api.navGen?.(), request = ++inventoryEditRequest;
+    const current = () => request === inventoryEditRequest && actor === api.state().me && backend === api.firebase() && namespace === root.DGOffline.namespace && (gen == null || api.navAlive(gen));
+    await inventoryWrites.catch(() => {}); if (!current()) return false;
+    await root.DGOperations.load(true); if (!current()) return false;
+    if (!root.DGOperations.state.inventory.some(item => item.id === id)) { api.toast('자재를 찾을 수 없어요. 초안은 저장 대기함에 남겨 두었어요.'); return false; }
+    await openInventory(id); return true;
+  }
+  async function discardInventoryDraft(id, options = {}) {
+    if (!api.can('admin')) throw new Error('관리자 권한이 필요해요.');
+    const actor = api.state().me, backend = api.firebase(), namespace = root.DGOffline.namespace, gen = api.navGen?.();
+    const current = () => actor === api.state().me && backend === api.firebase() && namespace === root.DGOffline.namespace && (gen == null || api.navAlive(gen));
+    await inventoryWrites.catch(() => {}); if (!current()) return false;
+    const key = actor + '/' + id, draft = inventoryDrafts.get(key) || (root.DGOffline.ready ? await root.DGOffline.get('inventoryDraft', id) : null);
+    if (!current() || !draft || draft.actor !== actor || draft.itemId !== id) return false;
+    const getJob = async () => draft.jobId && root.DGOffline.ready ? (await root.DGOffline.jobs()).find(job => job.id === draft.jobId) : null;
+    const job = await getJob(); if (!current()) return false;
+    if (job && ['queued', 'sending'].includes(job.state)) { api.toast('전송 중이거나 저장 대기 중이에요. 결과를 확인한 뒤 수정 초안을 정리해 주세요.'); return false; }
+    if (!options.confirmed && !await ask('저장하지 않은 자재 정보 수정을 버려요. 이미 저장된 자재·재고·변경 이력은 유지돼요.', { title: '수정 초안을 버릴까요?', ok: '초안 버리기', danger: true })) return false;
+    if (!current()) return false;
+    const latestJob = await getJob(); if (!current()) return false;
+    if (latestJob && ['queued', 'sending'].includes(latestJob.state)) { api.toast('전송 상태가 바뀌었어요. 저장 결과를 확인한 뒤 정리해 주세요.'); return false; }
+    if (latestJob && ['failed', 'conflict'].includes(latestJob.state)) { await root.DGOffline.discard(latestJob.id); if (!current()) return false; }
+    await clearInventoryDraft(draft); return current();
   }
   function settingsView() {
+    const privacySupported = root.DGPrivacy.supported({ database: api.database?.(), firebase: api.firebase() });
     const s = root.DGOperations.state.settings;
     if (!root.DGOperations.state.loaded && !root.DGOperations.state.error) setTimeout(() => root.DGOperations.load(), 0);
-    return '<div class="panel"><h3>업무 기준</h3><label class="f" for="dgInspectionDays">정기 점검 주기 (일)</label><input class="f-in" id="dgInspectionDays" type="number" min="1" max="3650" value="' + Number(s.inspectionDays) + '"><label class="f" for="dgPrivacyDays">신고 연락처 보관 기간 (일)</label><input class="f-in" id="dgPrivacyDays" type="number" min="1" max="3650" value="' + Number(s.privacyDays) + '"><p class="muted">점검 주기는 미점검·기한 초과 목록에 반영돼요. 연락처 자동 파기는 Firebase 예약 함수를 배포한 환경에서 실행돼요. 로컬 체험에는 수동 파기 기능을 사용할 수 있어요.</p><button class="btn sodium" data-mgmt="settings-save">기준 저장</button><button class="btn ghost" data-mgmt="privacy-purge">보관 기간 지난 신고자 정보 파기</button></div><div class="panel"><h3>기기 저장과 계정</h3><p>' + (root.DGOffline.durable ? '이 기기는 초안과 저장 대기 작업을 보관해요.' : '공유 기기 모드로 현재 창에서만 초안을 보관해요.') + '</p><button class="btn ghost" data-asec="roles">사용자·권한 / 기기 모드</button></div>';
+    return '<div class="panel"><h3>업무 기준</h3><label class="f" for="dgInspectionDays">정기 점검 주기 (일)</label><input class="f-in" id="dgInspectionDays" type="number" min="1" max="3650" value="' + Number(s.inspectionDays) + '"><label class="f" for="dgPrivacyDays">신고 연락처 보관 기간 (일)</label><input class="f-in" id="dgPrivacyDays" type="number" min="1" max="3650" value="' + Number(s.privacyDays) + '"><p class="muted">점검 주기는 미점검·기한 초과 목록에 반영돼요. 연락처 자동 파기는 Firebase 예약 함수를 배포한 환경에서 실행돼요. 수동 파기는 Firebase 또는 기기 체험 저장소에서 사용할 수 있어요. 이외의 공유 저장소에서는 수동 파기를 지원하지 않아요.</p><button class="btn sodium" data-mgmt="settings-save">기준 저장</button><button class="btn ghost" data-mgmt="privacy-purge"' + (privacySupported ? '' : ' disabled') + '>보관 기간 지난 신고자 정보 파기</button></div><div class="panel"><h3>기기 저장과 계정</h3><p>' + (root.DGOffline.durable ? '이 기기는 초안과 저장 대기 작업을 보관해요.' : '공유 기기 모드로 현재 창에서만 초안을 보관해요.') + '</p><button class="btn ghost" data-asec="roles">사용자·권한 / 기기 모드</button></div>';
   }
   async function saveSettings() {
     if (!api.can('admin')) return;
@@ -127,16 +276,17 @@
   }
   // What a citizen gave us that identifies them or where they were: contact, photo, GPS position, and the position text
   // an imported QR report carries (`ext`). Same list as the server's expiry job (functions/core.js PRIVATE_FIELDS).
-  function privateLeft(r) { return !!(r.contact || r.photo || typeof r.lat === 'number' || typeof r.lng === 'number' || (r.ext && r.location)); }
-  function privatePatch(r) { return { contact: '', photo: null, lat: null, lng: null, acc: null, ...(r.ext ? { location: '' } : {}) }; }
+  const privateLeft = r => root.DGPrivacy.privateLeft(r);
+  const privatePatch = r => root.DGPrivacy.privatePatch(r);
   async function purgeContacts() {
     if (!api.can('admin')) return;
-    const days = root.DGOperations.state.settings.privacyDays || 90, cut = Date.now() - days * 86400000;
-    const rows = await api.readAll('reports', { requireServer: !!api.firebase() });
-    const values = rows.filter(r => r.createdAt < cut && privateLeft(r));
+    if (!root.DGPrivacy.supported({ database: api.database(), firebase: api.firebase() })) throw new Error(root.DGPrivacy.unsupported);
+    const days = root.DGPrivacy.days(root.DGOperations.state.settings.privacyDays), at = Date.now();
+    const records = Object.fromEntries(await Promise.all(root.DGPrivacy.COLLECTIONS.map(async collection => [collection, await api.readAll(collection, { requireServer: !!api.firebase() })])));
+    const values = root.DGPrivacy.targets(records, at, days);
     if (!values.length) return api.toast('보관 기간이 지난 신고자 정보가 없어요.');
-    if (!await ask('보관 기간 ' + days + '일이 지난 신고 ' + values.length + '건의 연락처·사진·신고 위치를 파기해요. 신고 내용과 처리 이력은 유지돼요.', { title: '신고자 정보를 파기할까요?', ok: '파기', danger: true })) return;
-    const job = { id: root.DGOperations.uuid('privacy'), actor: api.state().me, at: Date.now(), ids: values.map(r => r.id), cut };
+    if (!await ask('개별 보관 만료일 또는 현재 보관 기간(' + days + '일)이 지난 원본·이관 신고 ' + values.length + '건의 연락처·사진·신고 위치를 파기해요. 신고 내용과 처리 이력은 유지돼요.', { title: '신고자 정보를 파기할까요?', ok: '파기', danger: true })) return;
+    const job = { id: root.DGOperations.uuid('privacy'), actor: api.state().me, at, privacyDays: days, targets: values };
     const result = await root.DGOffline.submit('privacy', job, { id: job.id, summary: '연락처 보관 기간 만료 · ' + values.length + '건' });
     api.toast(result.state === 'synced' ? '기한이 지난 연락처를 파기했어요.' : result.error || '저장 대기함에서 처리를 이어가요.');
   }
@@ -176,7 +326,7 @@
     if (enabled && !state.healthAttempted && !state.healthLoading) { state.healthAttempted = true; setTimeout(healthLoad, 0); }
     const h = state.health, labels = { gateway: '주민 접수', audit: '변경 이력 기록', retention: '보관 기간 정리' }, statuses = { unknown: '확인 기록 없음', ok: '정상 기록 있음', error: '최근 실패', stale: '최근 성공 확인 필요' };
     return '<div class="panel"><h3>공유 운영 상태</h3><p>서버가 기록한 최근 실행 결과와 처리 대기 건수를 확인해요.</p>' +
-      (!enabled ? '<p class="notice">현재는 공유 운영 서버가 연결되지 않았어요. 직원 로그인·공유 업무·주민 접수·예약 정리를 실제 운영하려면 서버 설정과 배포가 필요해요.</p>' : '<button class="btn ghost" data-mgmt="health-refresh"' + (state.healthLoading ? ' disabled' : '') + '>운영 상태 다시 확인</button>') +
+      (!enabled ? '<p class="notice">서버 관리 함수가 연결되지 않아 이 화면에서 접수·감사·예약 정리의 실행 상태를 확인할 수 없어요. 직원 공유 저장은 Firebase 설정에 따르며, 관리자 업무 기준에서 원본·이관 신고자 정보를 수동 파기할 수 있어요.</p>' : '<button class="btn ghost" data-mgmt="health-refresh"' + (state.healthLoading ? ' disabled' : '') + '>운영 상태 다시 확인</button>') +
       (state.healthLoading ? '<p role="status">서버 상태 확인 중…</p>' : '') + (state.healthError ? '<p class="notice" role="alert">' + E(state.healthError) + '</p>' : '') + '</div>' +
       (h ? (h.maintenance?.active ? '<p class="notice" role="alert">업무 자료 이전이 진행 중이에요. 완료 전까지 공동 자료의 조회·편집이 일시 중지됩니다.</p>' : '') + '<p class="muted">서버 확인 ' + api.fmtDT(h.checkedAt) + (state.healthError ? ' · 이전 조회 결과' : '') + '</p><div class="grid2">' + Object.entries(labels).map(([key, label]) => {
         const item = h.services?.[key] || {}, status = statuses[item.state] || statuses.unknown;
@@ -193,14 +343,21 @@
     if (action === 'registry-apply') return applyRegistry(button);
     if (action === 'registry-csv') { const d = state.registry; return root.DGOperations.download('동구_대장비교', [['구분', 'ID', '표찰', '변경 필드', '현장 충돌'], ...d.added.map(r => ['신규', r.id, r.code, '', '']), ...d.changed.map(r => ['변경', r.id, r.code, Object.keys(r.changes).join(', '), r.conflicts.join(', ')]), ...d.missing.map(r => ['누락', r.id, r.code, '', ''])]); }
     if (action === 'inventory-new') return newInventory();
-    if (action === 'inventory-refresh') return root.DGOperations.load(true);
+    if (action === 'inventory-refresh') { await root.DGOperations.load(true); return loadInventoryForecast(); }
     if (action === 'inventory-csv') return root.DGOperations.download('동구_자재재고', [['자재', '수량', '단위', '단가', '수정'], ...root.DGOperations.state.inventory.map(i => [i.name, i.quantity, i.unit, i.unitCost, api.fmtDT(i.updatedAt)])]);
     if (action === 'inventory-open') return openInventory(button.dataset.id);
+    if (action === 'inventory-update') return updateInventory(button);
+    if (action === 'inventory-edit-check' || action === 'inventory-edit-refresh') return checkInventoryEdit(button.dataset.id, action === 'inventory-edit-refresh');
+    if (action === 'inventory-edit-discard') {
+      const gen = api.navGen?.(), id = button.dataset.id;
+      if (await discardInventoryDraft(id)) { if (gen != null && !api.navAlive(gen)) return; await root.DGOperations.load(true); if (gen == null || api.navAlive(gen)) return openInventory(id); }
+      return;
+    }
     if (action === 'inventory-create' || action === 'inventory-move') {
       const create = action === 'inventory-create';
       const job = { id: root.DGOperations.uuid('stock-command'), kind: create ? 'inventory-create' : 'inventory-move', itemId: create ? root.DGOperations.uuid('item') : button.dataset.id, actor: api.state().me, at: Date.now(), ...(create ? { input: { name: Q('#dgItemName').value, unit: Q('#dgItemUnit').value, quantity: Number(Q('#dgItemQty').value), unitCost: Number(Q('#dgItemCost').value) } } : { delta: Number(Q('#dgMoveDelta').value), expectedRevision: Number(button.dataset.revision), reason: Q('#dgMoveReason').value }) };
       if (!create && (!job.reason.trim() || !job.delta)) throw new Error('입출고 수량과 사유를 입력해 주세요.');
-      button.disabled = true; try { await root.DGOperations.submit(job, create ? '자재 등록 · ' + job.input.name : '자재 입출고'); api.closeSheet(); await root.DGOperations.load(true); } finally { button.disabled = false; } return;
+      button.disabled = true; try { const result = await root.DGOperations.submit(job, create ? '자재 등록 · ' + job.input.name : '자재 입출고'); if (result.state === 'synced') { api.closeSheet(); await root.DGOperations.load(true); state.inventoryForecastAttempted = false; state.inventoryForecast = null; } } finally { button.disabled = false; } return;
     }
     if (action === 'settings-save') return saveSettings();
     if (action === 'privacy-purge') return purgeContacts();
@@ -214,16 +371,15 @@
   function attach(context) {
     api = context;
     root.DGOffline.register('registry', job => root.DGRegistryCommands.execute(job, { db: api.database(), fb: api.firebase(), user: api.state().me, admin: api.can('admin'), progress: (n, all) => { state.registryProgress = n + '/' + all + '개 처리'; const el = Q('#dgRegistryProgress'); if (el) el.textContent = state.registryProgress; } }));
-    root.DGOffline.register('privacy', async job => {
-      if (!api.can('admin') || job.actor !== api.state().me) throw new Error('처리한 관리자 계정으로 로그인해 주세요.');
-      for (const id of job.ids) {
-        const ref = api.database().doc('reports/' + id), snap = await ref.get(), row = snap && snap.exists !== false && snap.data();
-        if (row && row.createdAt < job.cut && privateLeft(row)) await ref.update({ ...privatePatch(row), privacyPurgedAt: job.at, privacyPurgedBy: job.actor });
-      }
-    });
+    root.DGOffline.register('privacy', job => root.DGPrivacy.execute(job, { database: api.database(), firebase: api.firebase(), actor: api.state().me, admin: api.can('admin') }));
     if (attached) return; attached = true;
     document.addEventListener('click', e => { const b = e.target.closest('[data-mgmt]'); if (b) Promise.resolve().then(() => handle(b)).catch(error => api.toast(error.message || '처리하지 못했어요.')); });
     document.addEventListener('change', e => { if (e.target.id === 'dgDashFrom' || e.target.id === 'dgDashTo') { state[e.target.id === 'dgDashFrom' ? 'from' : 'to'] = e.target.value; notify(); } if (e.target.id === 'dgRegistryFile' && e.target.files[0]) registryFile(e.target.files[0]); });
+    document.addEventListener('input', e => {
+      const form = e.target.closest('#dgInventoryEdit'); if (!form) return;
+      const draft = inventoryDrafts.get(api.state().me + '/' + form.dataset.id); if (!draft || draft.jobId) return;
+      captureInventoryDraft(draft); persistInventoryDraft(draft).catch(error => api.toast(error.message || '수정 초안을 기기에 보관하지 못했어요.'));
+    });
   }
-  root.DGManagement = { privateLeft, privatePatch, attach, dashboard, registryView, inventoryView, settingsView, auditView, healthView, state };
+  root.DGManagement = { privateLeft, privatePatch, attach, dashboard, registryView, inventoryView, settingsView, auditView, healthView, resumeInventoryDraft, discardInventoryDraft, state };
 })(globalThis);

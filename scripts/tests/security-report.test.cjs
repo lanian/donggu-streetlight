@@ -1,3 +1,4 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -5,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '../..');
-const reportHtml = fs.readFileSync(path.join(root, 'report/index.html'), 'utf8');
+const reportHtml = readSource(path.join(root, 'report/index.html'), 'utf8');
 const reportScript = [...reportHtml.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)]
   .map(match => match[1]).find(source => source.includes('function sendGateway'));
 
@@ -68,7 +69,7 @@ const firebaseConfig = {
 function shippedConfig() {
   const configContext = { window: {} };
   vm.createContext(configContext);
-  vm.runInContext(fs.readFileSync(path.join(root, 'report/config.js'), 'utf8'), configContext);
+  vm.runInContext(readSource(path.join(root, 'report/config.js'), 'utf8'), configContext);
   return configContext.window.REPORT_CONFIG;
 }
 
@@ -149,7 +150,7 @@ test('QR light identity is preserved for submission and cleared when its plate i
 });
 
 test('admin edit map and custom light options escape database text', async () => {
-  const source = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const source = readSource(path.join(root, 'index.html'), 'utf8');
   const start = source.indexOf('function openLightEdit(id)');
   const end = source.indexOf('async function saveLightEdit(', start);
   assert.ok(start >= 0 && end > start);
@@ -184,56 +185,42 @@ test('admin edit map and custom light options escape database text', async () =>
   assert.ok(sheetHtml.includes('&lt;/option&gt;&lt;/select&gt;&lt;img src=x onerror=&quot;window.bad=true&quot;&gt;'));
 });
 
-test('the shipped page files directly: one create-only Firestore write with typed fields and a fixed receipt', async () => {
+test('shipped intake waits for a verified gateway and never writes directly to Firestore', async () => {
   const config = shippedConfig();
-  assert.equal(config.backend, 'firestore');
-  let status = 200;
-  const page = reportPage(config, { response: () => ({ ok: status < 300, status, json: async () => ({}) }) });
-  page.run('st.photo = "data:image/jpeg;base64,dGVzdA=="; st.pos = null;');
-  page.nodes.get('#useGps').checked = false; page.nodes.get('#desc').value = '마트 앞';
-  assert.equal(page.nodes.get('#send').disabled, false);
+  assert.equal(config.backend, 'gateway'); assert.equal(config.phone, '');
+  const page = reportPage(config);
+  assert.equal(page.nodes.get('#send').disabled, true);
   await page.submit();
-  assert.equal(page.requests.length, 1);
-  const { url } = page.requests[0], fields = page.requests[0].body.fields;
-  assert.match(url, /^https:\/\/firestore\.googleapis\.com\/v1\/projects\/donggu-light\/databases\/\(default\)\/documents\/citizen_reports\?documentId=qr-[a-f0-9]{24}&key=/);
-  assert.equal(fields.imported.booleanValue, false); assert.equal(fields.schemaVersion.integerValue, '1');
-  assert.match(fields.at.integerValue, /^\d+$/); assert.ok(+fields.privacyExpiresAt.integerValue > +fields.at.integerValue);
-  assert.equal(fields.desc.stringValue, '마트 앞'); assert.equal(fields.photo.stringValue, 'data:image/jpeg;base64,dGVzdA==');
-  assert.equal('contact' in fields, false, 'no contact unless given');
-  assert.match(fields.receipt.stringValue, /^R\d{6}-[0-9A-F]{8}$/);
-  assert.equal(page.nodes.get('#receipt').textContent, fields.receipt.stringValue);
-  assert.equal(page.nodes.get('#doneTitle').textContent, '접수됐어요');
+  assert.equal(page.requests.length, 0); assert.equal(page.nodes.get('#done').hidden, true);
 });
 
-test('direct filing: a retry of the same report keeps its ID, and an earlier success (409) counts as filed', async () => {
+test('a stale direct-intake configuration cannot reopen public database writes', async () => {
+  const page = reportPage({ ...shippedConfig(), backend: 'firestore' });
+  assert.equal(page.nodes.get('#send').disabled, true);
+  await page.submit(); assert.equal(page.requests.length, 0); assert.equal(page.nodes.get('#done').hidden, true);
+});
+
+test('gateway retries keep their request ID and a conflicting response never claims success', async () => {
   let status = 503;
-  const page = reportPage(shippedConfig(), { response: () => ({ ok: status < 300, status, json: async () => ({}) }) });
+  const page = reportPage(firebaseConfig, { response: () => ({ ok: status < 300, status, json: async () => ({ receipt: 'R261107-TEST0001' }) }) });
   page.nodes.get('#useGps').checked = false;
-  await page.submit();
-  assert.equal(page.nodes.get('#done').hidden, true); assert.match(page.nodes.get('#err').textContent, /보내지 못했어요/);
+  await page.submit(); assert.equal(page.nodes.get('#done').hidden, true);
   status = 409; await page.submit();
-  assert.equal(page.requests[0].url, page.requests[1].url, 'same document ID on retry');
-  assert.equal(page.requests[0].body.fields.receipt.stringValue, page.requests[1].body.fields.receipt.stringValue);
-  assert.equal(page.nodes.get('#doneTitle').textContent, '접수됐어요');
-});
-
-test('direct filing: a write the rules refuse explains what to check and shows no receipt', async () => {
-  const page = reportPage(shippedConfig(), { response: () => ({ ok: false, status: 403, json: async () => ({}) }) });
-  page.nodes.get('#useGps').checked = false;
-  await page.submit();
-  assert.equal(page.nodes.get('#done').hidden, true); assert.match(page.nodes.get('#err').textContent, /신고 내용을 확인/);
+  assert.equal(page.requests[0].body.requestId, page.requests[1].body.requestId);
+  assert.equal(page.nodes.get('#done').hidden, true);
+  status = 200; await page.submit(); assert.equal(page.nodes.get('#doneTitle').textContent, '접수됐어요');
 });
 
 test('a report filed from outside the district goes through without the position', async () => {
-  const page = reportPage(shippedConfig(), { response: () => ({ ok: true, status: 200, json: async () => ({}) }) });
+  const page = reportPage(firebaseConfig);
   page.run('st.pos = { lat: 37.5665, lng: 126.978, acc: 10 };');
   page.nodes.get('#useGps').checked = true; page.nodes.get('#desc').value = '산수동 마트 앞';
   await page.submit();
-  const fields = page.requests[0].body.fields;
-  assert.equal('lat' in fields, false); assert.equal('lng' in fields, false);
+  const fields = page.requests[0].body;
+  assert.equal(fields.lat, null); assert.equal(fields.lng, null);
   assert.equal(page.nodes.get('#doneTitle').textContent, '접수됐어요');
   // with nothing else to go on, it asks for a plate or place instead of failing at the server
-  const bare = reportPage(shippedConfig(), { response: () => ({ ok: true, status: 200, json: async () => ({}) }) });
+  const bare = reportPage(firebaseConfig);
   bare.run('st.pos = { lat: 37.5665, lng: 126.978, acc: 10 }; st.code = ""; st.lightId = null;'); bare.nodes.get('#useGps').checked = true; bare.nodes.get('#desc').value = '';
   await bare.submit();
   assert.equal(bare.requests.length, 0); assert.match(bare.nodes.get('#err').textContent, /동구 밖/);

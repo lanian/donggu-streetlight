@@ -67,6 +67,8 @@ const server = http.createServer((req, res) => {
 
     // 4. manual purge clears contact, photo, position and an imported report's position text, keeps the content
     checks.push('manual purge clears every reporter detail');
+    const short = await add({ ...base, contact: 'short-period', createdAt: Date.now() - 60 * 86400000, privacyExpiresAt: Date.now() - 30 * 86400000 });
+    await page.evaluate(async () => db.doc('citizen_reports/expired-original').set({ at: Date.now() - 120 * 86400000, privacyExpiresAt: Date.now() - 30 * 86400000, contact: 'original-contact', photo: 'data:image/jpeg;base64,AAAA', lat: 35.14, lng: 126.92, imported: false, issue: 'keep original issue' }));
     await page.evaluate(() => DGOperations.state.settings.privacyDays = 90);
     await page.evaluate(() => { const b = document.createElement('button'); b.dataset.mgmt = 'privacy-purge'; document.body.appendChild(b); b.click(); });
     await page.locator('#dgDialog:not([hidden])').waitFor(); assert.match(await page.locator('#dgDialog .dgdlg-msg').textContent(), /연락처·사진·신고 위치/);
@@ -75,6 +77,9 @@ const server = http.createServer((req, res) => {
     const purged = await page.evaluate(id => S.reports.find(r => r.id === id), old);
     assert.equal(purged.contact, ''); assert.equal(purged.lat, null); assert.equal(purged.location, ''); assert.equal(purged.desc, '앞');
     assert.equal(await page.evaluate(id => S.reports.find(r => r.id === id).contact, fresh), '010-1111-2222', 'a report still inside its period is untouched');
+    assert.equal(await page.evaluate(async id => (await db.doc('reports/' + id).get()).data().contact, short), '');
+    const original = await page.evaluate(async () => (await db.doc('citizen_reports/expired-original').get()).data());
+    assert.equal(original.contact, ''); assert.equal(original.lat, null); assert.equal(original.imported, false); assert.equal(original.issue, 'keep original issue');
 
     // 5. a purged report restored from an older full backup does not get its details back
     checks.push('restore keeps destroyed details destroyed');

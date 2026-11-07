@@ -1,9 +1,10 @@
+const { readSource } = require('./source.cjs');
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const html=fs.readFileSync(path.resolve(__dirname,'../../index.html'),'utf8');
+const html=readSource(path.resolve(__dirname,'../../index.html'),'utf8');
 const from=html.indexOf('const POSITION_INPUT_MAX_M=50'),to=html.indexOf('let regPickMap=',from);
 assert.ok(from>=0&&to>from,'position quality helper source exists');
 const scope=vm.createContext({});

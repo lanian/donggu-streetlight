@@ -1,3 +1,4 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -6,7 +7,7 @@ const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 
 const root = process.env.DG_LIGHTING_ROOT || path.resolve(__dirname, '../..');
-const source = file => fs.readFileSync(path.join(root, file), 'utf8');
+const source = file => readSource(path.join(root, file), 'utf8');
 const Commands = require(path.join(root, 'app/lighting-commands.js'));
 const Model = require(path.join(root, 'app/lighting-model.js'));
 const Data = require(path.join(root, 'app/data.js'));

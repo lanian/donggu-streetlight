@@ -1,5 +1,6 @@
 .dg-work-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;text-align:left;width:100%}
 .dg-work-row small{display:block;margin-top:4px;color:var(--ink-2)}
+.dg-work-choice{display:flex;gap:8px;align-items:stretch;min-width:0}.dg-work-choice>label{display:flex;align-items:center;justify-content:center;min-width:36px;cursor:pointer}.dg-work-choice input{width:20px;height:20px;accent-color:var(--sodium)}.dg-work-choice>.dg-work-row{flex:1;min-width:0}.dg-work-choice.picked>.dg-work-row{border-color:var(--sodium);background:var(--sodium-soft)}.dg-work-select{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.dg-work-select>small{flex-basis:100%}#woBulkResults .hist{overflow-wrap:anywhere}#woEditForm input,#woEditForm select,#woEditForm textarea{max-width:100%}
 .dg-priority{font-size:12px;color:var(--ink-2)}.dg-priority.urgent,.dg-conflict{color:var(--bad);font-weight:700}
 .dg-conflict{display:block;margin-top:4px}.dg-pre{white-space:pre-wrap}
 .dg-option{display:flex;align-items:flex-start;gap:10px;padding:10px 0;min-height:44px}

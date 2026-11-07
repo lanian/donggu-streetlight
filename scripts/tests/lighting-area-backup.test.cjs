@@ -1,3 +1,4 @@
+const { readSource } = require('./source.cjs');
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -9,7 +10,7 @@ const Data = require('../../app/data.js');
 const Core = require('../../app/lighting-area-core.js');
 const Commands = require('../../app/lighting-area-commands.js');
 const Workflow = require('../../app/lighting-workflow-core.js');
-const source = name => fs.readFileSync(path.join(__dirname, '../..', name), 'utf8');
+const source = name => readSource(path.join(__dirname, '../..', name), 'utf8');
 const clone = Data.clone;
 const withoutId = ({ id, ...value }) => value;
 const record = (id, extra = {}) => ({ id, schemaVersion: 1, label: '산림 내부 제외', effect: 'exclude', reason: 'mountain', note: '보행로 경계 확인', shape: 'circle', lat: 35.14, lng: 126.93, radius: 20, vertices: [], disabled: false, createdAt: 1000, createdBy: 'original-author', updatedAt: 1000, updatedBy: 'original-author', revision: 1, operationId: 'old-area-op', ...extra });

@@ -1,5 +1,6 @@
-/* 직원 앱 Firebase 설정. 값을 채우면 GitHub Pages에서도 공유 저장·로그인·역할 강제가 켜져요.
-   비워 두면(null) 체험 모드(이 기기에만 저장)로 동작해요. 아티팩트(claude.ai) 안에서는 무시돼요. */
+/* Hosted staff Firebase configuration. Localhost/loopback uses device demo storage below.
+   These are public web-app identifiers; server credentials never belong in this file.
+   Set null to use demo mode on a hosted copy. Claude artifacts use their own adapter. */
 window.FIREBASE_CONFIG = {
   apiKey: "AIzaSyCi3DSZSxPcbIjPzJLmJ7ZYhYoLi3eJqeI",
   authDomain: "donggu-light.firebaseapp.com",
@@ -9,6 +10,11 @@ window.FIREBASE_CONFIG = {
   functionsRegion: "asia-northeast3",
   appCheckSiteKey: ""
 };
+// A local checkout must not silently use the hosted organization's shared database.
+(function () {
+  const host = typeof location === 'object' ? String(location.hostname || '').toLowerCase() : '';
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1' || host === '::1' || host === '[::1]') window.FIREBASE_CONFIG = null;
+})();
 /* 예:
 window.FIREBASE_CONFIG = {
   apiKey: "AIza...",

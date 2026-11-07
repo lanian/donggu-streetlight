@@ -26,8 +26,8 @@
   }
   function scheduleDraft() { clearTimeout(timer); timer = setTimeout(() => persistDraft().catch(warn), 160); }
   function patrolSnapshot() {
-    const p = api.patrol(); if (!p.sessionId || !(p.track.length || p.marks.length || p.spots.length || p.passed.size)) return null;
-    return { sessionId: p.sessionId, start: p.start, end: p.end || null, dong: p.dong, total: p.total, track: copy(p.track), passed: [...p.passed], marks: copy(p.marks), spots: copy(p.spots), dist: p.dist, pos: p.pos && copy(p.pos), last: p.last && copy(p.last), heading: p.heading, savedPart: p.savedPart ? copy(p.savedPart) : null, paused: true };
+    const p = api.patrol(); if (!p.sessionId || !(p.track.length || p.marks.length || p.spots.length || p.passed.size || (p.targets || []).length)) return null;
+    return { sessionId: p.sessionId, start: p.start, end: p.end || null, dong: p.dong, total: p.total, track: copy(p.track), passed: [...p.passed], marks: copy(p.marks), spots: copy(p.spots), undo: copy(p.undo || []), dist: p.dist, pos: p.pos && copy(p.pos), last: p.last && copy(p.last), heading: p.heading, savedPart: p.savedPart ? copy(p.savedPart) : null, targets: copy(p.targets || []), planId: p.planId || '', paused: true };
   }
   async function persistPatrol() {
     if (!root.DGOffline.ready) return;
@@ -103,7 +103,7 @@
   }
   async function hasUnsaved() {
     if (!root.DGOffline.ready) return hasUnsavedSync();
-    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'workDraft', 'workCompletion', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(k => root.DGOffline.list(k))]);
+    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'patrolTargets', 'inventoryDraft', 'workEdit', 'workDraft', 'workCompletion', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(k => root.DGOffline.list(k))]);
     memoryPending = jobs.some(j => j.state !== 'synced') || drafts.some(values => values.length);
     return memoryPending || hasActiveDraft();
   }

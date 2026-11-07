@@ -1,6 +1,6 @@
 /* Citizen report page: the plate box checks a typed number against the public registry (spacing, dash shape, leading
    zeros and a missing "동" do not matter) and links the chosen light; a report filed from outside the district goes
-   through without the position. The Firestore write is intercepted — nothing reaches a real project. */
+   through without the position. A local gateway is intercepted — nothing reaches a real project. */
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -25,8 +25,9 @@ const server = http.createServer((req, res) => {
   const filed = [];
   await context.route('**/*', route => {
     const url = route.request().url();
+    if (url === origin + '/report/config.js') return route.fulfill({ contentType: 'text/javascript', body: `window.REPORT_CONFIG={backend:'gateway',gatewayUrl:'${origin}/mock-gateway',allowLocalGateway:true,privacyDays:90,firestore:{}};` });
+    if (url === origin + '/mock-gateway') { filed.push({ url, body: JSON.parse(route.request().postData() || '{}') }); return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({receipt:'R261107-1234ABCD'}) }); }
     if (new URL(url).origin === origin) return route.continue();
-    if (url.startsWith('https://firestore.googleapis.com/')) { filed.push({ url, body: JSON.parse(route.request().postData() || '{}') }); return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }); }
     return route.fulfill({ status: 200, body: '', contentType: url.includes('.js') ? 'text/javascript' : 'text/plain' });
   });
   const page = await context.newPage(), errors = [], checks = [];
@@ -62,8 +63,8 @@ const server = http.createServer((req, res) => {
     await page.locator('#issues button').first().click();
     await page.locator('#send').click(); await page.locator('#done:not([hidden])').waitFor();
     assert.equal(filed.length, 1);
-    const f = filed[0].body.fields;
-    assert.equal('lat' in f, false); assert.equal(f.lightId.stringValue, dashed[at('id')]); assert.equal(f.code.stringValue, dashed[at('code')]);
+    const f = filed[0].body;
+    assert.equal(f.lat, null); assert.equal(f.lightId, dashed[at('id')]); assert.equal(f.code, dashed[at('code')]);
     assert.match(await page.locator('#receipt').textContent(), /^R\d{6}-[0-9A-F]{8}$/);
 
     assert.deepEqual(errors, []);

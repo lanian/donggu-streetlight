@@ -1,8 +1,9 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
-const source = readFileSync(resolve(__dirname, '../../index.html'),'utf8');
+const source = readSource(resolve(__dirname, '../../index.html'),'utf8');
 function fn(name, end) {
   const start = source.indexOf('function '+name+'(');
   assert.ok(start >= 0, name+' exists');

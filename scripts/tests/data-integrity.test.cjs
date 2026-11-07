@@ -1,3 +1,4 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -5,8 +6,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 
-const html = fs.readFileSync(path.join(__dirname, '../../index.html'), 'utf8');
-const dataSource = fs.readFileSync(path.join(__dirname, '../../app/data.js'), 'utf8');
+const html = readSource(path.join(__dirname, '../../index.html'), 'utf8');
+const dataSource = readSource(path.join(__dirname, '../../app/data.js'), 'utf8');
 const copy = value => JSON.parse(JSON.stringify(value));
 function section(start, end) {
   const a = html.indexOf(start), b = html.indexOf(end, a);
@@ -273,7 +274,7 @@ test('report, shared summary and CSV use the same district and date selection', 
   ];
   let csv;
   const c = context({
-    REP: { dong: '동A', data: { insp: [
+    REP: { dong: '동A', data: { key: 'fixture', insp: [
       { lightId: 'a', dong: '동A', date: 10, result: '정상', inspector: 'one' },
       { lightId: 'b', dong: '동B', date: 10, result: '고장', inspector: 'two' },
       { lightId: 'a', dong: '동A', date: 100, result: '고장', inspector: 'one' },
@@ -284,6 +285,7 @@ test('report, shared summary and CSV use the same district and date selection', 
       { start: 10, dong: '전체', passed: ['b'] },
     ] },
     repRange: () => ({ a: 1, b: 20 }),
+    reportQueryKey: () => 'fixture',
     inDong: (light, dong) => dong === '전체' || light.dong === dong,
     adongOf: light => light?.dong || '', adongOrder: () => 0,
     byId: id => lights.find(light => light.id === id),

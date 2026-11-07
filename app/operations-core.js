@@ -45,6 +45,28 @@
     const graph = { draft: ['assigned', 'cancelled'], assigned: ['in_progress', 'cancelled'], in_progress: ['completed', 'assigned', 'cancelled'], completed: ['verified', 'in_progress'], verified: ['assigned'], cancelled: ['draft'] };
     return (graph[order.status] || []).filter(s => admin || (order.status === 'assigned' && s === 'in_progress') || (order.status === 'in_progress' && s === 'completed'));
   }
+  function updateOrder(order, input, actor, admin, now) {
+    if (!admin) fail('작업 정보는 관리자만 수정할 수 있어요.', 'permission-denied');
+    if (!order || !['draft', 'assigned', 'in_progress', 'completed'].includes(order.status)) fail('진행 중인 작업의 정보만 수정할 수 있어요.', 'failed-precondition');
+    if (!input || Number(input.expectedRevision) !== Number(order.revision)) fail('다른 직원이 작업을 변경했어요. 최신 내용을 확인해 주세요.', 'conflict');
+    const fields = ['title', 'description', 'type', 'priority', 'assignedTo', 'dueAt', 'parts'];
+    if (Object.keys(input).some(key => key !== 'expectedRevision' && !fields.includes(key))) fail('수정할 수 없는 작업 정보가 포함됐어요.');
+    if (!fields.some(key => Object.prototype.hasOwnProperty.call(input, key))) fail('수정할 작업 정보를 입력해 주세요.');
+    const next = clone(order); delete next.id;
+    if (input.title !== undefined) { next.title = text(input.title, 120); if (!next.title) fail('작업 제목을 입력해 주세요.'); }
+    if (input.description !== undefined) next.description = text(input.description, 2000);
+    if (input.type !== undefined) { if (!TYPES.includes(input.type)) fail('작업 종류를 확인해 주세요.'); next.type = input.type; }
+    if (input.priority !== undefined) { if (!PRIORITIES.includes(input.priority)) fail('우선순위를 확인해 주세요.'); next.priority = input.priority; }
+    if (input.assignedTo !== undefined) next.assignedTo = text(input.assignedTo, 180);
+    if (next.status !== 'draft' && !next.assignedTo) fail('담당자를 선택해 주세요.');
+    if (input.dueAt !== undefined) { next.dueAt = finite(input.dueAt, 0, Number.MAX_SAFE_INTEGER, '완료 기한'); if (!Number.isSafeInteger(next.dueAt)) fail('완료 기한을 확인해 주세요.'); }
+    if (input.parts !== undefined) {
+      if (next.status === 'completed') fail('검수 대기 작업의 사용 자재는 작업 보완 후 수정해 주세요.', 'failed-precondition');
+      next.parts = parts(input.parts); next.costTotal = costTotal(next.parts);
+    }
+    next.revision = order.revision + 1; next.updatedAt = now; next.updatedBy = actor;
+    return next;
+  }
   function transition(order, target, input, actor, admin, now) {
     if (!order || !actions(order, actor, admin).includes(target)) fail('현재 상태 또는 담당자 권한으로 처리할 수 없어요.', 'permission-denied');
     if (Number(input.expectedRevision) !== Number(order.revision)) fail('다른 직원이 작업을 변경했어요. 최신 내용을 확인해 주세요.', 'conflict');
@@ -113,10 +135,16 @@
      2) with a start position the route begins at the nearest stop, otherwise every stop is tried as the start;
      3) the nearest-neighbour chain is then improved with 2-opt (uncrossing legs) and Or-opt (moving 1~3 stops). */
   const PLAN_MAX = 200;
+  function registryQuality(lights) {
+    const active = lights.filter(l => !l.removed && l.reg !== '반려' && !(l.reg === '대장반영' && l.linkedId));
+    return { total: lights.length, active: active.length, removed: lights.filter(l => l.removed).length,
+      approximate: active.filter(l => l.posApprox).length, inferredDong: active.filter(l => l.dongGuess).length, noPlate: active.filter(l => l.noPlate).length };
+  }
   function planVisits(lights, origin) {
-    const merged = new Map();
+    const merged = new Map(), approximate = new Map();
     for (const l of lights) {
       if (!l || l.removed || !Number.isFinite(l.lat) || !Number.isFinite(l.lng)) continue;
+      if (l.posApprox) { approximate.set(l.id, { id: l.id, code: l.code, dong: l.dong }); continue; }
       const works = Array.isArray(l.workIds) ? l.workIds : [], seen = merged.get(l.id);
       if (seen) { for (const id of works) if (!seen.workIds.includes(id)) seen.workIds.push(id); continue; }
       merged.set(l.id, { id: l.id, code: l.code, dong: l.dong, lat: l.lat, lng: l.lng, workIds: [...new Set(works)] });
@@ -126,9 +154,31 @@
     const start = origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng) ? { lat: origin.lat, lng: origin.lng } : null;
     const order = routeOrder(left, start);
     const stops = order.map(i => ({ ...left[i], distanceFromPrevious: 0, visited: false }));
-    const plan = { stops, distance: 0, method: 'straight-line-optimized', createdAt: Date.now() };
+    const plan = { stops, distance: 0, method: 'straight-line-optimized', createdAt: Date.now(), excludedApproximate: [...approximate.values()].filter(l => !merged.has(l.id)) };
     if (start) { plan.origin = start; plan.startDistance = stops.length ? Math.round(distance(start, stops[0])) : 0; }
     return planLegs(plan);
+  }
+  // Old plans did not retain posApprox. Recheck the current registry without losing the user's order or visited flags.
+  function reconcilePlan(plan, lookup) {
+    const next = clone(plan), approximate = new Map((next.excludedApproximate || []).map(s => [s.id, s])), unavailable = new Map((next.excludedUnavailable || []).map(s => [s.id, s]));
+    const visible = next.stops || [], candidates = new Map([...(next.pendingPositions || []), ...visible].map(stop => [stop.id, stop]));
+    const visibleIds = new Set(visible.map(stop => stop.id)); let index = 0;
+    // Reordering visible stops keeps excluded stops in their old gaps. Keep the full stop, including visits/work IDs,
+    // while the initial Firebase override snapshot is still missing or showing the uncorrected registry estimate.
+    const order = (next.positionOrder || visible.map(stop => stop.id)).filter(id => candidates.has(id)).map(id => visibleIds.has(id) ? visible[index++].id : id);
+    for (const id of candidates.keys()) if (!order.includes(id)) order.push(id);
+    next.positionOrder = [...new Set(order)]; next.pendingPositions = [];
+    next.stops = next.positionOrder.flatMap(id => {
+      const stop = candidates.get(id);
+      const current = lookup(stop.id);
+      if (!current || current.removed || !Number.isFinite(current.lat) || !Number.isFinite(current.lng)) { approximate.delete(stop.id); unavailable.set(stop.id, { id: stop.id, code: stop.code }); next.pendingPositions.push(stop); return []; }
+      if (current.posApprox) { unavailable.delete(stop.id); approximate.set(stop.id, { id: stop.id, code: current.code || stop.code, dong: current.dong }); next.pendingPositions.push(stop); return []; }
+      approximate.delete(stop.id); unavailable.delete(stop.id);
+      return [{ ...stop, code: current.code || stop.code, dong: current.dong || stop.dong, lat: current.lat, lng: current.lng }];
+    });
+    next.excludedApproximate = [...approximate.values()]; next.excludedUnavailable = [...unavailable.values()];
+    planLegs(next); if (next.origin) next.startDistance = next.stops.length ? Math.round(distance(next.origin, next.stops[0])) : 0;
+    return next;
   }
   /* legs between consecutive stops; the walk from the start position to the first stop is kept apart in startDistance */
   function planLegs(plan) {
@@ -254,7 +304,28 @@
     if (item.revision !== expectedRevision) fail('재고가 변경됐어요. 최신 수량을 확인해 주세요.', 'conflict');
     const next = finite(item.quantity, 0, 100000000, '현재 재고') + finite(delta, -100000000, 100000000, '입출고');
     if (next < 0) fail('재고보다 많은 수량을 출고할 수 없어요.');
+    if (next > 100000000) fail('재고 수량이 허용 범위를 넘었어요.');
     return { ...item, quantity: Math.round(next * 1000) / 1000, revision: item.revision + 1 };
   }
-  return { STATES, PRIORITIES, TYPES, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, transition, inspectionState, kstDateKey, workQuery, filterOrders, distance, planLegs, PLAN_MAX, planVisits, normalizeRegistry, registryDiff, analytics, inventoryChange };
+  // Informational forecast only. Already deducted quantities on reopened work must not be counted twice.
+  function inventoryForecast(inventory, orders) {
+    const rows = (inventory || []).map(item => ({ id: item.id, name: item.name, unit: item.unit, quantity: Number(item.quantity) || 0, planned: 0, available: Number(item.quantity) || 0, shortage: 0, workIds: [] }));
+    const byId = new Map(rows.map(row => [row.id, row])), unlinked = [];
+    for (const work of orders || []) {
+      if (!['draft', 'assigned', 'in_progress', 'completed'].includes(work.status)) continue;
+      const wanted = new Map();
+      for (const part of work.parts || []) {
+        const qty = Number(part.qty); if (!Number.isFinite(qty) || qty <= 0) continue;
+        if (!part.inventoryId || !byId.has(part.inventoryId)) { unlinked.push({ workId: work.id, name: part.name, qty, inventoryId: part.inventoryId || '' }); continue; }
+        wanted.set(part.inventoryId, (wanted.get(part.inventoryId) || 0) + qty);
+      }
+      for (const [id, qty] of wanted) {
+        const net = Math.max(0, qty - (Number(work.stockApplied?.[id]) || 0)); if (!net) continue;
+        const row = byId.get(id); row.planned = Math.round((row.planned + net) * 1000) / 1000; row.workIds.push(work.id);
+      }
+    }
+    for (const row of rows) { row.available = Math.round((row.quantity - row.planned) * 1000) / 1000; row.shortage = Math.max(0, -row.available); row.workIds = [...new Set(row.workIds)]; }
+    return { rows, unlinked };
+  }
+  return { STATES, PRIORITIES, TYPES, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, updateOrder, transition, inspectionState, kstDateKey, workQuery, filterOrders, distance, planLegs, PLAN_MAX, registryQuality, planVisits, reconcilePlan, normalizeRegistry, registryDiff, analytics, inventoryChange, inventoryForecast };
 });

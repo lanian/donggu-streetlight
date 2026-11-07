@@ -1,10 +1,11 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(path.resolve(__dirname, '../../index.html'), 'utf8');
+const source = readSource(path.resolve(__dirname, '../../index.html'), 'utf8');
 function between(start, end) {
   const from = source.indexOf(start);
   const to = source.indexOf(end, from + start.length);

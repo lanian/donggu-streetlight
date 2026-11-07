@@ -1,3 +1,4 @@
+const { readSource } = require('./source.cjs');
 /* Verify area clipping against the production light grid and review functions. */
 'use strict';
 const test = require('node:test');
@@ -8,11 +9,11 @@ const vm = require('node:vm');
 const Model = require('../../app/lighting-model.js');
 const Areas = require('../../app/lighting-area-core.js');
 const Field = require('../../app/field.js');
-const html = fs.readFileSync(path.join(__dirname, '../../index.html'), 'utf8');
+const html = readSource(path.join(__dirname, '../../index.html'), 'utf8');
 const grid = html.slice(html.indexOf('const LIGHT_MODEL='), html.indexOf('/* ---------- road network:'));
 const roadConstants = html.slice(html.indexOf('const ROAD_BBOX='), html.indexOf('let ROADS=null;'));
 const roadAreas = html.slice(html.indexOf('function roadAreas(G)'), html.indexOf('/* ---------- street map'));
-const review = fs.readFileSync(path.join(__dirname, '../../app/lighting-review.js'), 'utf8');
+const review = readSource(path.join(__dirname, '../../app/lighting-review.js'), 'utf8');
 const NOW = Date.UTC(2026, 9, 26, 12), latitude = 35.14, longitude = 126.93;
 const kx = 111320 * Math.cos(latitude * Math.PI / 180), ky = 110540;
 const xy = (x, y = 0) => ({ lat: latitude + y / ky, lng: longitude + x / kx });

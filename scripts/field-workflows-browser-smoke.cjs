@@ -90,10 +90,16 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.locator('#dgReportWork').getAttribute('data-report-id'), 'field-ui-duplicate');
     await page.evaluate(() => workLinkRace.restore());
     results.push('delayed linked-work detail cannot replace a newer report connection view');
+    assert.equal(await page.locator('[data-fw="new-from-report"]').isDisabled(), true);
+    await page.locator('[data-fw="open-linked-work"]').click();
+    await poll(page, id => DGOperations.state.currentOrder?.id === id && !!document.querySelector('#woDetail'), first, 'already-linked report opens its existing work');
+    assert.equal(await page.evaluate(async () => (await DGData.readAll(db, 'workOrders')).length), 3);
+    results.push('already-linked report disables competing new work and opens the existing work without duplication');
+    await page.evaluate(async id => { await db.doc('reports/field-ui-unlinked').set({ lightId: id, issue: '꺼짐', desc: '아직 보수 작업에 연결하지 않은 신고', status: '접수', createdAt: Date.now() }); await DGWorkflows.openReportWork('field-ui-unlinked'); }, location.id);
     await page.locator('[data-fw="new-from-report"]').click();
-    assert.equal(await page.locator('[data-work-report="field-ui-duplicate"]').isChecked(), true);
+    assert.equal(await page.locator('[data-work-report="field-ui-unlinked"]').isChecked(), true);
     const selectedDraft = await page.evaluate(() => DGOperations.state.draft);
-    assert.equal(selectedDraft.reportIds.includes('field-ui-duplicate'), true);
+    assert.equal(selectedDraft.reportIds.includes('field-ui-unlinked'), true);
     await page.evaluate(async () => { await DGOperations.clearWorkDraft(DGOperations.state.draft, 'workDraft'); closeSheet(); });
     results.push('report selection is preserved when opening a new work draft');
 

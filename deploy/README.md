@@ -45,7 +45,7 @@ Firebase 웹 앱 설정은 클라이언트가 읽는 공개 설정입니다. 서
 ## Firebase 운영 준비
 
 1. 운영할 프로젝트에 Firestore와 Google 로그인을 준비하고 실제 공개 도메인을 등록합니다. 배포 전에 프로젝트 ID를 확인합니다.
-2. `firebase-config.js`에 Firebase 웹 앱 설정을 넣습니다. `null`이면 기기 체험 모드입니다. 값이 있으나 연결에 실패하면 오류·재시도 화면을 표시하며 체험 모드로 자동 전환하지 않습니다.
+2. `firebase-config.js`의 호스팅용 Firebase 웹 앱 설정을 운영 프로젝트와 대조합니다. `null`이면 기기 체험 모드입니다. 값이 있으나 연결에 실패하면 오류·재시도 화면을 표시하며 체험 모드로 자동 전환하지 않습니다.
 3. `firestore.rules`와 `firestore.indexes.json`을 배포합니다. `firebase.json`이 두 파일을 가리킵니다. 인덱스가 준비된 뒤 시설별 이력·사진·작업 이력과 기간 조회를 확인합니다.
 4. 운영자가 실제 Auth UID를 확인하고 초기 관리자 설정 계획을 실행합니다. 기본 명령은 서버에 연결하거나 쓰지 않습니다.
 
@@ -64,7 +64,7 @@ npx firebase-tools@15.34.1 functions:secrets:set REPORT_RATE_SECRET --project PR
 npx firebase-tools@15.34.1 deploy --only firestore:rules,firestore:indexes,functions --project PROJECT_ID
 ```
 
-Functions 런타임은 Node.js 22, 지역은 `asia-northeast3`입니다. 직원 앱에서 서버 호출을 쓰려면 `functionsEnabled`, `functionsRegion`, `appCheckSiteKey`를 설정합니다. 주민 신고는 `report/config.js`의 `backend: "gateway"`, `gatewayUrl`, App Check와 같은 프로젝트의 Firebase 웹 앱 설정을 연결합니다. 무료 요금제에서는 `backend: "firestore"`로 신고 페이지가 Firestore에 직접 접수하고 서버 규칙이 항목을 검사합니다(횟수 제한 없음, [안내](../docs/citizen-report-plan.md)).
+Functions 런타임은 Node.js 22, 지역은 `asia-northeast3`입니다. 직원 앱에서 서버 호출을 쓰려면 `functionsEnabled`, `functionsRegion`, `appCheckSiteKey`를 설정합니다. 주민 신고는 `report/config.js`의 `backend: "gateway"`, `gatewayUrl`, App Check와 같은 프로젝트의 Firebase 웹 앱 설정을 연결합니다. 공개 Firestore 직접 접수는 차단합니다. 게이트웨이 운영 배포를 준비하지 못한 경우 실제 문자·이메일 수신처를 설정하거나 접수 준비 중으로 유지합니다. 호스팅된 직원 설정은 `donggu-light`를 가리키지만 localhost·loopback 실행은 항상 체험 모드입니다.
 
 서버 배포 후 공개 접수·초대·감사 트리거·만료 정리 예약 작업의 실제 실행과 로그를 확인합니다. 예약 함수와 클라이언트 설정만으로 과거 문서에 만료가 생기지는 않으므로 필요한 경우 보관 기간 이관 계획도 검토합니다. [서버 운영 안내](../docs/security-operations.md)에 상세 경계를 정리했습니다.
 

@@ -1,12 +1,13 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const Model = require('../../app/lighting-model.js');
-const html = fs.readFileSync(path.join(__dirname, '../../index.html'), 'utf8');
+const html = readSource(path.join(__dirname, '../../index.html'), 'utf8');
 const grid = html.slice(html.indexOf('const LIGHT_MODEL='), html.indexOf('/* ---------- road network:'));
-const review = fs.readFileSync(path.join(__dirname, '../../app/lighting-review.js'), 'utf8');
+const review = readSource(path.join(__dirname, '../../app/lighting-review.js'), 'utf8');
 function run(streetId, reverse = false, distance = 60) {
   const lights = [
     { id: streetId, kind: '가로등', code: 'street', lat: 35.14, lng: 126.93, lampType: 'LED일반형', status: '정상' },

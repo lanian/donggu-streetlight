@@ -203,10 +203,11 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       }
     });
 
-    test('a resident may file a well-formed report directly, create-only, and can never read or change one', async () => {
+    test('public direct intake is closed even for a well-formed report, and residents cannot access originals', async () => {
       const db=anonymous(),now=Date.now(),id='qr-'+'a'.repeat(24);
       const good={schemaVersion:1,receipt:'R261105-1A2B3C4D',code:'산수동 642',lightId:'',issue:'불이 꺼져 있어요',desc:'마트 앞',lat:35.146,lng:126.923,acc:12,photo:'data:image/jpeg;base64,dGVzdA==',contact:'010-0000-0000',consent:true,consentDays:90,imported:false,at:now,privacyExpiresAt:now+90*86400000};
-      await assertSucceeds(setDoc(doc(db,'citizen_reports/'+id),good));
+      await assertFails(setDoc(doc(db,'citizen_reports/'+id),good));
+      await assertFails(setDoc(doc(admin(),'citizen_reports/'+id),good));
       await assertFails(setDoc(doc(db,'citizen_reports/'+id),good),'the same report cannot be written twice');
       await assertFails(getDoc(doc(db,'citizen_reports/'+id)));
       const bad=[{imported:true},{issue:'<b>아무거나</b>'},{lat:37.5,lng:127},{photo:'https://tracker.example/x.gif'},{photo:'data:image/jpeg;base64,'+'A'.repeat(230000)},{desc:'x'.repeat(501)},{contact:'010',consent:false},{at:now-3600000},{privacyExpiresAt:now+20*365*86400000},{role:'admin'},{receipt:'anything'}];
@@ -591,6 +592,24 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       await assertSucceeds(updateDoc(doc(admin(), 'reports/kept'), { status: '처리중', updatedAt: 2000 }));
     });
 
+    test('manual privacy command removes original and imported private fields through authorized transactions', async () => {
+      const Privacy = require('../../app/privacy.js'), now = Date.now(), day = 86400000;
+      await seed({
+        'citizen_reports/expired-original': citizen({ at: now - 120 * day, privacyExpiresAt: now - day, contact: 'synthetic', photo: 'data:image/jpeg;base64,AAAA', lat: 35.14, lng: 126.92 }),
+        'reports/short-retention': { issue: '꺼짐', location: '', dong: '', code: '산수동 1', lightId: null, desc: 'keep', via: '전화', receipt: '', contact: 'synthetic', status: '접수', createdAt: now - 60 * day, privacyExpiresAt: now - day, reporterId: 'inspector-a' }
+      });
+      const adapter = client => ({ doc: name => doc(client, name), runTransaction: fn => runTransaction(client, fn) });
+      const targets = [{ collection: 'reports', id: 'short-retention' }, { collection: 'citizen_reports', id: 'expired-original' }];
+      await assertFails(Privacy.execute({ actor: 'inspector-a', at: now, privacyDays: 90, targets }, { actor: 'inspector-a', admin: true, firebase: adapter(staff()) }));
+      const client = admin();
+      await assertSucceeds(Privacy.execute({ actor: 'admin', at: now, privacyDays: 90, targets }, { actor: 'admin', admin: true, firebase: adapter(client) }));
+      for (const target of targets) {
+        const row = (await getDoc(doc(client, target.collection + '/' + target.id))).data();
+        assert.equal(row.contact, ''); assert.equal(row.lat, null); assert.equal(row.photo, null); assert.ok(row.privacyPurgedAt);
+        assert.equal(row.privacyExpiresAt, now - day);
+      }
+    });
+
     test('server-owned restore receipts and health cannot be forged by client administrators',async()=>{
       await assertFails(setDoc(doc(admin(),'restoreOperations/forged'),{status:'applied',by:'admin'}));
       await assertFails(setDoc(doc(admin(),'systemHealth/retention'),{lastSuccessAt:Date.now()}));
@@ -639,6 +658,54 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       assert.equal((await getDoc(doc(admin(),'reports/relink'))).data().receipt,'R-original');
       await assertFails(updateDoc(doc(admin(),'reportEvents/link-command'),{reason:'변경'}));
       await assertFails(updateDoc(doc(staff(),'reports/relink'),{lightId:'p2'}));
+    });
+
+    test('patrol-only escalation preserves full inspection and reinspection and cannot clear a fault', async () => {
+      const db = staff();
+      await assertSucceeds(setDoc(doc(db, 'lights/patrol-first'), { status: '점검필요', statusAt: 1000, updatedAt: 1000 }));
+      await seed({ 'lights/p1': { status: '정상', statusAt: 1000, updatedAt: 1000, lastInspected: 900, lastResult: '정상', redoNote: '전선 점검' } });
+      await assertSucceeds(updateDoc(doc(db, 'lights/p1'), { status: '고장', statusAt: 2000, updatedAt: 2000 }));
+      const saved = (await getDoc(doc(db, 'lights/p1'))).data();
+      assert.equal(saved.lastInspected, 900); assert.equal(saved.redoNote, '전선 점검'); assert.equal(saved.lastResult, '정상');
+      await assertFails(updateDoc(doc(db, 'lights/p1'), { status: '정상', statusAt: 3000, updatedAt: 3000 }));
+      await assertFails(updateDoc(doc(db, 'lights/p1'), { status: '점검필요', statusAt: 3000, updatedAt: 3000 }));
+      await assertFails(updateDoc(doc(db, 'lights/p1'), { statusAt: 1500, updatedAt: 1500 }));
+      await assertFails(updateDoc(doc(db, 'lights/p1'), { statusAt: Date.now() + 600000, updatedAt: Date.now() + 600000 }));
+    });
+
+    test('metadata edits on completed work preserve its original completer and evidence', async () => {
+      const C = require('../../app/operations-core'), manager = admin();
+      const work = { ...C.createOrder({ title: '검수 대기', assignedTo: 'inspector-a' }, { id: 'p1', code: '산수동 1', dong: '산수동' }, 'admin', 1000), status: 'completed', revision: 3, updatedAt: 3000, updatedBy: 'inspector-a', afterPhotos: ['waiting-photo'], completedAt: 3000, completedBy: 'inspector-a', completionNote: '수리' };
+      await seed({ 'workOrders/edit-waiting': work, 'photos/waiting-photo': photo({ workId: 'edit-waiting', kind: 'work' }) });
+      await assertFails(updateDoc(doc(staff(), 'workOrders/edit-waiting'), { title: '임의 변경', revision: 4, updatedAt: 4000, updatedBy: 'inspector-a' }));
+      await assertSucceeds(updateDoc(doc(manager, 'workOrders/edit-waiting'), { title: '검수 전 제목 정정', assignedTo: 'inspector-b', dueAt: 5000, priority: '긴급', revision: 4, updatedAt: 4000, updatedBy: 'admin' }));
+      const saved = (await getDoc(doc(manager, 'workOrders/edit-waiting'))).data();
+      assert.equal(saved.completedBy, 'inspector-a'); assert.equal(saved.completedAt, 3000); assert.deepEqual(saved.afterPhotos, ['waiting-photo']);
+      await assertFails(updateDoc(doc(manager, 'workOrders/edit-waiting'), { completionNote: '대체', revision: 5, updatedAt: 5000 }));
+    });
+
+    test('inventory metadata edits keep a fingerprinted immutable history receipt', async () => {
+      const manager = admin(), item = { name: '램프', unit: '개', quantity: 10, unitCost: 100, revision: 1, updatedAt: 1000, updatedBy: 'admin' };
+      await seed({ 'inventory/item': item });
+      const batch = writeBatch(manager);
+      batch.update(doc(manager, 'inventory/item'), { name: 'LED 램프', unitCost: 150, revision: 2, updatedAt: 2000 });
+      batch.set(doc(manager, 'inventoryMoves/item-edit'), { itemId: 'item', delta: 0, reason: '기본정보 수정', at: 2000, by: 'admin', revision: 2, requestHash: 'a'.repeat(64) });
+      await assertSucceeds(batch.commit());
+      await assertFails(updateDoc(doc(manager, 'inventoryMoves/item-edit'), { reason: '이력 대체' }));
+      await assertFails(setDoc(doc(manager, 'inventoryMoves/bad-hash'), { itemId: 'item', delta: 0, reason: '기본정보 수정', at: 2000, by: 'admin', revision: 2, requestHash: 'invalid' }));
+    });
+
+    test('real work assignment and inventory metadata commands are atomic, idempotent authorized transactions', async () => {
+      const C = require('../../app/operations-core'), W = require('../../app/work-commands'), manager = admin();
+      const context = { db: manager, user: 'admin', admin: true, fb: { doc: key => doc(manager, key), runTransaction: fn => runTransaction(manager, fn) } };
+      await seed({ 'workOrders/unassigned': C.createOrder({ title: '일괄 배정' }, { id: 'p1', code: '산수동 1', dong: '산수동' }, 'admin', 1000), 'inventory/item': { name: '램프', unit: '개', quantity: 10, unitCost: 100, revision: 1, updatedAt: 1000, updatedBy: 'admin' } });
+      const assign = { id: 'assign-draft', kind: 'assign', workId: 'unassigned', actor: 'admin', at: 2000, input: { expectedRevision: 1, assignedTo: 'inspector-a', priority: '긴급', dueAt: 5000 } };
+      await W.execute(assign, context); await W.execute(assign, context);
+      const work = (await getDoc(doc(manager, 'workOrders/unassigned'))).data(); assert.equal(work.status, 'assigned'); assert.equal(work.revision, 2); assert.equal(work.priority, '긴급');
+      const inventory = { id: 'stock-info-edit', kind: 'inventory-update', itemId: 'item', actor: 'admin', at: 3000, expectedRevision: 1, input: { name: 'LED 램프', unitCost: 150 }, reason: '기준 정보 정정' };
+      await W.execute(inventory, context); await W.execute(inventory, context);
+      const item = (await getDoc(doc(manager, 'inventory/item'))).data(); assert.equal(item.quantity, 10); assert.equal(item.revision, 2); assert.equal(item.unitCost, 150);
+      const event = (await getDoc(doc(manager, 'inventoryMoves/stock-info-edit'))).data(); assert.equal(event.delta, 0); assert.match(event.requestHash, /^[a-f0-9]{64}$/);
     });
 
     test('admin can attach a report to a completed work without replacing its original completer',async()=>{

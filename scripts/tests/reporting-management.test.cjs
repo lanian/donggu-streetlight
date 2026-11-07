@@ -1,9 +1,10 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const Reporting = require('../../app/reporting.js');
-const source = name => fs.readFileSync(require('node:path').join(__dirname, '../..', name), 'utf8');
+const source = name => readSource(require('node:path').join(__dirname, '../..', name), 'utf8');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 test('photo preview pagination never changes the full selected set or mixes different repairs', () => {
@@ -75,7 +76,7 @@ test('audit permission failure makes one request and only an explicit retry star
 
 test('an unconfigured shared server is shown as unconnected without requesting a health call', () => {
   const f = management(); const html = f.manager.healthView();
-  assert.match(html, /공유 운영 서버가 연결되지/);
+  assert.match(html, /서버 관리 함수가 연결되지/);
   assert.equal(f.scheduled.length, 0);
   assert.doesNotMatch(html, /정상 기록 있음/);
 });

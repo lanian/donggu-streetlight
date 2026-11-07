@@ -23,32 +23,41 @@
     job = clone(job); identifier(job.id);
     if (job.actor !== context.user) fail('저장 작업의 계정이 현재 계정과 달라요.', 'permission-denied');
     if (job.kind === 'report-link') return prepareReportLink(job, read, context);
-    const inventoryOnly = job.kind === 'inventory-create' || job.kind === 'inventory-move';
-    if (!inventoryOnly && !['create', 'transition', 'link-reports'].includes(job.kind)) fail('지원하지 않는 업무 명령이에요.');
+    const inventoryOnly = ['inventory-create', 'inventory-move', 'inventory-update'].includes(job.kind);
+    if (!inventoryOnly && !['create', 'transition', 'link-reports', 'update', 'assign'].includes(job.kind)) fail('지원하지 않는 업무 명령이에요.');
     if (inventoryOnly) identifier(job.itemId); else identifier(job.workId);
-    const requestHash = inventoryOnly ? null : await fingerprint(job);
+    const requestHash = !inventoryOnly || job.kind === 'inventory-update' ? await fingerprint(job) : null;
     const eventPath = (inventoryOnly ? 'inventoryMoves/' : 'workEvents/') + job.id;
     const existingEvent = await read(eventPath);
     if (existingEvent) {
-      if (existingEvent.by !== job.actor || (inventoryOnly ? existingEvent.itemId !== job.itemId : existingEvent.workId !== job.workId || existingEvent.requestHash && existingEvent.requestHash !== requestHash)) fail('작업 ID가 다른 기록에 사용됐어요.', 'conflict');
+      if (existingEvent.by !== job.actor || (inventoryOnly ? existingEvent.itemId !== job.itemId : existingEvent.workId !== job.workId) || (requestHash && existingEvent.requestHash && existingEvent.requestHash !== requestHash) || (job.kind === 'inventory-update' && existingEvent.requestHash !== requestHash)) fail('작업 ID가 다른 기록에 사용됐어요.', 'conflict');
       return { ops: [], expected: {}, alreadyApplied: true };
     }
     const expected = { [eventPath]: null }, ops = [];
     if (inventoryOnly) {
       if (!context.admin) fail('재고는 관리자만 변경할 수 있어요.', 'permission-denied');
       const path = 'inventory/' + job.itemId, old = await read(path);
-      let item, delta;
+      let item, delta, reason = core.text(job.reason || '초기 입고', 300);
       if (job.kind === 'inventory-create') {
         if (old) fail('이미 등록된 자재 ID예요.', 'conflict');
         item = { name: core.text(job.input.name, 100), unit: core.text(job.input.unit || '개', 20), quantity: Number(job.input.quantity || 0), unitCost: Number(job.input.unitCost || 0), revision: 1, updatedAt: job.at, updatedBy: job.actor };
         if (!item.name || !Number.isFinite(item.quantity) || item.quantity < 0 || item.quantity > 100000000 || !Number.isFinite(item.unitCost) || item.unitCost < 0 || item.unitCost > 1000000000) fail('자재 이름·수량·단가를 확인해 주세요.');
         expected[path] = null; delta = item.quantity;
+      } else if (job.kind === 'inventory-update') {
+        if (!old) fail('자재를 찾을 수 없어요.');
+        if (old.revision !== job.expectedRevision) fail('자재 정보가 변경됐어요. 최신 내용을 확인해 주세요.', 'conflict');
+        if (!job.input || Object.keys(job.input).some(key => !['name', 'unitCost'].includes(key)) || !reason || !core.text(job.reason, 300)) fail('자재 이름·단가와 수정 사유를 확인해 주세요.');
+        const name = core.text(job.input.name, 100), unitCost = Number(job.input.unitCost);
+        if (!name || !Number.isFinite(unitCost) || unitCost < 0 || unitCost > 1000000000) fail('자재 이름·단가를 확인해 주세요.');
+        item = { ...old, name, unitCost, revision: old.revision + 1, updatedAt: job.at, updatedBy: job.actor }; delete item.id;
+        expected[path] = old.revision; delta = 0;
+        reason = core.text('기본정보 수정 · ' + old.name + ' → ' + name + ' · 단가 ' + old.unitCost + ' → ' + unitCost + '원 · ' + core.text(job.reason, 180), 500);
       } else {
         if (!old) fail('자재를 찾을 수 없어요.');
         item = core.inventoryChange(old, Number(job.delta), job.expectedRevision);
         item.updatedAt = job.at; item.updatedBy = job.actor; expected[path] = old.revision; delta = Number(job.delta);
       }
-      ops.push({ path, data: item }, { path: eventPath, data: { itemId: job.itemId, delta, reason: core.text(job.reason || '초기 입고', 300), at: job.at, by: job.actor, revision: item.revision } });
+      ops.push({ path, data: item }, { path: eventPath, data: { itemId: job.itemId, delta, reason, at: job.at, by: job.actor, revision: item.revision, ...(requestHash ? { requestHash } : {}) } });
       return { ops, expected };
     }
     const path = 'workOrders/' + job.workId, old = await read(path);
@@ -58,6 +67,14 @@
       if (old) fail('같은 작업 ID가 이미 있어요.', 'conflict');
       if (job.input.reportIds && (!Array.isArray(job.input.reportIds) || job.input.reportIds.length > 20)) fail('한 작업에는 신고를 최대 20건 연결할 수 있어요.');
       next = core.createOrder(job.input, job.light, job.actor, job.at); expected[path] = null;
+    } else if (job.kind === 'assign') {
+      if (!old || old.status !== 'draft') fail('배정 대기 작업만 배정할 수 있어요.', 'failed-precondition');
+      if (!job.input || Object.keys(job.input).some(key => !['expectedRevision', 'assignedTo', 'dueAt', 'priority'].includes(key))) fail('배정할 담당자·기한·우선순위를 확인해 주세요.');
+      next = core.updateOrder(old, job.input, job.actor, context.admin, job.at);
+      if (!next.assignedTo) fail('담당자를 선택해 주세요.');
+      next.status = 'assigned'; expected[path] = old.revision;
+    } else if (job.kind === 'update') {
+      next = core.updateOrder(old, job.input, job.actor, context.admin, job.at); expected[path] = old.revision;
     } else if (job.kind === 'link-reports') {
       if (!context.admin) fail('신고 연결은 관리자만 변경할 수 있어요.', 'permission-denied');
       if (!old || !active(old)) fail('진행 중인 작업에만 신고를 연결할 수 있어요.');
@@ -98,7 +115,8 @@
       if (!photo || photo.lightId !== next.lightId || photo.workId !== job.workId || photo.kind !== 'work' || typeof photo.data !== 'string' || !photo.data.startsWith('data:image/')) fail('작업에 연결된 원본 사진을 확인하지 못했어요. 다시 첨부해 주세요.', 'failed-precondition');
       if (!Object.prototype.hasOwnProperty.call(expected, 'photos/' + id)) expected['photos/' + id] = { document: clone(photo) };
     }
-    if (job.target === 'verified') {
+    const verifying = job.kind === 'transition' && job.target === 'verified';
+    if (verifying) {
       if (!next.afterPhotos.length) fail('조치 후 원본 사진이 필요해요.');
       const wanted = {};
       for (const part of next.parts) if (part.inventoryId) wanted[part.inventoryId] = (wanted[part.inventoryId] || 0) + part.qty;
@@ -135,7 +153,7 @@
       }
     }
     ops.push({ path, data: next });
-    ops.push({ path: eventPath, data: { workId: job.workId, lightId: next.lightId, fromStatus: old ? old.status : '', toStatus: next.status, type: job.kind === 'create' ? 'created' : job.kind === 'link-reports' ? 'reports-linked' : 'transition', note: core.text(job.input.verificationNote || job.input.completionNote || job.note || '', 2000), at: job.at, by: job.actor, revision: next.revision, createdAt: next.createdAt, costTotal: next.costTotal, costDelta: job.target === 'verified' ? next.costTotal - (Number(old.accountedCost) || 0) : 0, requestHash } });
+    ops.push({ path: eventPath, data: { workId: job.workId, lightId: next.lightId, fromStatus: old ? old.status : '', toStatus: next.status, type: job.kind === 'create' ? 'created' : job.kind === 'link-reports' ? 'reports-linked' : job.kind === 'update' ? 'updated' : 'transition', note: core.text(job.input.verificationNote || job.input.completionNote || job.note || (job.kind === 'update' ? '작업 정보 수정' : ''), 2000), at: job.at, by: job.actor, revision: next.revision, createdAt: next.createdAt, costTotal: next.costTotal, costDelta: verifying ? next.costTotal - (Number(old.accountedCost) || 0) : 0, requestHash } });
     return { ops, expected, order: next };
   }
   async function prepareReportLink(job, read, context) {

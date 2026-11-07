@@ -1,9 +1,10 @@
+const { readSource } = require('./source.cjs');
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {webcrypto}=require('node:crypto');
-const html=fs.readFileSync(path.resolve(__dirname,'../../index.html'),'utf8');
-const dataJS=fs.readFileSync(path.resolve(__dirname,'../../app/data.js'),'utf8');
+const html=readSource(path.resolve(__dirname,'../../index.html'),'utf8');
+const dataJS=readSource(path.resolve(__dirname,'../../app/data.js'),'utf8');
 const clone=x=>JSON.parse(JSON.stringify(x));
 function context(extra={}){const security=require('../../security.js'),c=vm.createContext({console,Date,Math,Blob,crypto:webcrypto,window:{},FB:null,S:{me:'staff'},render(){},toast(){},confirm:()=>true,dgConfirm:async()=>true,resolveNames(){},...security,DGSecurity:security,...extra});vm.runInContext(dataJS,c);c.listAllRecords=(name,opts)=>c.DGData.readAll(c.db,name,opts);return c}
 function load(c,start,end){const a=html.indexOf(start),b=html.indexOf(end,a);assert(a>=0&&b>a,start);vm.runInContext(html.slice(a,b),c)}
@@ -106,7 +107,7 @@ test('reports include an older period beyond 1,000 newer records and refresh aft
 });
 
 test('gallery retrieves the 41st latest photo and 31 patrol sessions give full 30-day coverage',async()=>{
-  const now=Date.now(),photos={},patrols={},lights=[];for(let i=1;i<=41;i++)photos['ph'+i]={lightId:'p',at:i,data:'data:image/png;base64,aGVsbG8=',label:'전경'};for(let i=0;i<31;i++){lights.push({id:'p'+i,lat:35});patrols['trip'+i]={start:now-i*1000,passed:['p'+i]}}
+  const now=Date.now(),photos={},patrols={},lights=[];for(let i=1;i<=41;i++)photos['ph'+i]={lightId:'p',at:i,data:'data:image/png;base64,aGVsbG8=',label:'전경'};for(let i=0;i<31;i++){lights.push({id:'p'+i,lat:35,lng:126});patrols['trip'+i]={start:now-i*1000,passed:['p'+i]}}
   const {db}=local({photos,patrols}),box={},c=context({db,GAL:{},S:{lights,patrols:[]},$:s=>s==='#galBox'?box:{},esc:String,fmtD:String,inDong:()=>true,PT_DAYS:30});
   load(c,'async function loadGallery(id){','async function getPhoto');await c.loadGallery('p');assert(c.GAL.ph41);assert.match(box.innerHTML,/ph41/);
   load(c,'let PT_LAST={};','const pt=');load(c,'function ptCoverage(dong){','function ptSay');await c.loadPatrolCoverage();assert.equal(c.ptCoverage('전체').cov,31);assert.equal(c.ptCoverage('전체').pct,100);

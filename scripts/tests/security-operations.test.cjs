@@ -1,10 +1,11 @@
+const { readSource } = require('./source.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
 const security=require('../../security');
-const html=fs.readFileSync(path.resolve(__dirname,'../../index.html'),'utf8');
+const html=readSource(path.resolve(__dirname,'../../index.html'),'utf8');
 const between=(a,b)=>{const start=html.indexOf(a),end=html.indexOf(b,start);assert.ok(start>=0&&end>start);return html.slice(start,end);};
 test('all CSV exports use the common formula-safe cell encoder',()=>{
   for(const value of ['=1+1','+SUM(A1)','-1+2','@cmd',' \t=1','＝1+1'])assert.ok(security.csvCell(value).startsWith('"\''));
@@ -23,7 +24,7 @@ test('role change updates an existing role without erasing its assigned district
   vm.createContext(sandbox);vm.runInContext(between('async function setRole(','async function write('),sandbox);await vm.runInContext('setRole("worker","admin")',sandbox);assert.deepEqual(saved.dongs,['산수1동']);
 });
 test('Firebase devices default to shared mode while local demo remains durable',()=>{
-  const source=fs.readFileSync(path.resolve(__dirname,'../../security.js'),'utf8');
+  const source=readSource(path.resolve(__dirname,'../../security.js'),'utf8');
   for(const [config,expected] of [[{projectId:'demo'},false],[null,true]]){const window={FIREBASE_CONFIG:config,localStorage:{getItem:()=>null}};vm.runInNewContext(source,{window});assert.equal(window.DG_DEVICE_TRUSTED,expected);}
 });
 test('citizen import refuses to silently use a different signed-in Firebase project',async()=>{
@@ -36,7 +37,7 @@ test('shared-device switch preserves pending offline work and refuses to clear i
   let handle,cleared=0,written=0,message='';
   const window={FIREBASE_CONFIG:{projectId:'demo'},localStorage:{getItem:()=> 'true',setItem:()=>written++},document:{addEventListener:(event,fn)=>handle=fn},DGOffline:{ready:true,jobs:async()=>[{state:'queued'}],list:async()=>[],clear:async()=>cleared++}};
   const button={dataset:{dgAction:'device'},disabled:false},sandbox={window,document:{getElementById:()=>({checked:false})},confirm:()=>true,toast:value=>message=value,FB:{fs:{terminate:()=>assert.fail('pending work must block'),clearPersistence:()=>assert.fail('pending work must block')}}};
-  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../security.js'),'utf8'),sandbox);
+  vm.runInNewContext(readSource(path.resolve(__dirname,'../../security.js'),'utf8'),sandbox);
   await handle({target:{closest:()=>button},preventDefault(){}});
   assert.equal(cleared,0);assert.equal(written,0);assert.equal(window.DG_DEVICE_TRUSTED,true);assert.match(message,/미전송 작업/);
 });
@@ -44,7 +45,7 @@ function deviceFixture(offline,integration){
   let handle,cleared=0,written=0,reloaded=0,message='',signedOut=0;
   const window={FIREBASE_CONFIG:{projectId:'demo'},localStorage:{getItem:()=> 'true',setItem:()=>written++},document:{addEventListener:(event,fn)=>handle=fn},DGOffline:{clear:async()=>cleared++,...offline},DGIntegration:integration};
   const button={dataset:{dgAction:'device'},disabled:false},sandbox={window,document:{getElementById:()=>({checked:false})},confirm:()=>true,toast:value=>message=value,location:{reload:()=>reloaded++},FB:{auth:{signOut:async()=>signedOut++},fs:{terminate:async()=>{},clearPersistence:async()=>{}}}};
-  vm.createContext(sandbox);vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../security.js'),'utf8'),sandbox);sandbox.DGSecurity=window.DGSecurity;
+  vm.createContext(sandbox);vm.runInContext(readSource(path.resolve(__dirname,'../../security.js'),'utf8'),sandbox);sandbox.DGSecurity=window.DGSecurity;
   return {window,sandbox,change:()=>handle({target:{closest:()=>button},preventDefault(){}}),result:()=>({cleared,written,reloaded,message,signedOut})};
 }
 test('device mode can change before login without reading an unconfigured offline namespace',async()=>{

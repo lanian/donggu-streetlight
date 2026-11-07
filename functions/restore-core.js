@@ -65,8 +65,8 @@ function validate(collection, d) {
     keys(d, ['name','unit','quantity','unitCost','revision','updatedAt','updatedBy'], ['name','unit','quantity','unitCost','revision','updatedAt','updatedBy']);
     text(d.name, 120, true); text(d.unit, 40, true); number(d.quantity, 0, 100000000); number(d.unitCost, 0, 1000000000); integer(d.revision, 1); integer(d.updatedAt, 1); text(d.updatedBy, 128, true);
   } else if (collection === 'inventoryMoves') {
-    keys(d, ['itemId','delta','reason','at','by','revision','workId'], ['itemId','delta','reason','at','by','revision']);
-    id(d.itemId); number(d.delta, -100000000, 100000000); text(d.reason, 500); integer(d.at, 1); text(d.by, 128, true); integer(d.revision, 1); if (d.workId) id(d.workId);
+    keys(d, ['itemId','delta','reason','at','by','revision','workId','requestHash'], ['itemId','delta','reason','at','by','revision']);
+    id(d.itemId); number(d.delta, -100000000, 100000000); text(d.reason, 500); integer(d.at, 1); text(d.by, 128, true); integer(d.revision, 1); if (d.workId) id(d.workId); if (d.requestHash !== undefined) digest(d.requestHash);
   } else if (collection === 'reportEvents') {
     keys(d, ['schemaVersion','type','reportId','fromLightId','toLightId','reason','by','at','revision','requestHash'], ['schemaVersion','type','reportId','fromLightId','toLightId','reason','by','at','revision','requestHash']);
     if (d.schemaVersion !== 1 || d.type !== 'facility-linked') fail('신고 연결 이력 형식을 확인해 주세요.'); id(d.reportId); if (d.fromLightId) id(d.fromLightId); id(d.toLightId); text(d.reason, 500, true); text(d.by, 128, true); integer(d.at, 1); integer(d.revision, 1); digest(d.requestHash);

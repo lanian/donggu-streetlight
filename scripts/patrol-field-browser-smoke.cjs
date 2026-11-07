@@ -41,7 +41,7 @@ const server = http.createServer((req, res) => {
 
     // helpers: a patrol with a fixed position and no GPS watch
     const light = await page.evaluate(() => S.lights.find(l => Number.isFinite(l.lat) && l.kind === '가로등'));
-    const startPatrol = () => page.evaluate(l => { openPatrol('전체'); if (pt.watch != null) { navigator.geolocation.clearWatch(pt.watch); pt.watch = null; } pt.pos = { lat: l.lat, lng: l.lng }; pt.acc = 5; pt.track.push([l.lat, l.lng], [l.lat + 0.0005, l.lng]); }, light);
+    const startPatrol = () => page.evaluate(l => { openPatrol('전체'); if (pt.watch != null) { navigator.geolocation.clearWatch(pt.watch); pt.watch = null; } pt.pos = { lat: l.lat, lng: l.lng, acc: 5, at: Date.now() }; pt.acc = 5; pt.fixReady = true; pt.track.push([l.lat, l.lng], [l.lat + 0.0005, l.lng]); }, light);
     const markLight = result => page.evaluate(([id, result]) => { pt.sel = id; ptMark(result); }, [light.id, result]);
 
     // 2. 취소 takes back the last action, in order

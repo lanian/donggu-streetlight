@@ -29,15 +29,25 @@ service cloud.firestore {
         && (!('posSuggest' in data) || data.posSuggest == null || (data.posSuggest is map
           && data.posSuggest.lat is number && data.posSuggest.lng is number));
     }
-    // 점검자는 점검·순찰 기록과 함께만 상태를 바꾸고(lastInspected도 바뀜), 그 기록이 지금 상태를 정한 일보다 늦어야 한다.
+    function statusRank(status){return status=='고장'?3:(status=='점검필요'?2:(status=='수리중'?1:0));}
+    // 점등 관찰은 고장 경보만 높일 수 있다. 정식 점검일·재점검 사유·마지막 종합 판정은 건드리지 않는다.
+    function patrolEscalation(next,prev){
+      let at=next.get('statusAt',0);
+      return next.diff(prev).affectedKeys().hasOnly(['status','statusAt','updatedAt'])
+        && next.get('status','') in ['점검필요','고장']
+        && statusRank(next.status)>=statusRank(prev.get('status','정상'))
+        && at is int && at>0 && at>=prev.get('statusAt',0) && at<=request.time.toMillis()+300000
+        && next.get('updatedAt',0)==at;
+    }
+    // 정상으로의 변경은 정식 점검에서 판단한다. 기록 시각은 직전 상태 판정보다 오래될 수 없다.
     // 기기 시계가 앞서 간 기록이 다른 점검을 막지 않도록, 시각은 서버 시각 + 5분까지만 받는다.
     function staffStatusChange(next, prev){
       let changed=next.diff(prev).affectedKeys();
       let at=changed.hasAny(['statusAt']) && next.get('statusAt',null) is int ? next.statusAt : next.get('lastInspected',0);
       let limit=request.time.toMillis()+300000;
       return (!changed.hasAny(['lastInspected']) || next.get('lastInspected',null)==null || next.lastInspected<=limit)
-        && (!changed.hasAny(['statusAt']) || next.get('statusAt',null)==null || next.statusAt<=limit)
-        && (!changed.hasAny(['status']) || (changed.hasAny(['lastInspected']) && at is int && at>=prev.get('statusAt',0) && at<=limit));
+        && (!changed.hasAny(['statusAt']) || (next.get('statusAt',0) is int && next.statusAt>=prev.get('statusAt',0) && next.statusAt<=limit))
+        && (!changed.hasAny(['status']) || (changed.hasAny(['lastInspected']) && at is int && at>=prev.get('statusAt',0) && at<=limit) || patrolEscalation(next,prev));
     }
     function ownPositionSuggestion(data){
       return data.get('posSuggest', null) is map
@@ -138,6 +148,7 @@ service cloud.firestore {
           && request.resource.data.get('photo', null) == null
           && validRep(request.resource.data,'repWide') && validRep(request.resource.data,'repPlate') && validRep(request.resource.data,'repAround')
           && (!('posSuggest' in request.resource.data) || ownPositionSuggestion(request.resource.data)))
+        || patrolEscalation(request.resource.data,{})
         || newFieldLight(id, request.resource.data)));
       allow update: if (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasAny(['restoredAt'])
         && request.resource.data.restoredBy==request.auth.uid && request.resource.data.restoredAt is int
@@ -257,28 +268,9 @@ service cloud.firestore {
     // 주민 신고 직접 접수(무료 요금제, 서버 함수 없음): 로그인 없이 새 문서 생성만, 읽기·수정·삭제는 직원만.
     // 항목·길이·문제 유형·좌표 범위(광주 동구 주변)·사진 형식과 크기·접수 시각(서버 ±5분)·보관 만료(최대 10년)를 검사한다.
     // 서버 함수 접수(Blaze)를 쓰면 함수가 Admin 권한으로 쓰므로 이 규칙과 무관하다.
-    function citizenText(d, k, max){ return !(k in d) || (d[k] is string && d[k].size() <= max); }
-    function publicCitizenReport(id, d){
-      let now = request.time.toMillis();
-      return id.matches('^qr-[a-f0-9]{24}$')
-        && d.keys().hasAll(['schemaVersion','receipt','issue','consent','imported','at','privacyExpiresAt'])
-        && d.keys().hasOnly(['schemaVersion','receipt','code','lightId','issue','desc','lat','lng','acc','photo','contact','consent','consentDays','imported','at','privacyExpiresAt'])
-        && d.schemaVersion == 1 && d.imported == false
-        && d.receipt is string && d.receipt.matches('^R[0-9]{6}-[0-9A-F]{8}$')
-        && d.issue in ['불이 꺼져 있어요','깜빡거려요','낮에도 켜져 있어요','등이 파손됐어요','기둥이 기울었어요','전선이 노출됐어요','기타']
-        && citizenText(d, 'code', 40) && citizenText(d, 'desc', 500) && citizenText(d, 'contact', 40)
-        && (!('lightId' in d) || d.lightId == '' || (d.lightId is string && d.lightId.matches('^[A-Za-z0-9_-]{1,120}$')))
-        && d.consent is bool && (d.get('contact', '') == '' || d.consent == true)
-        && (!('consentDays' in d) || (d.consentDays is int && d.consentDays >= 1 && d.consentDays <= 3650))
-        && d.at is int && d.at > now - 300000 && d.at < now + 300000
-        && d.privacyExpiresAt is int && d.privacyExpiresAt > d.at && d.privacyExpiresAt <= d.at + 315360000000
-        && ((!('lat' in d) && !('lng' in d)) || (d.lat is number && d.lng is number && d.lat >= 34.9 && d.lat <= 35.3 && d.lng >= 126.7 && d.lng <= 127.1))
-        && (!('acc' in d) || (d.acc is number && d.acc >= 0 && d.acc <= 100000))
-        && (!('photo' in d) || (d.photo is string && d.photo.size() <= 220000 && d.photo.matches('^data:image/jpeg;base64,[A-Za-z0-9+/=]+$')))
-        && (d.get('code', '') != '' || d.get('lightId', '') != '' || d.get('desc', '') != '' || 'lat' in d);
-    }
     match /citizen_reports/{id} {
-      allow create: if publicCitizenReport(id, request.resource.data);
+      // Public intake goes through the App Check and rate-limited gateway (Admin SDK).
+      allow create: if false;
       allow read: if isStaff();
       allow update: if isAdmin() || (isStaff()
         && resource.data.imported==false && request.resource.data.imported==true
@@ -608,7 +600,7 @@ service cloud.firestore {
         && (!changed.hasAny(['stockApplied','accountedCost']) || (admin && previous.status=='completed' && data.status=='verified'))
         && (data.status!='completed' || (workEvidence(id,data) && data.completedAt is int
           && (data.completedBy==request.auth.uid || (admin && previous.status=='completed'
-            && changed.hasOnly(['reportIds','revision','updatedAt','updatedBy'])))))
+            && changed.hasOnly(['reportIds','title','description','type','priority','assignedTo','dueAt','revision','updatedAt','updatedBy'])))))
         && (data.status!='verified' || (admin && workEvidence(id,data)
           && data.get('accountedCost',0)==data.costTotal && data.verifiedBy==request.auth.uid && data.verifiedAt is int));
     }
@@ -634,10 +626,11 @@ service cloud.firestore {
     }
     match /inventoryMoves/{id} {
       allow read: if isStaff();
-      allow create: if isAdmin() && request.resource.data.keys().hasOnly(['itemId','delta','reason','at','by','revision','workId'])
+      allow create: if isAdmin() && request.resource.data.keys().hasOnly(['itemId','delta','reason','at','by','revision','workId','requestHash'])
         && request.resource.data.itemId is string && request.resource.data.delta is number
         && request.resource.data.by==request.auth.uid && request.resource.data.at is int
         && optionalText(request.resource.data,'reason',500) && request.resource.data.revision is int
+        && (!('requestHash' in request.resource.data) || (request.resource.data.requestHash is string && request.resource.data.requestHash.matches('[a-f0-9]{64}')))
         && getAfter(/databases/$(db)/documents/inventory/$(request.resource.data.itemId)).data.revision==request.resource.data.revision;
       allow update,delete: if false;
     }

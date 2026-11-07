@@ -72,7 +72,7 @@ async function poll(page, predicate, arg) {
     assert.equal(await page.evaluate(() => window.__auditReads), 1);
     await page.locator('[data-mgmt="audit-refresh"]').click(); await page.waitForFunction(() => window.__auditReads === 2);
     await page.evaluate(() => { DGData.readPage = window.__originalReadPage; openAdminSection('health'); });
-    await page.getByText(/공유 운영 서버가 연결되지/).waitFor();
+    await page.getByText(/서버 관리 함수가 연결되지/).waitFor();
     results.push('audit permission errors wait for an explicit retry and unconfigured shared health is never presented as healthy');
     assert.deepEqual(errors, []);
     await context.close();

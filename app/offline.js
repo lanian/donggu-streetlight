@@ -203,19 +203,25 @@
   async function jobs() { return (await requireStore().list('job:')).sort((a, b) => b.createdAt - a.createdAt); }
   async function flush(options) {
     if (!storage || !connected()) return;
-    const gen = generation;
+    const gen = generation, store = storage;
     for (const job of await jobs()) {
       if (gen !== generation) return;
       if (job.state === 'queued' || job.state === 'sending' || (options && options.retry && job.state === 'failed')) await run(job.id, options);
     }
     const done = (await jobs()).filter(x => x.state === 'synced');
-    for (const job of done.slice(50)) await storage.remove('job:' + job.id);
+    for (const job of done.slice(50)) {
+      if (gen !== generation || store !== storage) return;
+      await store.remove('job:' + job.id);
+    }
   }
   async function retry(id) { return run(id, { retry: true }); }
   async function discard(id) {
-    const job = await requireStore().read('job:' + id);
+    const store = requireStore(), gen = generation;
+    const job = await store.read('job:' + id);
+    if (gen !== generation || store !== storage) throw Object.assign(new Error('계정이 바뀌어 이전 대기 항목을 정리하지 않았어요.'), { code: 'account-changed' });
     if (job && job.state === 'sending') throw new Error('전송 중인 작업은 결과를 확인한 뒤 정리할 수 있어요.');
-    await storage.remove('job:' + id); emit({ type: 'discarded', id, job: job ? copy(job) : null });
+    await store.remove('job:' + id);
+    if (gen === generation && store === storage) emit({ type: 'discarded', id, job: job ? copy(job) : null });
   }
   async function clear() { await requireStore().clear(); emit({ type: 'cleared' }); }
   function subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); }

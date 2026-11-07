@@ -1,3 +1,4 @@
+const { readSource } = require('./source.cjs');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -5,9 +6,9 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '../..');
-const lightingReviewSource = fs.readFileSync(path.join(root, 'app/lighting-review.js'), 'utf8');
-const source = lightingReviewSource + '\n' + fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const registry = JSON.parse(fs.readFileSync(path.join(root, 'data/lights.json'), 'utf8'));
+const lightingReviewSource = readSource(path.join(root, 'app/lighting-review.js'), 'utf8');
+const source = lightingReviewSource + '\n' + readSource(path.join(root, 'index.html'), 'utf8');
+const registry = JSON.parse(readSource(path.join(root, 'data/lights.json'), 'utf8'));
 const lights = registry.rows.map(row => ({
   ...Object.fromEntries(registry.cols.map((key, i) => [key, row[i]])), status: '정상'
 }));
