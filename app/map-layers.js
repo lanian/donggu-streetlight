@@ -4,6 +4,8 @@
   const MODES = ['street', 'satellite', 'hybrid'];
   const PREFERENCE = 'dg-map-background-v1';
   const IMAGE_PANE = 'dgSatellitePane', LABEL_PANE = 'dgSatelliteLabelsPane';
+  const MODE_NAMES = { street: '일반 지도', satellite: '위성·항공사진', hybrid: '사진＋도로명' };
+  let controlSequence = 0;
   const CREDIT = '© <a href="https://www.vworld.kr/" target="_blank" rel="noopener">국토교통부 VWorld</a>';
 
   function imageryConfig() {
@@ -24,7 +26,7 @@
     const inheritedAdd = group.onAdd, inheritedRemove = group.onRemove;
     const maxZoom = extra.maxZoom ?? streetProvider.maxZoom ?? 19;
     let mode = config ? preferredMode() : 'street', epoch = 0;
-    let map = null, removed = false, control = null, box = null, select = null, note = null, cleanControl = null;
+    let map = null, removed = false, control = null, box = null, select = null, note = null, toggle = null, status = null, cleanControl = null;
     let bindings = [], message = config ? '' : '위성 지도 연결 준비 중';
     const connected = () => !map || map.getContainer().isConnected !== false;
 
@@ -57,6 +59,12 @@
     function renderControl() {
       if (select) select.value = mode;
       if (note) { note.textContent = message; note.hidden = !message; }
+      if (toggle) {
+        toggle.setAttribute('aria-label', '지도 배경 변경: ' + MODE_NAMES[mode] + (message ? '. ' + message : ''));
+        toggle.setAttribute('data-warning', message ? 'true' : 'false');
+        toggle.title = message || '지도 배경 변경 · 현재 ' + MODE_NAMES[mode];
+      }
+      if (status && status.textContent !== message) status.textContent = message;
     }
     function replaceTiles() {
       releaseTiles();
@@ -83,27 +91,52 @@
     function buildControl() {
       box = root.document.createElement('div'); box.className = 'dg-map-layers leaflet-control';
       if (map.getContainer().querySelector?.('.locbtn')) box.className += ' dg-map-layers-below-location';
+      toggle = root.document.createElement('button'); toggle.type = 'button'; toggle.className = 'dg-map-layers-toggle'; toggle.textContent = '배경';
+      toggle.setAttribute('aria-expanded', 'false'); box.setAttribute('data-open', 'false');
+      const panel = root.document.createElement('div'); panel.className = 'dg-map-layers-panel'; panel.hidden = true;
+      panel.id = 'dg-map-background-' + (++controlSequence); toggle.setAttribute('aria-controls', panel.id);
+      box.appendChild(toggle); box.appendChild(panel);
       const label = root.document.createElement('label'), title = root.document.createElement('span');
       title.textContent = '지도 배경'; label.appendChild(title);
       select = root.document.createElement('select'); select.setAttribute('aria-label', '지도 배경');
       for (const [value, text] of [['street', '일반 지도'], ['satellite', '위성·항공사진'], ['hybrid', '사진＋도로명']]) {
         const option = root.document.createElement('option'); option.value = value; option.textContent = text; option.disabled = value !== 'street' && !config; select.appendChild(option);
       }
-      label.appendChild(select); box.appendChild(label);
-      note = root.document.createElement('div'); note.className = 'dg-map-layers-note'; note.setAttribute('role', 'status'); note.setAttribute('aria-live', 'polite'); box.appendChild(note);
-      const owner = box, input = select;
-      const changeInput = () => { if (map && !removed && connected() && box === owner) { change(input.value, true, 'manual'); renderControl(); } };
+      label.appendChild(select); panel.appendChild(label);
+      note = root.document.createElement('div'); note.className = 'dg-map-layers-note'; panel.appendChild(note);
+      status = root.document.createElement('span'); status.className = 'dg-map-layers-status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite'); box.appendChild(status);
+      const owner = box, input = select, trigger = toggle;
+      const current = () => map && !removed && connected() && box === owner;
+      const expand = (open, returnFocus = false) => {
+        if (!current()) return;
+        panel.hidden = !open; trigger.setAttribute('aria-expanded', String(open)); owner.setAttribute('data-open', String(open));
+        if (open) input.focus?.({ preventScroll: true }); else if (returnFocus) trigger.focus?.({ preventScroll: true });
+      };
+      const togglePanel = () => expand(panel.hidden);
+      const changeInput = () => { if (current()) { change(input.value, true, 'manual'); renderControl(); expand(false, true); } };
+      const escape = e => { if (e.key === 'Escape' && !panel.hidden && current()) { e.preventDefault(); expand(false, true); } };
+      const host = map.getContainer().closest?.('#ptMapBox') || map.getContainer();
+      const leaveFocus = e => { if (e.relatedTarget && !owner.contains(e.relatedTarget) && !host.contains(e.relatedTarget)) expand(false); };
+      const outside = e => {
+        if (!current() || panel.hidden || owner.contains(e.target)) return;
+        const surface = host.contains(e.target) && !e.target.closest?.('.leaflet-control,button,a,input,select,textarea,[role="button"]');
+        expand(false, surface);
+        // The first tap on an editing canvas dismisses the picker without moving a facility or adding a vertex.
+        if (surface) { e.preventDefault(); e.stopPropagation(); }
+      };
       const stop = e => L.DomEvent.stopPropagation(e);
       input.addEventListener('change', changeInput);
+      trigger.addEventListener('click', togglePanel); owner.addEventListener('keydown', escape); owner.addEventListener('focusout', leaveFocus);
+      root.document.addEventListener('click', outside, true);
       // Keep native select keyboard behavior while isolating the map's shortcuts and editors.
       const events = ['click', 'dblclick', 'mousedown', 'touchstart', 'pointerdown', 'wheel', 'keydown', 'keyup', 'input', 'change'];
       for (const event of events) owner.addEventListener(event, stop);
       L.DomEvent.disableClickPropagation(owner); L.DomEvent.disableScrollPropagation(owner);
-      cleanControl = () => { input.removeEventListener('change', changeInput); for (const event of events) owner.removeEventListener(event, stop); L.DomEvent.off(owner); owner.remove?.(); };
+      cleanControl = () => { input.removeEventListener('change', changeInput); trigger.removeEventListener('click', togglePanel); owner.removeEventListener('keydown', escape); owner.removeEventListener('focusout', leaveFocus); root.document.removeEventListener('click', outside, true); for (const event of events) owner.removeEventListener(event, stop); L.DomEvent.off(owner); owner.remove?.(); };
       renderControl(); return box;
     }
     function removeControl() {
-      control?.remove(); control = null; cleanControl?.(); cleanControl = null; box = select = note = null;
+      control?.remove(); control = null; cleanControl?.(); cleanControl = null; box = select = note = toggle = status = null;
     }
     group.onAdd = function (target) {
       map = target; removed = false;

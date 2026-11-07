@@ -27,16 +27,19 @@ function harness(config = { apiKey: 'browser-only-fake-key', maxNativeZoom: 18 }
     control(options) { return { options, addTo(m) { this._map = m; this.element = this.onAdd(m); controls.push(this); return this; }, remove() { if (this._map) { this.onRemove?.(this._map); controls.splice(controls.indexOf(this), 1); this._map = null; } return this; } }; },
     DomEvent: { disableClickPropagation() {}, disableScrollPropagation() {}, stopPropagation() {}, off() {} }
   };
-  const context = { document: { createElement: element }, DONGGU_SATELLITE_CONFIG: config, localStorage: { getItem: k => store.get(k) || null, setItem: (k, v) => { store.set(k, v); writes.push([k, v]); } } };
+  const outsideHandlers = new Set();
+  const context = { document: { createElement: element, addEventListener(type, fn) { if (type === 'click') outsideHandlers.add(fn); }, removeEventListener(type, fn) { if (type === 'click') outsideHandlers.delete(fn); } }, DONGGU_SATELLITE_CONFIG: config, localStorage: { getItem: k => store.get(k) || null, setItem: (k, v) => { store.set(k, v); writes.push([k, v]); } } };
   vm.runInNewContext(fs.readFileSync(source, 'utf8'), context);
   const street = { urlTemplate: 'https://street.invalid/{z}/{x}/{y}.png', attribution: 'Street credit', maxZoom: 21 };
-  return { ...context, L, map, panes, mapContainer, store, writes, controls, create(extra) { return context.DongguMapLayers.create(L, street, extra); } };
+  return { ...context, L, map, panes, mapContainer, store, writes, controls, outsideHandlers, create(extra) { return context.DongguMapLayers.create(L, street, extra); } };
 }
+function picker(box) { const [toggle, panel] = box.children, [label, note] = panel.children; return { toggle, panel, label, select: label.children[1], note }; }
 
 test('unconfigured imagery stays on ordinary map with disabled explained choices', () => {
   const h = harness({ apiKey: '' }, 'hybrid'), group = h.create().addTo(h.map);
   assert.equal(group.getMode(), 'street'); assert.equal(group.getLayers().length, 1);
-  const box = h.controls[0].element, label = box.children[0], select = label.children[1], note = box.children[1];
+  const { toggle, panel, label, select, note } = picker(h.controls[0].element);
+  assert.equal(toggle.attributes['aria-expanded'], 'false'); assert.equal(panel.hidden, true);
   assert.equal(label.children[0].textContent, '지도 배경'); assert.equal(select.attributes['aria-label'], '지도 배경');
   assert.deepEqual(select.children.map(o => !!o.disabled), [false, true, true]); assert.match(note.textContent, /연결 준비 중/);
   group.setMode('satellite'); assert.equal(group.getMode(), 'street'); assert.equal(h.writes.length, 0);
@@ -81,7 +84,7 @@ test('current generation fourth consecutive imagery failure falls back while kee
   image.fire('tileerror'); image.fire('tileerror'); image.fire('tileload');
   image.fire('tileerror'); image.fire('tileerror'); image.fire('tileerror'); assert.equal(group.getMode(), 'hybrid');
   image.fire('tileerror', { error: new Error('raw key URL'), tile: { src: 'secret' } }); assert.equal(group.getMode(), 'street');
-  assert.equal(h.store.get('dg-map-background-v1'), 'hybrid'); assert.match(h.controls[0].element.children[1].textContent, /일반 지도/);
+  assert.equal(h.store.get('dg-map-background-v1'), 'hybrid'); assert.match(picker(h.controls[0].element).note.textContent, /일반 지도/);
   assert.deepEqual(changes.at(-1), { mode: 'street', reason: 'tile-failure' }); assert.equal(errors.at(-1).error, undefined); assert.equal(errors.at(-1).tile, undefined);
 });
 
@@ -95,12 +98,15 @@ test('late prior-mode and disposed events and detached controls cannot mutate mo
   const h = harness(), group = h.create().addTo(h.map); group.setMode('satellite');
   const image = group.getLayers()[0], lateError = image.listeners('tileerror')[0];
   group.setMode('hybrid'); for (let i = 0; i < 9; i++) lateError({}); assert.equal(group.getMode(), 'hybrid');
-  const lateCurrent = group.getLayers()[0].listeners('tileerror')[0], select = h.controls[0].element.children[0].children[1], lateChange = select.listeners.get('change');
+  const lateCurrent = group.getLayers()[0].listeners('tileerror')[0], select = picker(h.controls[0].element).select, lateChange = select.listeners.get('change');
+  assert.equal(h.outsideHandlers.size, 1);
   group.remove(); const count = h.writes.length;
   assert.equal(h.controls.length, 0); assert.equal(select.listeners.size, 0); assert.equal(group.getLayers().length, 0);
+  assert.equal(h.outsideHandlers.size, 0, 'removing a map retires its document dismissal handler');
   select.value = 'street'; lateChange(); for (let i = 0; i < 9; i++) lateCurrent({}); group.setMode('street');
   assert.equal(group.getMode(), 'hybrid'); assert.equal(h.writes.length, count);
   group.addTo(h.map); assert.equal(group.getLayers().length, 2); assert.equal(h.controls.length, 1);
+  assert.equal(h.outsideHandlers.size, 1, 'reattachment owns exactly one document dismissal handler');
 });
 
 test('unavailable localStorage does not block maps or manual switching', () => {
@@ -110,7 +116,7 @@ test('unavailable localStorage does not block maps or manual switching', () => {
 
 test('a detached editor container rejects late tile errors, control changes and explicit mode changes', () => {
   const h = harness(), group = h.create().addTo(h.map); group.setMode('hybrid');
-  const image = group.getLayers()[0], error = image.listeners('tileerror')[0], select = h.controls[0].element.children[0].children[1], change = select.listeners.get('change'), writes = h.writes.length;
+  const image = group.getLayers()[0], error = image.listeners('tileerror')[0], select = picker(h.controls[0].element).select, change = select.listeners.get('change'), writes = h.writes.length;
   h.mapContainer.isConnected = false; for (let i = 0; i < 8; i++) error({}); select.value = 'street'; change(); group.setMode('street');
   assert.equal(group.getMode(), 'hybrid'); assert.equal(h.writes.length, writes); assert.equal(group.getLayers().length, 2);
 });

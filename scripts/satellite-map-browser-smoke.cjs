@@ -17,6 +17,26 @@ async function poll(page, predicate, argument) {
   const until = Date.now() + 30000;
   while (!await page.evaluate(predicate, argument)) { if (Date.now() > until) throw new Error('Timed out: ' + predicate); await page.waitForTimeout(40); }
 }
+async function openBackground(page, host) {
+  const control = page.locator(host), toggle = control.locator('.dg-map-layers-toggle'), panel = control.locator('.dg-map-layers-panel');
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  await panel.waitFor({ state: 'visible' });
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
+  const select = control.locator('select[aria-label="지도 배경"]');
+  await poll(page, selector => document.activeElement === document.querySelector(selector), host + ' select[aria-label="지도 배경"]');
+  return { control, toggle, panel, select };
+}
+async function backgroundClosed(page, host, focusReturned = false) {
+  const control = page.locator(host);
+  await control.locator('.dg-map-layers-panel').waitFor({ state: 'hidden' });
+  assert.equal(await control.locator('.dg-map-layers-toggle').getAttribute('aria-expanded'), 'false');
+  if (focusReturned) assert.equal(await control.locator('.dg-map-layers-toggle').evaluate(el => document.activeElement === el), true, 'closing by selection or Escape returns focus to the background button');
+}
+async function chooseBackground(page, host, mode) {
+  const { select } = await openBackground(page, host);
+  await select.selectOption(mode);
+  await backgroundClosed(page, host, true);
+}
 (async () => {
   const results = [], errors = [], network = { interceptedImagery: 0, interceptedStreet: 0, invalidImageryPaths: 0, productionCalls: 0 }; let browser;
   fs.mkdirSync(artifacts, { recursive: true });
@@ -50,17 +70,31 @@ async function poll(page, predicate, argument) {
       const { context, page } = await fixture();
       await page.evaluate(() => { localStorage.setItem('dg-map-background-v1', 'hybrid'); openMap('all'); });
       await page.locator('#gmap .dg-map-layers').waitFor();
-      assert.equal(await page.locator('#gmap [aria-label="지도 배경"]').inputValue(), 'street');
+      assert.equal(await page.locator('#gmap .dg-map-layers-toggle').count(), 1, 'map background choices start behind one compact toggle');
+      assert.equal(await page.locator('#gmap .dg-map-layers-toggle').getAttribute('aria-expanded'), 'false');
+      assert.equal(await page.locator('#gmap .dg-map-layers-panel').isVisible(), false);
+      assert.equal(await page.locator('#gmap .dg-map-layers').evaluate(el => { const r = el.getBoundingClientRect(); return Math.abs(r.width - 64) <= 1 && Math.abs(r.height - 44) <= 1; }), true, 'collapsed map background occupies only 64 by 44 pixels');
+      await openBackground(page, '#gmap .dg-map-layers');
+      assert.equal(await page.locator('#gmap select[aria-label="지도 배경"]').inputValue(), 'street');
       assert.equal(await page.locator('#gmap option:disabled').count(), 2); assert.match(await page.locator('#gmap .dg-map-layers-note').innerText(), /연결 준비 중/);
-      assert.equal(network.interceptedImagery, 0); pass('missing key disables both imagery choices, explains setup and retains ordinary map'); await context.close();
+      await page.keyboard.press('Escape'); await backgroundClosed(page, '#gmap .dg-map-layers', true);
+      assert.equal(await page.locator('#gmap').count(), 1);
+      assert.equal(network.interceptedImagery, 0); pass('compact background button keeps missing-key choices hidden until opened; setup remains clear and Escape retains ordinary map'); await context.close();
     }
     const { context, page } = await fixture('synthetic-only/public?key#segment');
     await page.evaluate(() => { S.demoRole = 'admin'; openMap('all'); window.__background = Object.values(gmap._layers).find(layer => typeof layer.getMode === 'function'); });
     await page.locator('#gmap .dg-map-layers').waitFor();
-    const select = page.locator('#gmap [aria-label="지도 배경"]');
+    const select = page.locator('#gmap select[aria-label="지도 배경"]');
+    assert.equal(await page.locator('#gmap .dg-map-layers-panel').isVisible(), false);
     assert.equal(await select.evaluate(el => { const r = el.closest('.dg-map-layers').getBoundingClientRect(), b = document.querySelector('#mapLoc').getBoundingClientRect(); return r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom; }), true, 'main background selector must not overlap the existing location button');
     await page.evaluate(() => { window.__locationCalls = 0; const watch = navigator.geolocation.watchPosition.bind(navigator.geolocation); navigator.geolocation.watchPosition = (...args) => { __locationCalls++; return watch(...args); }; });
+    await openBackground(page, '#gmap .dg-map-layers');
     await page.locator('#mapLoc').click(); assert.ok(await page.evaluate(() => __locationCalls > 0), 'existing location button still starts its geolocation workflow');
+    await backgroundClosed(page, '#gmap .dg-map-layers');
+    await page.evaluate(() => { window.__outsideLinkCalls = 0; const link = document.createElement('a'); link.id = 'mapOutsideAction'; link.href = '#'; link.textContent = '검사 링크'; link.addEventListener('click', event => { event.preventDefault(); __outsideLinkCalls++; }); document.querySelector('#sheet .sheet-head').appendChild(link); });
+    await openBackground(page, '#gmap .dg-map-layers'); await page.locator('#mapOutsideAction').click();
+    await backgroundClosed(page, '#gmap .dg-map-layers'); assert.equal(await page.evaluate(() => __outsideLinkCalls), 1, 'outside links still run their original action');
+    await page.evaluate(() => document.getElementById('mapOutsideAction').remove());
     await page.evaluate(() => {
       gmap.setView([35.146, 126.923], 19, { animate: false });
       window.__route = L.polyline([[35.146,126.923],[35.147,126.924]]).addTo(gmap);
@@ -70,7 +104,7 @@ async function poll(page, predicate, argument) {
     await page.waitForTimeout(350);
     await page.evaluate(() => { window.__view = { center: gmap.getCenter(), zoom: gmap.getZoom() }; window.__markers = gmapLayer.getLayers(); });
     for (const [mode, count] of [['satellite', 1], ['hybrid', 2], ['street', 1], ['hybrid', 2]]) {
-      await select.selectOption(mode);
+      await chooseBackground(page, '#gmap .dg-map-layers', mode);
       const state = await page.evaluate(() => ({ mode: __background.getMode(), count: __background.getLayers().length, sameView: gmap.getCenter().equals(__view.center) && gmap.getZoom() === __view.zoom, overlays: gmap.hasLayer(__route) && gmap.hasLayer(__gps) && __markers.every(m => gmapLayer.hasLayer(m)), zooms: __background.getLayers().map(l => l.options.maxZoom), native: __background.getLayers().map(l => l.options.maxNativeZoom) }));
       assert.equal(state.mode, mode); assert.equal(state.count, count); assert.equal(state.sameView, true, JSON.stringify(state)); assert.equal(state.overlays, true, JSON.stringify(state)); assert.ok(state.zooms.every(z => z === 19));
       if (mode !== 'street') assert.ok(state.native.every(z => z === 18));
@@ -84,17 +118,26 @@ async function poll(page, predicate, argument) {
     const filters = await page.evaluate(() => ({ street: getComputedStyle(gmap.getPane('tilePane')).filter, imagery: __background.getLayers().map(l => getComputedStyle(gmap.getPane(l.options.pane)).filter), z: __background.getLayers().map(l => +getComputedStyle(gmap.getPane(l.options.pane)).zIndex) }));
     assert.equal(filters.street, 'invert(1)'); assert.deepEqual(filters.imagery, ['none', 'none']); assert.ok(filters.z.every(z => z < 400));
     assert.deepEqual(await page.evaluate(() => __background.getLayers().map(l => getComputedStyle(Object.values(l._tiles).find(t => t.el.naturalWidth > 0).el).mixBlendMode)), ['normal', 'normal'], 'imagery and road labels must retain their source colors without additive blending');
-    await select.focus(); await page.keyboard.press('Home'); await page.keyboard.press('ArrowDown');
+    await openBackground(page, '#gmap .dg-map-layers'); await page.keyboard.press('Home');
+    await backgroundClosed(page, '#gmap .dg-map-layers', true); assert.equal(await select.inputValue(), 'street');
+    await openBackground(page, '#gmap .dg-map-layers'); await page.keyboard.press('ArrowDown');
+    await backgroundClosed(page, '#gmap .dg-map-layers', true);
     assert.equal(await select.inputValue(), 'satellite'); assert.equal(await page.evaluate(() => __background.getMode()), 'satellite');
-    await page.keyboard.press('End'); assert.equal(await select.inputValue(), 'hybrid');
-    await page.keyboard.press('Escape'); assert.equal(await page.locator('#gmap').count(), 1);
-    for (const width of [390, 1440]) {
+    await openBackground(page, '#gmap .dg-map-layers'); await page.keyboard.press('End');
+    await backgroundClosed(page, '#gmap .dg-map-layers', true); assert.equal(await select.inputValue(), 'hybrid');
+    await openBackground(page, '#gmap .dg-map-layers'); await page.locator('#gmap .dg-map-layers-toggle').focus();
+    await page.keyboard.press('Escape'); await backgroundClosed(page, '#gmap .dg-map-layers', true); assert.equal(await page.locator('#gmap').count(), 1);
+    for (const width of [320, 390, 1440]) {
       await page.setViewportSize({ width, height: 900 }); await page.waitForTimeout(100);
-      assert.equal(await select.evaluate(el => { const r = el.getBoundingClientRect(), b = el.closest('.leaflet-container').getBoundingClientRect(); return r.width >= 120 && r.left >= b.left && r.right <= b.right && r.height >= 32; }), true);
+      assert.equal(await page.locator('#gmap .dg-map-layers').evaluate(el => { const r = el.getBoundingClientRect(); return Math.abs(r.width - 64) <= 1 && Math.abs(r.height - 44) <= 1; }), true);
+      const { panel } = await openBackground(page, '#gmap .dg-map-layers');
+      assert.equal(await panel.evaluate(el => { const r = el.getBoundingClientRect(), b = el.closest('.leaflet-container').getBoundingClientRect(); return r.width >= 120 && r.left >= b.left && r.right <= b.right && r.top >= b.top && r.bottom <= b.bottom; }), true, 'the whole open background popup fits the map on mobile and desktop');
+      assert.equal(await panel.evaluate(el => { const r = el.getBoundingClientRect(), b = document.querySelector('#mapLoc').getBoundingClientRect(); return r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom; }), true, 'open popup does not cover the location button');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       await page.screenshot({ path: path.join(artifacts, 'main-' + width + '.png') });
+      await page.keyboard.press('Escape'); await backgroundClosed(page, '#gmap .dg-map-layers', true);
     }
-    pass('keyboard selection and Escape retain map; mobile/desktop fit; night filter stays on ordinary tiles while imagery remains original color');
+    pass('compact popup opens on demand, closes with selection or Escape and restores focus; mobile/desktop popup boundaries and ordinary outside actions remain usable; imagery keeps its source colors');
 
     const fallback = await page.evaluate(() => {
       __background.setMode('hybrid'); const layers = __background.getLayers(), old = layers[0], center = gmap.getCenter(), zoom = gmap.getZoom();
@@ -109,19 +152,28 @@ async function poll(page, predicate, argument) {
     await page.setViewportSize({ width: 390, height: 844 });
     const lightId = await page.evaluate(() => S.lights.find(l => Number.isFinite(l.lat) && Number.isFinite(l.lng) && !l.removed).id);
     await page.evaluate(() => closeSheet('all')); await poll(page, () => !document.querySelector('#sheet').classList.contains('open') && NAV.stack.length === 0);
-    await page.evaluate(id => { openLightEdit(id); window.__editBackground = Object.values(leMap._layers).find(l => typeof l.getMode === 'function'); window.__editBefore = { lat: document.querySelector('#leLat').value, lng: document.querySelector('#leLng').value, marker: leMarker, center: leMap.getCenter(), zoom: leMap.getZoom(), form: JSON.stringify(DGIntegration.captureForm(document.querySelector('#sheetIn'))) }; window.__editClicks = 0; leMap.on('click dblclick', () => __editClicks++); }, lightId);
+    await page.evaluate(id => { openLightEdit(id); window.__editBackground = Object.values(leMap._layers).find(l => typeof l.getMode === 'function'); window.__editBefore = { lat: document.querySelector('#leLat').value, lng: document.querySelector('#leLng').value, marker: leMarker, markerPosition: leMarker.getLatLng(), center: leMap.getCenter(), zoom: leMap.getZoom(), form: JSON.stringify(DGIntegration.captureForm(document.querySelector('#sheetIn'))) }; window.__editClicks = 0; leMap.on('click dblclick', () => __editClicks++); }, lightId);
     await page.waitForTimeout(350); await page.evaluate(() => { __editBefore.center = leMap.getCenter(); __editBefore.zoom = leMap.getZoom(); });
-    const editSelect = page.locator('#leMapBox [aria-label="지도 배경"]');
+    const editSelect = page.locator('#leMapBox select[aria-label="지도 배경"]');
     assert.equal(await editSelect.inputValue(), 'hybrid'); assert.equal(await editSelect.getAttribute('id'), null);
-    await editSelect.selectOption('street'); await editSelect.selectOption('hybrid');
+    await chooseBackground(page, '#leMapBox .dg-map-layers', 'street'); await chooseBackground(page, '#leMapBox .dg-map-layers', 'hybrid');
+    await openBackground(page, '#leMapBox .dg-map-layers');
     await editSelect.evaluate(el => { for (const type of ['click', 'dblclick', 'mousedown', 'touchstart', 'pointerdown', 'wheel', 'keydown']) el.dispatchEvent(new Event(type, { bubbles: true })); });
+    await page.keyboard.press('Escape'); await backgroundClosed(page, '#leMapBox .dg-map-layers', true);
+    assert.equal(await page.locator('#leMapBox').count(), 1, 'Escape closes the map popup before its parent editor');
+    await openBackground(page, '#leMapBox .dg-map-layers');
+    const canvasPoint = await page.locator('#leMapBox').evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.left + 32, y: r.bottom - 36 }; });
+    await page.mouse.click(canvasPoint.x, canvasPoint.y); await backgroundClosed(page, '#leMapBox .dg-map-layers');
     assert.equal(await page.evaluate(() => __editClicks === 0 && leMarker === __editBefore.marker && document.querySelector('#leLat').value === __editBefore.lat && document.querySelector('#leLng').value === __editBefore.lng && leMap.getCenter().equals(__editBefore.center) && leMap.getZoom() === __editBefore.zoom && JSON.stringify(DGIntegration.captureForm(document.querySelector('#sheetIn'))) === __editBefore.form), true);
     await page.screenshot({ path: path.join(artifacts, 'editor-390.png') });
-    pass('facility editor inherits saved preference; selection gestures leave editor marker, coordinates and captured business form unchanged');
+    await page.mouse.click(canvasPoint.x, canvasPoint.y); assert.equal(await page.evaluate(() => __editClicks), 1, 'only the dismissing canvas click is consumed; later editor clicks work normally');
+    await page.evaluate(() => { document.querySelector('#leLat').value = __editBefore.lat; document.querySelector('#leLng').value = __editBefore.lng; leMarker.setLatLng(__editBefore.markerPosition); });
+    assert.equal(await page.evaluate(() => JSON.stringify(DGIntegration.captureForm(document.querySelector('#sheetIn'))) === __editBefore.form), true, 'restore the test editor inputs before reload');
+    pass('facility editor retains saved preference and parent sheet; popup gestures and first outside map click preserve coordinates and drafts while later map clicks work');
 
     await page.reload(); await poll(page, () => S.live && DGOffline.ready && DGIntegration.initialized);
     await page.evaluate(() => { openMap('all'); window.__background = Object.values(gmap._layers).find(l => typeof l.getMode === 'function'); });
-    assert.equal(await page.locator('#gmap [aria-label="지도 배경"]').inputValue(), 'hybrid');
+    assert.equal(await page.locator('#gmap select[aria-label="지도 배경"]').inputValue(), 'hybrid');
     const disposal = await page.evaluate(() => {
       const b = __background, oldTile = b.getLayers()[0], oldControl = document.querySelector('#gmap .dg-map-layers'), oldSelect = oldControl.querySelector('select');
       const error = oldTile._events.tileerror[0].fn;
@@ -136,15 +188,23 @@ async function poll(page, predicate, argument) {
 
     await page.evaluate(() => closeSheet('all')); await poll(page, () => !document.querySelector('#sheet').classList.contains('open') && NAV.stack.length === 0);
     await page.evaluate(() => { openPatrol('전체'); if (pt.watch != null) navigator.geolocation.clearWatch(pt.watch); pt.watch = null; ptView('map'); ptMapRotate(-63); window.__patrolBackground = Object.values(pt.map._layers).find(l => typeof l.getMode === 'function'); });
-    const patrolSelect = page.locator('#ptMapBox > .dg-map-layers [aria-label="지도 배경"]'); await patrolSelect.waitFor();
+    const patrolHost = '#ptMapBox > .dg-map-layers';
+    await page.locator(patrolHost).waitFor(); await backgroundClosed(page, patrolHost);
     await page.waitForTimeout(350);
     const patrolBefore = await page.evaluate(() => { window.__patrolBefore = { marker: pt.mapMe, route: pt.mapTrack }; return { center: pt.map.getCenter(), zoom: pt.map.getZoom(), follow: pt.mapFollow }; });
-    await patrolSelect.selectOption('hybrid');
-    assert.equal(await patrolSelect.evaluate(el => { const box = document.querySelector('#ptMapBox').getBoundingClientRect(), r = el.getBoundingClientRect(); return !document.querySelector('#ptMapRot').contains(el) && getComputedStyle(el.closest('.dg-map-layers')).transform === 'none' && r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom; }), true);
-    assert.equal(await patrolSelect.evaluate(el => { const r = el.closest('.dg-map-layers').getBoundingClientRect(); return ['ptMapFollow', 'ptMapHeadUp'].every(id => { const b = document.getElementById(id).getBoundingClientRect(); return r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom; }); }), true, 'patrol background selector must not overlap follow or heading controls');
+    await chooseBackground(page, patrolHost, 'hybrid');
     assert.equal(await page.evaluate(before => pt.map.getCenter().equals(before.center) && pt.map.getZoom() === before.zoom && pt.mapMe === __patrolBefore.marker && pt.mapTrack === __patrolBefore.route && pt.map.hasLayer(pt.mapMe) && pt.map.hasLayer(pt.mapTrack) && pt.mapFollow === before.follow, patrolBefore), true);
     assert.equal(await page.evaluate(() => document.querySelector('#ptMapRot').style.transform), 'rotate(-63deg)');
-    await page.screenshot({ path: path.join(artifacts, 'patrol-390.png') });
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 }); await page.waitForTimeout(100);
+      const { control, panel } = await openBackground(page, patrolHost);
+      assert.equal(await control.evaluate(el => { const r = el.getBoundingClientRect(); return Math.abs(r.width - 64) <= 1 && Math.abs(r.height - 44) <= 1; }), true);
+      assert.equal(await panel.evaluate(el => { const box = document.querySelector('#ptMapBox').getBoundingClientRect(), r = el.getBoundingClientRect(); return !document.querySelector('#ptMapRot').contains(el) && getComputedStyle(el.closest('.dg-map-layers')).transform === 'none' && r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom; }), true, 'the whole open patrol popup stays upright and within its map');
+      assert.equal(await panel.evaluate(el => { const r = el.getBoundingClientRect(); return ['ptMapFollow', 'ptMapHeadUp'].every(id => { const b = document.getElementById(id).getBoundingClientRect(); return r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom; }); }), true, 'open patrol popup must not cover follow or heading controls');
+      await page.screenshot({ path: path.join(artifacts, 'patrol-' + width + '.png') });
+      await page.keyboard.press('Escape'); await backgroundClosed(page, patrolHost, true);
+      assert.equal(await page.locator('#ptFull').isVisible(), true, 'Escape closes the patrol popup while retaining patrol');
+    }
     await page.evaluate(() => { ptMap(false); }); assert.equal(await page.locator('#ptMapBox > .dg-map-layers').count(), 0);
     await page.evaluate(() => { ptReset(); openMap('all'); window.__background = Object.values(gmap._layers).find(l => typeof l.getMode === 'function'); });
     pass('patrol heading rotation keeps selector upright, visible and outside turning plate; switching retains follow, GPS and route; removal cleans external host');

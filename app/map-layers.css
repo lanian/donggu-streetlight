@@ -1,11 +1,17 @@
 /* A compact map control using the application's existing palette and typography. */
-.dg-map-layers{box-sizing:border-box;width:180px;max-width:calc(100vw - 80px);padding:6px 8px;border:1px solid var(--line,#ccd1d7);border-radius:8px;background:var(--card,#fff);color:var(--ink,#16233d);font-family:var(--font,inherit);font-size:12px;line-height:1.35;box-shadow:0 2px 8px #16233d1a}
+.dg-map-layers{position:relative;box-sizing:border-box;width:64px;height:44px;color:var(--ink,#16233d);font-family:var(--font,inherit);font-size:12px;line-height:1.35}
+.dg-map-layers-toggle{position:relative;box-sizing:border-box;display:block;width:64px;min-height:44px;padding:6px;border:1px solid var(--line,#ccd1d7);border-radius:8px;background:var(--card,#fff);color:inherit;font:inherit;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px #16233d1a}
+.dg-map-layers-toggle[data-warning="true"]::after{content:'!';position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;background:var(--warn,#966000);color:#fff;font-size:12px;line-height:16px}
+.dg-map-layers-toggle[aria-expanded="true"]{border-color:var(--ink,#16233d)}
+.dg-map-layers-panel{position:absolute;right:calc(100% + 6px);top:0;box-sizing:border-box;width:180px;max-width:calc(100vw - 160px);padding:8px;border:1px solid var(--line,#ccd1d7);border-radius:8px;background:var(--card,#fff);box-shadow:0 2px 8px #16233d1a}
+.dg-map-layers-panel[hidden]{display:none}
 .dg-map-layers label{display:flex;flex-direction:column;gap:3px;margin:0;font:inherit;color:inherit}
 .dg-map-layers label>span{font-weight:700}
 .dg-map-layers select{box-sizing:border-box;display:block;width:100%;max-width:100%;min-height:44px;margin:0;padding:5px 20px 5px 6px;border:1px solid var(--line,#ccd1d7);border-radius:5px;background:var(--card,#fff);color:var(--ink,#16233d);font:inherit;font-size:16px;cursor:pointer}
-.dg-map-layers select:focus-visible{outline:2px solid var(--ink,#16233d);outline-offset:2px}
+.dg-map-layers select:focus-visible,.dg-map-layers-toggle:focus-visible{outline:2px solid var(--ink,#16233d);outline-offset:2px}
 .dg-map-layers-note{max-width:165px;margin-top:4px;color:var(--ink-2,#586476);font-size:11px;overflow-wrap:anywhere}
 .dg-map-layers-note[hidden]{display:none}
+.dg-map-layers-status{position:absolute;width:1px;height:1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .leaflet-top.leaflet-right .dg-map-layers-below-location{margin-top:64px}
 .dg-map-layers.dg-map-layers-patrol{position:absolute;z-index:1000;top:64px;right:10px;margin:0;transform:none}
 /* Preserve imagery and transparent road-label colors over the map background. */
