@@ -155,7 +155,7 @@
     if (action === 'new-from-report') { const ids = selectedReportIds(); if (!ids.length) throw new Error('연결할 신고를 선택해 주세요.'); return root.DGOperations.newWork(state.report.lightId, ids); }
     if (action === 'link-existing-work') return linkExisting();
     if (action === 'facility' || action === 'facility-refresh') return openFacility(button.dataset.id);
-    if (action === 'facility-print') { if (state.facility) api.print(facilityHTML(state.facility, false)); return; }
+    if (action === 'facility-print') { if (state.facility) return api.print(facilityHTML(state.facility, false)); return; }
     if (action === 'facility-csv') { if (state.facility) return root.DGOperations.download('동구_시설통합이력', [['시설', state.facility.light.code], ['조회 출처', root.DGOperations.sourceText(state.facility.metadata)], ['일시', '종류', '내용', '상세', '담당', '작업ID', '신고ID', '인정자재비증감'], ...state.facility.items.map(x => [stamp(x.at), x.kind, x.title, x.detail, label(x.by), x.workId || '', x.reportId || '', x.costDelta ?? ''])]); }
   }
   function attach(context) {

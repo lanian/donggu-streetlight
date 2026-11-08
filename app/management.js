@@ -337,7 +337,7 @@
     const action = button.dataset.mgmt;
     if (action === 'dashboard-load') { state.from = Q('#dgDashFrom').value; state.to = Q('#dgDashTo').value; return loadDashboard(); }
     if (action === 'dashboard-csv') return root.DGOperations.download('동구_업무현황_' + state.from + '_' + state.to, dashboardRows());
-    if (action === 'dashboard-print') { requireDashboard(); return api.print(Q('#dgDashboardReport').innerHTML); }
+    if (action === 'dashboard-print') { requireDashboard(); return api.print(Q('#dgDashboardReport').outerHTML); }
     if (action === 'health-refresh') return healthLoad();
     if (!api.can('admin')) throw new Error('관리자 권한이 필요해요.');
     if (action === 'registry-apply') return applyRegistry(button);

@@ -119,8 +119,12 @@ const server = http.createServer((req, res) => {
     await page.evaluate(id => DGWorkflows.openFacility(id), location.id); await page.getByText('시간순 기록', { exact: true }).waitFor();
     const history = await page.evaluate(() => DGWorkflows.state.facility);
     assert.equal(history.items.some(x => x.kind === '신고 시설 연결'), true); assert.equal(history.items.some(x => x.kind === '작업에 신고 연결'), true); assert.equal(history.orders.length, 3);
+    const facilityBeforePrint = await page.locator('#sheetIn').innerHTML();
     await page.evaluate(() => { window.print = () => { document.body.dataset.didPrint = 'yes'; }; }); await page.locator('[data-fw="facility-print"]').click();
     await page.waitForFunction(() => document.body.dataset.didPrint === 'yes'); assert.equal((await page.locator('#sheetIn').textContent()).includes('신고 시설 연결'), true);
+    assert.equal(await page.locator('#sheetIn').innerHTML(), facilityBeforePrint);
+    assert.equal((await page.locator('#reportPrintRoot').textContent()).includes('신고 시설 연결'), true);
+    await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     results.push('facility history and printable report include linkage, work, and report events');
 

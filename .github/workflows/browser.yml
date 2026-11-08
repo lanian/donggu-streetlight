@@ -64,3 +64,5 @@ jobs:
           node scripts/patrol-functional-browser-smoke.cjs
           node scripts/satellite-map-browser-smoke.cjs
           node scripts/marker-selection-browser-smoke.cjs
+          node scripts/print-lifecycle-browser-smoke.cjs
+          node scripts/report-output-browser-smoke.cjs

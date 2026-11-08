@@ -23,7 +23,16 @@ function initializeOperations() {
     removeDraft: async id => { delete DRAFTS[id]; if (draft && draft.lightId === id) { draft = null; closeSheet(); } await DGIntegration.flushDraftWrites().catch(() => {}); await DGOffline.remove('draft', id); },
     removePatrolDraft: sessionId => { if (pt.sessionId === sessionId) { ptReset(); if ($('#ptSumm')) closeSheet(); } },
     restorePatrol: () => DGIntegration.restorePatrol(),
-    print: html => { S.asec = null; navRoute('print', null, { replace: true }); openSheet('<div class="sheet-head noprint"><h3>업무 현황 인쇄</h3><button class="x" data-close aria-label="닫기">×</button></div><div class="rep">' + html + '</div>'); window.print(); },
+    print: html => {
+      const generation = navGen(), actor = S.me, database = db, firebase = FB, role = myRole();
+      const sheet = document.querySelector('#sheet'), source = sheet?.firstElementChild;
+      const title = sheet?.querySelector('h2,h3')?.textContent || '동구 가로등 업무 현황';
+      const selection = () => JSON.stringify([...sheet.querySelectorAll('input,select,textarea')].map(el => [el.id, el.value, el.checked]));
+      const selected = selection();
+      return DongguPrint.run({ html: '<div class="rep">' + html + '</div>', title,
+        button: document.activeElement?.tagName === 'BUTTON' ? document.activeElement : undefined,
+        isCurrent: () => navAlive(generation) && S.me === actor && db === database && FB === firebase && myRole() === role && source?.isConnected && sheet.classList.contains('open') && selection() === selected });
+    },
     processPhoto: async file => {
       const result = await compressBlob(file, 1000, .72); let data = result.url;
       if (data.length > 700000) data = result.canvas.toDataURL('image/jpeg', .45);

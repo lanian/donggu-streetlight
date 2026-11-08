@@ -21,7 +21,8 @@ test('photo preview pagination never changes the full selected set or mixes diff
 });
 
 test('the real photo appendix renders 100 selected photos for print at every size and labels fallback evidence', () => {
-  const html = source('index.html'), from = html.indexOf('const REP_PH={'), to = html.indexOf('async function decodePrintImages', from);
+  const html = source('index.html'), from = html.indexOf('const REP_PH={'), to = html.indexOf('async function printSheet', from);
+  assert.ok(from >= 0 && to > from, 'photo appendix source boundary');
   const context = vm.createContext({ DGReporting: Reporting, inspectionThumbs: row => row.thumbs, esc: String, safeImageSrc: value => value || '', fmtDT: String, S: { names: {} }, render() {}, getPhoto: async () => null });
   vm.runInContext(html.slice(from, to), context);
   const rows = Array.from({ length: 100 }, (_, n) => ({ id: 'i' + n, lightId: 'a', code: 'A', result: '고장', date: n, thumbs: [{ id: 'p' + n, label: '현장', t: 'data:image/png;base64,AA==' }] }));

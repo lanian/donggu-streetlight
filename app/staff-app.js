@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v65-markers";
+const APP_VER="v66-reports";
 const RELEASE_NOTES=[
+  {v:"v66-reports",d:"2026-11-08",t:"A4 보고서·사진 출력 개선, 페이지 번호·전체 점검 선택·긴 메모 보존과 출력 중 화면·계정 변경 보호"},
   {v:"v65-markers",d:"2026-11-08",t:"겹친 시설 목록 선택, 순찰 방향 보정, 필터·검색 선택 보호와 추정 좌표 조명 범위 제외"},
   {v:"v64-map-control",d:"2026-11-08",t:"지도 배경 선택창을 작은 배경 버튼으로 접기, 선택·Escape·바깥 클릭으로 닫기와 지도 편집 보호"},
   {v:"v63-vworld",d:"2026-11-08",t:"일반·위성/항공사진·사진+도로명 지도 전환, 브이월드 개발키 연결, 위치·시설 표시 유지와 영상 오류 복귀"},
@@ -1760,7 +1761,7 @@ async function backupImport(){
 const REPORTER_FIELDS=["contact","photo","lat","lng","acc","ua"];
 function withoutReporter(r){const out={...r};for(const k of REPORTER_FIELDS)delete out[k];if(out.ext&&out.location)out.location="";return out}
 /* ---------- period report: one printable page the office can file ---------- */
-const REP={period:"month",from:"",to:"",dong:"전체",photos:true,inlinePh:true,data:null,loading:false,err:""};
+const REP={period:"month",from:"",to:"",dong:"전체",photos:true,inlinePh:true,detail:"issues",data:null,loading:false,err:""};
 function repRange(){const now=new Date();let a,b=now.getTime();
   if(REP.period==="month"){a=new Date(now.getFullYear(),now.getMonth(),1).getTime()}
   else if(REP.period==="last"){a=new Date(now.getFullYear(),now.getMonth()-1,1).getTime();b=new Date(now.getFullYear(),now.getMonth(),1).getTime()-1}
@@ -1774,15 +1775,23 @@ function repRange(){const now=new Date();let a,b=now.getTime();
   if(!Number.isFinite(a)||!Number.isFinite(b)||a>b)return{error:"시작일이 종료일보다 늦어요. 보고서 기간을 확인해 주세요."};
   return{a,b};}
 function reportQueryKey(){return [REP.period,REP.from,REP.to].join("|")}
+function reportSourceText(){
+  const m=REP.data?.metadata||{source:FB?"server":db?.mode==="local"?"local":"unknown",complete:!!FB||db?.mode==="local"};
+  const label={server:"서버 조회",local:"이 기기 기록 조회",artifact:"공유 저장소 조회",cache:"기기 캐시",mixed:"출처 혼합",unknown:"자료 출처 미확인"}[m.source]||"자료 출처 미확인";
+  return label+" · "+(m.complete?"전체 조회 확인":"전체 여부 미확인");
+}
 async function repLoad(){
   if(REP.loading||!db)return;
   const range=repRange();if(range.error){REP.err=range.error;REP.data=null;render();return}
-  REP.loading=true;REP.err="";const key=reportQueryKey(),revision=REP.revision||0;render();
+  REP.loading=true;REP.err="";const key=reportQueryKey(),revision=REP.revision||0,actor=S.me,database=db,firebase=FB,metadata=[];render();
   const now=new Date(),trendStart=new Date(now.getFullYear(),now.getMonth()-5,1).getTime();
   try{const [insp,patrols]=await Promise.all([
-    listAllRecords("inspections",{where:[["date",">=",Math.min(range.a,trendStart)],["date","<=",Math.max(range.b,Date.now())]],orderBy:[["date","desc"]]}),
-    listAllRecords("patrols",{where:[["start",">=",range.a],["start","<=",range.b]],orderBy:[["start","desc"]]})
-  ]);if(key===reportQueryKey()&&revision===(REP.revision||0))REP.data={insp,patrols,at:Date.now(),key};}
+    listAllRecords("inspections",{where:[["date",">=",Math.min(range.a,trendStart)],["date","<=",Math.max(range.b,Date.now())]],orderBy:[["date","desc"]],onMetadata:m=>metadata.push(m)}),
+    listAllRecords("patrols",{where:[["start",">=",range.a],["start","<=",range.b]],orderBy:[["start","desc"]],onMetadata:m=>metadata.push(m)})
+  ]);if(key===reportQueryKey()&&revision===(REP.revision||0)&&S.me===actor&&db===database&&FB===firebase){
+    const sources=[...new Set(metadata.map(m=>m.source))];
+    REP.data={insp,patrols,at:Date.now(),key,owner:{actor,database,firebase},metadata:{source:sources.length===1?sources[0]:sources.length?"mixed":"unknown",complete:metadata.length===2&&metadata.every(m=>m.complete===true)}};
+  }}
   catch(e){REP.err="기록을 모두 불러오지 못했어요: "+(e.message||"연결을 확인하세요.")}
   REP.loading=false;render();resolveNames();
 }
@@ -1798,8 +1807,9 @@ function reportData(){
   const pats=(REP.data&&REP.data.patrols||S.patrols).filter(p=>p.start>=a&&p.start<=b&&(REP.dong==="전체"||p.dong===REP.dong||[...(p.passed||[]),...(p.marks||[]).map(m=>m.id)].some(id=>inD(byId(id)))));
   const pend=(S.allLights||S.lights).filter(l=>l.reg&&l.foundAt>=a&&l.foundAt<=b&&inD(l));
   const edits=(S.allLights||S.lights).flatMap(l=>(l.edits||[]).filter(e=>e.at>=a&&e.at<=b&&!e.undone&&inD(l)).map(e=>({l,e})));
-  const aKeys=[...new Set(lights.map(adongOf).filter(Boolean))].sort((x,y)=>adongOrder(x)-adongOrder(y));
-  const byDong=aKeys.map(d=>{const ls=lights.filter(l=>adongOf(l)===d),ii=ins.filter(i=>adongOf(byId(i.lightId)||{dong:i.dong})===d);return{d,n:ls.length,insp:ii.length,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length,open:ls.filter(l=>l.status!=="정상").length}}).sort((x,y)=>y.insp-x.insp||y.n-x.n);
+  const reportDong=l=>adongOf(l)||"행정동 미확인",inspectionDong=i=>reportDong(byId(i.lightId)||{dong:i.dong});
+  const aKeys=[...new Set([...lights.map(reportDong),...ins.map(inspectionDong)])].sort((x,y)=>adongOrder(x)-adongOrder(y));
+  const byDong=aKeys.map(d=>{const ls=lights.filter(l=>reportDong(l)===d),ii=ins.filter(i=>inspectionDong(i)===d);return{d,n:ls.length,insp:ii.length,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length,open:ls.filter(l=>l.status!=="정상").length}}).sort((x,y)=>y.insp-x.insp||y.n-x.n);
   const byWho=[...new Set(ins.map(i=>i.inspector).filter(Boolean))].map(w=>{const ii=ins.filter(i=>i.inspector===w);return{w,n:ii.length,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,fault:ii.filter(i=>i.result==="고장").length,bad:ii.filter(i=>i.result!=="정상").length,ph:ii.reduce((s,i)=>s+(i.photoN||(i.photo?1:0)),0),pt:ii.filter(i=>i.patrol).length}}).sort((x,y)=>y.n-x.n);
   return{a,b,lights,ins,all,open,pats,pend,edits,byDong,byWho};
 }
@@ -1810,42 +1820,50 @@ function reportControls(){
     ${seg("period",[["month","이번 달"],["last","지난 달"],["7","최근 7일"],["30","최근 30일"],["custom","직접"]],REP.period)}
     ${REP.period==="custom"?`<div class="grid2" style="margin-top:8px"><label>시작일<input class="f-in" type="date" id="repFrom" value="${esc(REP.from)}"></label><label>종료일<input class="f-in" type="date" id="repTo" value="${esc(REP.to)}"></label></div>`:""}
     <div class="grid2" style="margin-top:8px"><select class="f-in" id="repDong" aria-label="보고서 동">${dongOptions(REP.dong)}</select><label class="muted" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="repPhotos" ${REP.photos?"checked":""}> 사진 부록</label></div>
-    <label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="repInline" ${REP.inlinePh?"checked":""}> 이상 발견 표에 사진 칸</label>
+    <div style="margin-top:8px"><span class="muted small">점검 내역 범위</span>${seg("detail",[["issues","이상 발견만"],["all","전체 점검"]],REP.detail||"issues")}</div>
+    <label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="repInline" ${REP.inlinePh?"checked":""}> 점검 내역 표에 사진 칸</label>
+    <p class="muted small">A4 세로·배율 100%를 권장해요. 브라우저의 머리글·바닥글을 끄면 제목·주소 중복을 줄일 수 있어요. 미리보기의 표시 한도와 관계없이 선택한 내역·사진 전체를 출력해요.</p>
     <div class="split"><button class="btn sm" id="repPrint" ${ready?"":"disabled"}>인쇄 / PDF 저장</button>${dl?`<button class="btn ghost sm" id="csv7" ${ready?"":"disabled"}>표 CSV</button>`:""}${navigator.share?`<button class="btn ghost sm" id="repShare" ${ready?"":"disabled"}>요약 공유</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${REP.loading?"기간 기록 불러오는 중…":ready?`기간 조회 완료 · ${fmtDT(REP.data.at)}`:esc(REP.err||"")}</span></div></div>`;
 }
 function reportSection(forPrint=false){
   if(REP.data&&REP.data.key!==reportQueryKey())REP.data=null;
+  if(REP.data?.owner&&(REP.data.owner.actor!==S.me||REP.data.owner.database!==db||REP.data.owner.firebase!==FB))REP.data=null;
   const range=repRange();if(range.error){REP.data=null;REP.err=range.error}
   const controls=reportControls();
   if(!REP.data&&!REP.loading&&!REP.err)setTimeout(repLoad,0);
   if(!REP.data)return controls+`<div class="panel"><p role="${REP.err?"alert":"status"}">${esc(REP.err||"기간 전체 기록을 불러오는 중이에요…")}</p>${REP.err&&!range.error?`<button class="btn sm" id="repRefresh">다시 불러오기</button>`:""}</div>`;
   const {a,b,lights,ins,all,open,pats,pend,edits,byDong,byWho}=reportData();
   const cnt=r=>ins.filter(i=>i.result===r).length;
-  const faults={};ins.forEach(i=>inspectionFaults(i).forEach(f=>faults[f]=(faults[f]||0)+1));const faultTop=Object.entries(faults).sort((x,y)=>y[1]-x[1]).slice(0,6);
+  const faults={};ins.forEach(i=>inspectionFaults(i).forEach(f=>faults[f]=(faults[f]||0)+1));const faultTop=Object.entries(faults).sort((x,y)=>y[1]-x[1]);
   // 6-month trend from everything loaded (not just the period)
   const months=[];for(let k=5;k>=0;k--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-k);months.push(repMonthKey(d.getTime()))}
   const trend=months.map(m=>{const ii=all.filter(i=>repMonthKey(i.date)===m);return{m,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length}});const tmax=Math.max(1,...trend.map(t=>t.ok+t.warn+t.bad));
-  const found=ins.filter(i=>i.result!=="정상").slice(0,forPrint?undefined:100);
+  const detailRows=REP.detail==="all"?ins:ins.filter(i=>i.result!=="정상"),found=detailRows.slice(0,forPrint?undefined:100);
+  const longNotes=forPrint?found.filter(i=>String(i.memo||"").length>600||String(i.memo||"").split("\n").length>10):[],noteNumbers=new Map(longNotes.map((i,n)=>[i,n+1]));
+  const memoHTML=i=>!i.memo?"":noteNumbers.has(i)?`<br><span class="muted">${esc(String(i.memo).slice(0,180))}…</span><br><strong>전체 내용: 상세 메모 ${noteNumbers.get(i)}번</strong>`:`<br><span class="muted" style="white-space:pre-wrap">${esc(i.memo)}</span>`;
   const title=`${dongLabel(REP.dong)} 가로등·보안등 점검 보고서`;
   const periodTxt=`${fmtD(a)} ~ ${fmtD(b)}`;
   const photoAppendix=REP.photos?repPhotoAppendix(ins,{all:forPrint,load:!forPrint}):"";
   return controls+`<div class="rep" id="repBody">
-    <div class="cover"><h2>${esc(title)}</h2><div class="muted">기간 ${periodTxt} · 작성 ${fmtDT(Date.now())} · ${esc(S.names[S.me]||"담당자")}</div></div>
-    <div class="kpi"><div><b>${lights.length.toLocaleString()}</b><span>대상 등</span></div><div><b>${ins.length}</b><span>점검 건수</span></div><div><b>${open.length}</b><span>현재 조치 필요</span></div>
+    <div class="cover"><h2>${esc(title)}</h2><div class="muted">기간 ${periodTxt} · 작성 ${fmtDT(Date.now())} · ${esc(S.names[S.me]||"담당자")}</div><div class="report-meta"><span>선택 범위: ${esc(dongLabel(REP.dong))}</span><span>기간 자료 조회: ${fmtDT(REP.data.at)}</span><span>자료 출처: ${esc(reportSourceText())}</span><span>내역 범위: ${REP.detail==="all"?"전체 점검":"이상 발견만"} · 사진 부록 ${REP.photos?"포함":"제외"}</span></div></div>
+    <div class="kpi"><div><b>${lights.length.toLocaleString()}</b><span>현재 대상 시설</span></div><div><b>${ins.length}</b><span>기간 점검 기록 건수</span></div><div><b>${open.length}</b><span>현재 조치 필요</span></div>
       <div><b style="color:var(--ok)">${cnt("정상")}</b><span>정상</span></div><div><b style="color:var(--warn)">${cnt("점검필요")}</b><span>점검필요</span></div><div><b style="color:var(--bad)">${cnt("고장")}</b><span>고장</span></div></div>
+    <div class="report-reading-notes"><p>점검은 기록 건수이며, 같은 시설의 반복 점검을 포함해요. 현재 대상 시설·현재 조치 필요는 작성 시점의 현황으로 기간 실적과 달라요.</p><p>행정동은 현재 시설 정보를 우선 사용해요. 현재 시설이 없는 동의 과거 기록도 포함하고, 확인되지 않은 동은 별도로 집계해요.</p><p>${REP.dong==="전체"?"순찰은 선택 기간의 전체 세션이에요.":"순찰은 선택한 동이 포함된 전체 세션의 거리·통과·표시예요. 해당 동 안의 구간만 계산한 값은 아니에요."} 누적 통과 기록은 같은 시설의 중복을 포함하며 점등 확인 건수가 아니에요.</p></div>
     <h3>월별 점검 추이 <span class="muted">최근 6개월</span></h3>
     <div class="trend">${trend.map(t=>{const tot=t.ok+t.warn+t.bad;const h=v=>Math.round(v/tmax*84);return `<div class="m"><b>${tot||""}</b><div class="bar" style="height:${h(tot)}px">${t.ok?`<i style="height:${h(t.ok)}px;background:var(--ok)" title="정상 ${t.ok}"></i>`:""}${t.warn?`<i style="height:${h(t.warn)}px;background:var(--warn)" title="점검필요 ${t.warn}"></i>`:""}${t.bad?`<i style="height:${h(t.bad)}px;background:var(--bad)" title="고장 ${t.bad}"></i>`:""}</div><small>${t.m.slice(2)}</small></div>`}).join("")}</div>
     <div class="legend"><span><i style="background:var(--ok)"></i>정상</span><span><i style="background:var(--warn)"></i>점검필요</span><span><i style="background:var(--bad)"></i>고장</span></div>
-    <h3>행정동별</h3><table><thead><tr><th>행정동</th><th class="n">등 수</th><th class="n">점검</th><th class="n">고장 발견</th><th class="n">현재 조치 필요</th></tr></thead><tbody>${byDong.slice(0,40).map(r=>`<tr><td>${esc(r.d)}</td><td class="n">${r.n.toLocaleString()}</td><td class="n">${r.insp}</td><td class="n">${r.bad}</td><td class="n">${r.open}</td></tr>`).join("")}</tbody></table>
+    <h3>행정동별</h3><table><thead><tr><th>행정동</th><th class="n">등 수</th><th class="n">점검</th><th class="n">고장 발견</th><th class="n">현재 조치 필요</th></tr></thead><tbody>${byDong.map(r=>`<tr><td>${esc(r.d)}</td><td class="n">${r.n.toLocaleString()}</td><td class="n">${r.insp}</td><td class="n">${r.bad}</td><td class="n">${r.open}</td></tr>`).join("")}</tbody></table>
     <h3>점검자별</h3>${byWho.length?`<table><thead><tr><th>점검자</th><th class="n">점검</th><th class="n">이상 발견</th><th class="n">순찰 표시</th><th class="n">사진</th></tr></thead><tbody>${byWho.map(r=>`<tr><td>${esc(S.names[r.w]||"점검자")}</td><td class="n">${r.n}</td><td class="n">${r.bad}</td><td class="n">${r.pt}</td><td class="n">${r.ph}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">기간 내 점검 기록이 없어요.</p>`}
     ${faultTop.length?`<h3>불량 항목</h3><table><tbody>${faultTop.map(([f,n])=>`<tr><td>${esc(f)}</td><td class="n">${n}</td></tr>`).join("")}</tbody></table>`:""}
-    <h3>순찰·등록·수정</h3><table><tbody><tr><td>야간 순찰</td><td class="n">${pats.length}회 · ${(pats.reduce((s,p)=>s+(p.dist||0),0)/1000).toFixed(1)}km · 지나간 등 ${pats.reduce((s,p)=>s+(p.passed||[]).length,0)}개 · 표시 ${pats.reduce((s,p)=>s+(p.marks||[]).length,0)}건</td></tr><tr><td>현장 등록(미등록)</td><td class="n">${pend.length}건 (대장반영 ${pend.filter(l=>l.reg==="대장반영").length} · 반려 ${pend.filter(l=>l.reg==="반려").length})</td></tr><tr><td>등 정보 수정</td><td class="n">${edits.length}건</td></tr></tbody></table>
-    <h3>이상 발견 내역 <span class="muted">${found.length}${ins.filter(i=>i.result!=="정상").length>found.length?" / "+ins.filter(i=>i.result!=="정상").length:""}건</span></h3>
-    ${found.length?`<table><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th>${REP.inlinePh?`<th>사진</th>`:""}</tr></thead><tbody>${found.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${inspectionFaults(i).map(esc).join(", ")}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td>${REP.inlinePh?`<td class="phcell">${inspectionThumbs(i).slice(0,2).map(t=>`<img src="${esc(safeImageSrc(t.t))}" alt="${esc(t.label||"")}" title="${esc(t.label||"")}">`).join("")||(i.photo?`<img src="${esc(safeImageSrc(i.photo))}" alt="">`:"")}</td>`:""}</tr>`).join("")}</tbody></table>`:`<p class="muted">기간 내 이상 발견이 없어요.</p>`}
+    <h3>순찰·등록·수정</h3><table><tbody><tr><td>야간 순찰</td><td class="report-summary-value">${pats.length}회 · ${(pats.reduce((s,p)=>s+(p.dist||0),0)/1000).toFixed(1)}km · 누적 통과 ${pats.reduce((s,p)=>s+(p.passed||[]).length,0)}개 · 표시 ${pats.reduce((s,p)=>s+(p.marks||[]).length,0)}건</td></tr><tr><td>현장 등록(미등록)</td><td class="n">${pend.length}건 (대장반영 ${pend.filter(l=>l.reg==="대장반영").length} · 반려 ${pend.filter(l=>l.reg==="반려").length})</td></tr><tr><td>등 정보 수정</td><td class="n">${edits.length}건</td></tr></tbody></table>
+    <h3>${REP.detail==="all"?"점검 내역":"이상 발견 내역"} <span class="muted">${found.length}${detailRows.length>found.length?" / "+detailRows.length:""}건</span></h3>
+    ${found.length?`<table class="report-findings-table"><colgroup><col class="col-date"><col class="col-light"><col class="col-result"><col>${REP.inlinePh?'<col class="col-photo">':""}</colgroup><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th>${REP.inlinePh?`<th>사진</th>`:""}</tr></thead><tbody>${found.map(i=>`<tr data-report-inspection="${esc(i.id||"")}"><td>${fmtDT(i.date)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${inspectionFaults(i).map(esc).join(", ")}${memoHTML(i)}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td>${REP.inlinePh?`<td class="phcell">${inspectionThumbs(i).slice(0,2).map(t=>`<img src="${esc(safeImageSrc(t.t))}" alt="${esc(t.label||"")}" title="${esc(t.label||"")}">`).join("")||(i.photo?`<img src="${esc(safeImageSrc(i.photo))}" alt="">`:"")}</td>`:""}</tr>`).join("")}</tbody></table>`:`<p class="muted">${REP.detail==="all"?"기간 내 점검 기록이 없어요.":"기간 내 이상 발견이 없어요."}</p>`}
+    ${!forPrint&&detailRows.length>found.length?'<p class="report-preview-note">화면은 일부 내역만 표시하며 인쇄 / PDF에는 선택한 전체 내역이 포함돼요.</p>':""}
     <h3>현재 조치 필요 등 <span class="muted">${open.length}</span></h3>
     ${open.length?`<table><thead><tr><th>등</th><th>상태</th><th>마지막 점검</th><th>위치</th></tr></thead><tbody>${open.slice(0,forPrint?undefined:150).map(l=>`<tr><td><b>${esc(l.code)}</b><br><span class="muted">${esc(l.dong)}</span></td><td><span class="chip st-${esc(l.status)}">${esc(l.status)}</span></td><td style="white-space:nowrap">${fmtD(l.lastInspected)}</td><td class="muted">${esc(l.address||"")}</td></tr>`).join("")}</tbody></table>${!forPrint&&open.length>150?`<p class="muted">외 ${open.length-150}개</p>`:""}`:`<p class="muted">모든 등이 정상이에요.</p>`}
+    ${longNotes.length?`<section class="report-long-notes"><h3>상세 메모 · 긴 점검 내용</h3>${longNotes.map((i,n)=>`<article class="report-long-note"><h4>${n+1}. ${esc(i.code)} · ${fmtDT(i.date)} · ${esc(i.result)}</h4><p>${esc(i.memo)}</p></article>`).join("")}</section>`:""}
     ${photoAppendix}
-    <p class="muted" style="margin-top:16px;font-size:11px">${REP.data?`기간 전체 기록으로 집계했어요. 자료 기준 ${fmtDT(REP.data.at)}.`:""} 밝기·조명 범위는 모델 추정이며 실측값이 아니에요.</p>
+    <p class="muted" style="margin-top:16px;font-size:11px">${REP.data?`조회한 기간 기록으로 집계했어요. 자료 기준 ${fmtDT(REP.data.at)} · ${esc(reportSourceText())}.`:""} 밝기·조명 범위는 모델 추정이며 실측값이 아니에요.</p>
   </div>`;
 }
 /* photo appendix: full-size photos of the period's inspections, before/after pairs side by side, loaded on demand */
@@ -1862,7 +1880,8 @@ async function loadReportPhotos(items,progress){
 }
 function repPhotoAppendix(ins,options={}){
   const all=options.items||DGReporting.photoItems(ins,inspectionThumbs,REP_PH.scope);
-  const page=DGReporting.photoPage(all,REP_PH.size,REP_PH.page),items=options.all?all:page.items;
+  const size=options.size||REP_PH.size,names=options.names||S.names;
+  const page=DGReporting.photoPage(all,size,REP_PH.page),items=options.all?all:page.items;
   if(!options.all)REP_PH.page=page.page;
   if(options.load!==false&&items.some(x=>x.id&&!REP_PH.docs[x.id])&&!REP_PH.loading){
     REP_PH.loading=true;loadReportPhotos(items).finally(()=>{REP_PH.loading=false;render()});
@@ -1872,54 +1891,49 @@ function repPhotoAppendix(ins,options={}){
   const fig=x=>{
     const d=x.id?REP_PH.docs[x.id]:null,src=safeImageSrc(x.full||(d&&d.data)||x.t);
     const fallback=x.id&&!(d&&d.data),note=fallback?(d?.missing?'원본 조회 실패 · 보관된 미리보기':'원본 확인 전 · 미리보기'):"";
-    return '<figure>'+(src?'<img src="'+esc(src)+'" alt="'+esc(x.label)+'" loading="eager">':'<div class="notice">사진을 불러올 수 없어요.</div>')+'<figcaption><b>'+esc(x.code)+'</b> · '+esc(x.label)+(x.result!=="정상"?' · '+esc(x.result):"")+'<br>'+fmtDT(x.date)+' · '+esc(S.names[x.by]||"점검자")+(d?.note?' · '+esc(d.note):"")+(note?'<br><strong>'+note+'</strong>':"")+'</figcaption></figure>';
+    return '<figure>'+(src?'<img src="'+esc(src)+'" alt="'+esc(x.label)+'" loading="eager">':'<div class="notice">사진을 불러올 수 없어요.</div>')+'<figcaption><b>'+esc(x.code)+'</b> · '+esc(x.label)+(x.result!=="정상"?' · '+esc(x.result):"")+'<br>'+fmtDT(x.date)+' · '+esc(names[x.by]||"점검자")+(d?.note?' · '+esc(d.note):"")+(note?'<br><strong>'+note+'</strong>':"")+'</figcaption></figure>';
   };
   const blocks=DGReporting.photoGroups(items,REP_PH.docs).map(({before,after,rest})=>(before&&after?'<div class="pair-ba"><div class="pl">동일 작업·점검의 조치 전 · 후</div>'+fig(before)+fig(after)+'</div>':"")+rest.map(fig).join("")+(before&&!after?fig(before):"")+(after&&!before?fig(after):"")).join("");
   const missing=items.filter(x=>x.id&&REP_PH.docs[x.id]?.missing).length;
-  return '<section id="repPhotoAppendix"><h3>부록 · 사진 <span class="muted">선택 전체 '+all.length+'장</span></h3>'+ctl+paging+(REP_PH.loading&&!options.all?'<p class="muted noprint" role="status">원본 사진 불러오는 중…</p>':"")+(missing?'<p class="notice">원본을 확인하지 못한 사진 '+missing+'장. 각 사진에 미리보기 대체 여부를 표시했어요.</p>'+(!options.all?'<button class="btn ghost sm noprint" id="repPhotosRetry">원본 다시 조회</button>':""):"")+(items.length?'<div class="psheet ph-'+esc(REP_PH.size)+'">'+blocks+'</div>':'<p class="muted">선택한 범위에 첨부된 사진이 없어요.</p>')+'</section>';
-}
-async function decodePrintImages(container){
-  const images=[...container.querySelectorAll("img")];
-  images.forEach(image=>{image.loading="eager"});
-  await Promise.all(images.map(image=>image.complete?Promise.resolve():new Promise(resolve=>{
-    let timer;const done=()=>{clearTimeout(timer);image.removeEventListener("load",done);image.removeEventListener("error",done);resolve()};
-    image.addEventListener("load",done,{once:true});image.addEventListener("error",done,{once:true});timer=setTimeout(done,8000);
-  })));
-  await Promise.all(images.map(image=>image.decode?image.decode().catch(()=>{}):Promise.resolve()));
-  for(const image of images)if(!image.naturalWidth){const note=document.createElement("p");note.className="notice";note.textContent="사진 표시 실패 · 원본을 확인해 주세요.";image.replaceWith(note)}
+  return '<section id="repPhotoAppendix"'+(items.length?' class="has-photos"':'')+'><h3>부록 · 사진 <span class="muted">선택 전체 '+all.length+'장</span></h3>'+ctl+paging+(REP_PH.loading&&!options.all?'<p class="muted noprint" role="status">원본 사진 불러오는 중…</p>':"")+(missing?'<p class="notice">원본을 확인하지 못한 사진 '+missing+'장. 각 사진에 미리보기 대체 여부를 표시했어요.</p>'+(!options.all?'<button class="btn ghost sm noprint" id="repPhotosRetry">원본 다시 조회</button>':""):"")+(items.length?'<div class="psheet ph-'+esc(size)+'">'+blocks+'</div>':'<p class="muted">선택한 범위에 첨부된 사진이 없어요.</p>')+'</section>';
 }
 /* Prepare a frozen, complete print view. Preview pagination never limits the output. */
+function prepareDossierPrint(target){
+  const table=target.querySelector(".report-dossier-table");if(!table)return;
+  const notes=[];
+  for(const memo of table.querySelectorAll(".dossier-memo")){
+    const text=memo.textContent||"";if(text.length<=600&&text.split("\n").length<=10)continue;
+    const row=memo.closest("tr"),label=[...row.cells].slice(0,3).map(c=>c.textContent).join(" · ");
+    notes.push({text,label});memo.textContent=text.slice(0,180)+"…";
+    const ref=document.createElement("strong");ref.textContent="전체 내용: 상세 메모 "+notes.length+"번";
+    memo.append(document.createElement("br"),ref);
+  }
+  if(notes.length){
+    const appendix=document.createElement("section");appendix.className="report-long-notes";
+    appendix.innerHTML='<h3>상세 메모 · 긴 점검 내용</h3>'+notes.map((n,i)=>'<article class="report-long-note"><h4>'+(i+1)+'. '+esc(n.label)+'</h4><p>'+esc(n.text)+'</p></article>').join("");
+    table.after(appendix);
+  }
+}
 async function printSheet(btn){
-  if(REP_PH.printing)return;
   if(btn?.id==="repPrint"&&repRange().error)return toast(repRange().error);
-  const report=document.querySelector("#repBody"),sheet=document.querySelector("#sheet");
-  if(!sheet)return;
+  const sheet=document.querySelector("#sheet"),report=sheet?.querySelector("#repBody");
+  if(!sheet?.classList.contains("open"))return;
   if(report&&(!REP.data||REP.loading||REP.err||REP.data.key!==reportQueryKey()))return toast("기간 자료를 다시 조회한 뒤 인쇄해 주세요.");
-  REP_PH.printing=true;const text=btn?.textContent;
-  if(btn){btn.disabled=true;btn.textContent="전체 출력 준비 중…"}
-  let target;
+  const generation=navGen(),actor=S.me,database=db,firebase=FB,role=myRole(),source=report||sheet.firstElementChild,data=REP.data;
+  const signature=()=>JSON.stringify([reportQueryKey(),REP.dong,REP.photos,REP.inlinePh,REP.detail,REP_PH.scope,REP_PH.size]);
+  const signatureAt=signature(),scope=REP_PH.scope,size=REP_PH.size,names={...S.names};
+  const isCurrent=()=>navAlive(generation)&&S.me===actor&&db===database&&FB===firebase&&myRole()===role&&sheet.classList.contains("open")&&(report?!!sheet.querySelector("#repBody")&&REP.data===data&&!REP.loading&&!REP.err&&signature()===signatureAt:source?.isConnected);
+  const html=report?reportSection(true):sheet.innerHTML;
+  const title=report?`동구가로등_기간보고서_${fmtD(repRange().a)}-${fmtD(repRange().b)}`:(sheet.querySelector("h2,h3")?.textContent||"동구 가로등 출력");
+  const items=report&&REP.photos?DGReporting.photoItems(reportData().ins,inspectionThumbs,scope):null;
   try{
-    if(REP_PH.cleanup)REP_PH.cleanup();
-    const scope=REP_PH.scope,size=REP_PH.size,key=report?reportQueryKey():null;
-    target=document.createElement("div");target.id="reportPrintRoot";target.setAttribute("aria-hidden","true");target.style.display="none";
-    target.innerHTML=report?reportSection(true):sheet.innerHTML;
-    if(report&&REP.photos){
-      const items=DGReporting.photoItems(reportData().ins,inspectionThumbs,scope);
-      await loadReportPhotos(items,(done,total)=>{if(btn?.isConnected)btn.textContent="사진 준비 "+done+"/"+total});
-      if(!document.querySelector("#repBody")||reportQueryKey()!==key||REP_PH.scope!==scope||REP_PH.size!==size)throw new Error("검토 조건이나 화면이 바뀌었어요. 현재 화면에서 다시 인쇄해 주세요.");
-      const appendix=target.querySelector("#repPhotoAppendix");if(appendix)appendix.outerHTML=repPhotoAppendix([],{all:true,load:false,items});
-    }
-    if(!document.querySelector("#sheet")?.classList.contains("open"))throw new Error("화면이 닫혀 인쇄 준비를 취소했어요.");
-    target.querySelectorAll(".noprint,.sheet-head,.sheet-foot,button").forEach(el=>el.remove());
-    const style=document.createElement("style");style.textContent='@media print{body.dg-report-printing>*:not(#reportPrintRoot){display:none!important}body.dg-report-printing #reportPrintRoot{display:block!important;position:static!important;width:auto!important;height:auto!important;overflow:visible!important}body.dg-report-printing{overflow:visible!important;background:white!important}}';
-    target.append(style);document.body.append(target);
-    await decodePrintImages(target);
-    document.body.classList.add("dg-report-printing");
-    let timer;const cleanup=()=>{clearTimeout(timer);window.removeEventListener("afterprint",cleanup);target.remove();document.body.classList.remove("dg-report-printing");if(REP_PH.cleanup===cleanup)REP_PH.cleanup=null};
-    REP_PH.cleanup=cleanup;window.addEventListener("afterprint",cleanup,{once:true});timer=setTimeout(cleanup,120000);
-    window.print();
-  }catch(error){if(target)target.remove();document.body.classList.remove("dg-report-printing");toast(error.message||"인쇄 자료를 준비하지 못했어요.")}
-  finally{REP_PH.printing=false;if(btn?.isConnected){btn.disabled=false;btn.textContent=text}}
+    await DongguPrint.run({html,title,button:btn,isCurrent,kind:sheet.querySelector(".qrgrid")?"labels":"report",prepare:async target=>{
+      prepareDossierPrint(target);if(!items)return;
+      await loadReportPhotos(items,(done,total)=>{if(btn?.isConnected&&isCurrent())btn.textContent="사진 준비 "+done+"/"+total});
+      if(!isCurrent())return;
+      const appendix=target.querySelector("#repPhotoAppendix");if(appendix)appendix.outerHTML=repPhotoAppendix([],{all:true,load:false,items,size,names});
+    }});
+  }catch(error){toast(error.message||"인쇄 자료를 준비하지 못했어요.")}
 }
 function repSummaryText(){const {a,b,ins,open,pats}=reportData();
   return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${fmtD(a)}~${fmtD(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${pats.length}회`}
@@ -1946,7 +1960,7 @@ async function openLightDossier(id){
     <div class="split noprint" style="margin:0 0 10px"><button class="btn sm" id="psPrint">인쇄 / PDF 저장</button></div>
     <div class="rep"><div class="cover" style="display:flex;gap:14px;align-items:flex-start"><div style="flex:1;min-width:0"><h2>${kindBadge(l.kind)}${esc(l.code)} <span class="chip st-${esc(l.status)}">${esc(l.status)}</span></h2><div class="muted">${esc(l.dong)}${l.road?` · ${esc(l.road)}`:""} · ${esc(l.address||"")} · 출력 ${fmtDT(Date.now())}</div></div>${(()=>{const rs=repSlots(l);const imgs=REP_SLOTS.map(k=>{const e=rs[k];if(!e)return null;const src=e.legacy||(e.id&&GAL[e.id]&&GAL[e.id].data)||(l.photoId===e.id?l.photoT:null);return src?`<img class="repimg" src="${esc(safeImageSrc(src))}" alt="대표 사진 ${k}" title="${k}">`:null}).filter(Boolean);return imgs.length?`<div class="repimgs">${imgs.join("")}</div>`:""})()}</div>
     <h3>대장 정보</h3><table><tbody><tr><td>관리ID</td><td>${esc(l.lampId||"")}</td><td>종류</td><td>${esc(l.kind||"")}</td></tr><tr><td>광원</td><td>${esc(l.lampType||"")}</td><td>등주</td><td>${esc(l.pole||"")}</td></tr><tr><td>점멸기</td><td>${esc(l.sw||"")}</td><td>전주번호</td><td>${esc(l.poleNo||"")}</td></tr><tr><td>좌표</td><td>${typeof l.lat==="number"?`${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}`:""}</td><td>마지막 점검</td><td>${fmtD(l.lastInspected)}</td></tr>${l.note?`<tr><td>비고</td><td colspan="3">${esc(l.note)}</td></tr>`:""}${l.redoNote?`<tr><td>재점검 요청</td><td colspan="3">${esc(l.redoNote)}</td></tr>`:""}</tbody></table>
-    <h3>점검 이력 <span class="muted">${rows.length}</span></h3>${rows.length?`<table><thead><tr><th>일시</th><th>결과</th><th>점검자</th><th>내용</th></tr></thead><tbody>${rows.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${esc(S.names[i.inspector]||"점검자")}</td><td>${inspectionFaults(i).map(esc).join(", ")}${typeof i.tiltDeg==="number"?` · 기울기 ${i.tiltDeg.toFixed(1)}°`:""}${typeof i.posDist==="number"?` · 📍${i.posDist}m`:""}${i.memo?`<br><span class="muted">${esc(i.memo)}</span>`:""}${i.reviewedAt?`<br><span class="muted">검수 ${fmtD(i.reviewedAt)}</span>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">점검 기록이 없어요.</p>`}
+    <h3>점검 이력 <span class="muted">${rows.length}</span></h3>${rows.length?`<table class="report-dossier-table"><colgroup><col class="col-date"><col class="col-result"><col class="col-who"><col></colgroup><thead><tr><th>일시</th><th>결과</th><th>점검자</th><th>내용</th></tr></thead><tbody>${rows.map(i=>`<tr><td style="white-space:nowrap">${fmtDT(i.date)}</td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${esc(S.names[i.inspector]||"점검자")}</td><td>${inspectionFaults(i).map(esc).join(", ")}${typeof i.tiltDeg==="number"?` · 기울기 ${i.tiltDeg.toFixed(1)}°`:""}${typeof i.posDist==="number"?` · 📍${i.posDist}m`:""}${i.memo?`<br><span class="muted dossier-memo">${esc(i.memo)}</span>`:""}${i.reviewedAt?`<br><span class="muted">검수 ${fmtD(i.reviewedAt)}</span>`:""}</td></tr>`).join("")}</tbody></table>`:`<p class="muted">점검 기록이 없어요.</p>`}
     ${l.edits&&l.edits.length?`<h3>정보 변경 이력</h3><div class="panel">${editHistory(l)}</div>`:""}
     ${workflow}
     ${PT_LAST[l.id]?`<h3>순찰</h3><p>마지막 순찰 기록 ${fmtD(PT_LAST[l.id].at)}${PT_LAST[l.id].mark?` (${esc(PT_LAST[l.id].mark)})`:" · GPS 근접 통과(점등 미확인)"}</p>`:""}
