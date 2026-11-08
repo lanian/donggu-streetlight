@@ -1,0 +1,21 @@
+/* Review-area editing uses the staff theme; controls stay outside the map. */
+#laForm{min-width:0}
+#laForm .la-map{height:340px;min-height:260px;margin-top:12px;isolation:isolate}
+#laForm .la-mode,#laForm .la-tools{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+#laForm .la-mode>button{flex:1;min-width:130px;font-size:14px;padding:10px 12px}
+#laForm .la-mode [aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+#laForm .la-tools>button{flex:1 1 130px;font-size:13px;padding:8px;min-height:44px}
+#laForm #laPointState{min-height:2.8em;margin:8px 0;line-height:1.5}
+#laForm .la-help{font-size:12px;line-height:1.6}
+#laForm .la-coordinates{border:1px solid var(--line);border-radius:10px;padding:0 12px;margin:14px 0}
+#laForm .la-coordinates>summary{cursor:pointer;min-height:48px;padding:12px 0;font-size:13px;font-weight:700}
+#laForm .la-coordinates *{box-sizing:border-box}
+#laForm .la-coordinates[open]{padding-bottom:12px}
+#laForm #laVertices{font-size:13px;line-height:1.6;resize:vertical}
+#laForm #laGeometryHint[data-valid="false"]{border-left:3px solid var(--sodium);padding-left:10px}
+#laMap .la-vertex,#laMap .la-midpoint{display:grid;place-items:center;background:transparent;border:0;color:var(--ink);font:700 13px var(--font);touch-action:none}
+#laMap .la-vertex>span{display:grid;place-items:center;width:28px;height:28px;border:2px solid var(--ink);border-radius:50%;background:var(--card);box-shadow:0 1px 4px #0005}
+#laMap .la-vertex.is-selected>span{background:var(--sodium);color:#1b1300;border-color:#1b1300;box-shadow:0 0 0 3px var(--card),0 1px 6px #0008}
+#laMap .la-midpoint>span{display:grid;place-items:center;width:22px;height:22px;border:1px solid var(--ink-2);border-radius:6px;background:var(--card);font-size:18px;line-height:1;box-shadow:0 1px 3px #0004}
+#laMap .la-vertex:focus-visible,#laMap .la-midpoint:focus-visible{outline:3px solid var(--sodium);outline-offset:-2px;border-radius:50%}
+@media(min-width:900px){#laForm .la-map{height:420px}}

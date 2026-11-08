@@ -33,6 +33,7 @@ jobs:
           node scripts/field-workflows-browser-smoke.cjs
           node scripts/lighting-workflows-smoke.cjs
           node scripts/lighting-areas-browser-smoke.cjs
+          node scripts/polygon-editor-browser-smoke.cjs
           node scripts/lighting-review-navigation-smoke.cjs
           node scripts/review-fixes-smoke.cjs
           node scripts/sheet-transitions-browser-smoke.cjs

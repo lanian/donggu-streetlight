@@ -9,7 +9,7 @@
   const EFFECTS = { exclude: '검토 제외', include: '보행로 예외 포함' };
   const state = { loaded: false, error: '', records: [], draft: null, drafts: [], filter: 'active', search: '', show: 40 };
   let api, attached = false, loading = null, reloadRequested = false, signature = '', compiled = null, unsubscribe;
-  let generation = 0, editorSequence = 0, writes = Promise.resolve(), writeCount = 0, editorMap = null, mapLayer = null, searchComposing = false;
+  let generation = 0, editorSequence = 0, writes = Promise.resolve(), writeCount = 0, editorMap = null, mapLayer = null, mapSequence = 0, searchComposing = false;
   const settlements = new Map(), appliedOperations = new Set(), saveViews = new Map();
   const Q = selector => document.querySelector(selector), copy = value => value == null ? null : JSON.parse(JSON.stringify(value));
   const E = value => api.esc(value == null ? '' : value), uid = prefix => root.DGData.newId(prefix);
@@ -33,6 +33,34 @@
       if (!pointValid(point)) fail((index + 1) + '번째 경계점의 좌표 범위를 확인해 주세요.', 'invalid-argument');
       return point;
     });
+  }
+  // Editing history belongs to this draft object, never to the stored area payload.
+  const polygonSessions = new WeakMap();
+  function polygonSession(draft = state.draft) {
+    if (!draft) return null;
+    let session = polygonSessions.get(draft);
+    if (!session) {
+      const editor = root.DGPolygonEditor.create(draft.polygonText ?? verticesText(draft.data.vertices));
+      let count = 0; try { count = root.DGPolygonEditor.points(editor.text).length; } catch (_) {}
+      session = { editor, mode: count >= 3 ? 'edit' : 'draw' }; polygonSessions.set(draft, session);
+    }
+    return session;
+  }
+  function polygonEditable(form, draft, sequence, scope) {
+    return ownsView(form, draft, sequence, scope) && !draft.readonly && !draft.pending && !draft.conflict && canWrite() && Q('#laShape')?.value === 'polygon';
+  }
+  function focusPoint(index) { Q('#laMap .la-vertex[data-point="' + index + '"]')?.focus({ preventScroll: true }); }
+  function editPolygon(operation, focus = false) {
+    const draft = state.draft, form = Q('#laForm'), sequence = editorSequence, scope = generation;
+    if (!draft || !polygonEditable(form, draft, sequence, scope)) return false;
+    readForm(); const session = polygonSession(draft), editor = session.editor;
+    root.DGPolygonEditor.update(editor, draft.polygonText, editor.text === draft.polygonText ? editor.selected : null);
+    operation(editor, session); Q('#laVertices').value = editor.text;
+    changed(); if (focus && editor.selected !== null) focusPoint(editor.selected);
+    return true;
+  }
+  function geometryPreview(draft) {
+    return normalizedDraft({ ...draft, data: { ...draft.data, label: draft.data.label || '범위 미리보기' } });
   }
   function ownsView(form, draft, sequence, scope) {
     return scope === generation && sequence === editorSequence && !!form?.isConnected && Q('#laForm') === form && form.dataset.recordId === draft.recordId && form.dataset.editorSequence === String(sequence) && sheetOpen();
@@ -90,7 +118,7 @@
   }
   function readForm(draft = state.draft) {
     const form = Q('#laForm');
-    if (!draft || draft !== state.draft || draft.readonly || draft.pending || form?.dataset.recordId !== draft.recordId || !sheetOpen()) return draft;
+    if (!draft || draft !== state.draft || draft.readonly || draft.pending || draft.conflict || !canWrite() || form?.dataset.recordId !== draft.recordId || !sheetOpen()) return draft;
     Object.assign(draft.data, { label: Q('#laLabel').value, effect: Q('#laEffect').value, reason: Q('#laReason').value, note: Q('#laNote').value, shape: Q('#laShape').value, lat: Q('#laLat').value, lng: Q('#laLng').value, radius: Q('#laRadius').value });
     draft.polygonText = Q('#laVertices').value;
     return draft;
@@ -98,7 +126,13 @@
   function showDraftError(draft, error) {
     if (state.draft !== draft || Q('#laForm')?.dataset.recordId !== draft.recordId) return;
     const element = Q('#laSaveState'); if (element) element.textContent = '초안을 보관하지 못했어요. 현재 입력은 화면에 남아 있어요. ' + errorText(error);
-    if (error.code === 'conflict') { draft.conflict = true; if (Q('#laDraftConflict')) Q('#laDraftConflict').hidden = false; }
+    if (error.code === 'conflict') {
+      draft.conflict = true;
+      const fieldset = Q('#laForm')?.querySelector('fieldset'); if (fieldset) fieldset.disabled = true;
+      if (element) element.textContent = '다른 탭의 초안이 바뀌어 편집을 잠갔어요. 현재 입력을 새 구역 초안으로 복사하거나 최신 초안을 열어 주세요.';
+      if (Q('#laDraftConflict')) Q('#laDraftConflict').hidden = false;
+      updateGeometry();
+    }
   }
   function writeDraft(draft) {
     if (!draft || draft.readonly) return writes;
@@ -200,8 +234,12 @@
   function renderEditor() {
     const draft = state.draft; if (!draft) return;
     destroyMap();
-    const data = draft.data, old = state.records.find(r => r.id === draft.recordId), locked = draft.readonly || !!draft.pending;
-    api.navigate(heading(data.effect === 'include' ? '보행로 예외 포함' : '검토 제외 구역') + '<div class="split"><button type="button" class="btn ghost sm" data-la="back">' + (draft.returnSection === 'light' ? '밝기 검토로' : '구역 목록으로') + '</button></div><form id="laForm" class="panel" data-record-id="' + E(draft.recordId) + '" data-editor-sequence="' + editorSequence + '"><fieldset' + (locked ? ' disabled' : '') + ' style="border:0;padding:0;min-width:0"><label class="f" for="laLabel">구역 이름</label><input class="f-in" id="laLabel" value="' + E(data.label) + '" maxlength="100" placeholder="예: 보행로 밖 산림" required><div class="grid2"><div><label class="f" for="laEffect">적용 방법</label><select class="f-in" id="laEffect">' + option(EFFECTS, data.effect) + '</select></div><div><label class="f" for="laReason">사유</label><select class="f-in" id="laReason">' + option(data.effect === 'include' ? { public_path: REASONS.public_path, other: REASONS.other } : Object.fromEntries(Object.entries(REASONS).filter(([k]) => k !== 'public_path')), data.reason) + '</select></div></div><label class="f" for="laShape">범위 지정 방식</label><select class="f-in" id="laShape">' + option({ circle: '중심과 반경', polygon: '경계선을 직접 지정' }, data.shape) + '</select><div id="laCircleFields"' + (data.shape === 'polygon' ? ' hidden' : '') + '><div class="grid2"><div><label class="f" for="laLat">중심 위도</label><input class="f-in" id="laLat" type="number" min="-85" max="85" step="any" value="' + E(data.lat) + '"></div><div><label class="f" for="laLng">중심 경도</label><input class="f-in" id="laLng" type="number" min="-180" max="180" step="any" value="' + E(data.lng) + '"></div></div><label class="f" for="laRadius">반경 (5–1,000m)</label><input class="f-in" id="laRadius" type="number" min="5" max="1000" step="any" value="' + E(data.shape === 'circle' ? data.radius : 25) + '"></div><div id="laPolygonFields"' + (data.shape === 'circle' ? ' hidden' : '') + '><label class="f" for="laVertices">경계점 (한 줄에 위도, 경도)</label><textarea class="f-in" id="laVertices" rows="5" spellcheck="false" placeholder="35.145000, 126.928000&#10;35.145100, 126.928000&#10;35.145100, 126.928200">' + E(draft.polygonText ?? verticesText(data.vertices)) + '</textarea><div class="split"><button type="button" class="btn ghost sm" data-la="undo-point">마지막 점 취소</button><button type="button" class="btn ghost sm" data-la="clear-points">경계점 비우기</button></div></div><label class="f" for="laNote">제외·예외 판단 근거</label><textarea class="f-in" id="laNote" rows="3" maxlength="1000" placeholder="예: 통행로 없는 산림 내부만 제외. 산책로는 별도 예외 구역으로 포함.">' + E(data.note) + '</textarea></fieldset><p id="laGeometryHint" class="muted" role="status"></p><div id="laMap" class="gmap" style="height:300px;min-height:240px" aria-label="검토 구역 범위 지도"></div><p id="laMapHint" class="muted">' + (locked ? '지도로 저장한 범위를 확인하세요.' : '중심·반경은 지도를 눌러 중심을 지정하고, 경계선은 둘레를 따라 차례로 눌러요. 저장 전 실제 보행로가 포함되는지 확인하세요.') + '</p><p class="notice">제외와 예외가 겹치면 보행로 예외가 우선해요. 이 설정은 시설이나 현장 기록을 삭제하지 않아요.</p>' +
+    const data = draft.data, old = state.records.find(r => r.id === draft.recordId), locked = draft.readonly || !!draft.pending || !!draft.conflict || !canWrite();
+    const coordinates = '<div id="laCircleFields"' + (data.shape === 'polygon' ? ' hidden' : '') + '><div class="grid2"><div><label class="f" for="laLat">중심 위도</label><input class="f-in" id="laLat" type="number" min="-85" max="85" step="any" value="' + E(data.lat) + '"></div><div><label class="f" for="laLng">중심 경도</label><input class="f-in" id="laLng" type="number" min="-180" max="180" step="any" value="' + E(data.lng) + '"></div></div><label class="f" for="laRadius">반경 (5–1,000m)</label><input class="f-in" id="laRadius" type="number" min="5" max="1000" step="any" value="' + E(data.shape === 'circle' ? data.radius : 25) + '"></div>';
+    const polygonTools = '<div id="laPolygonTools"' + (data.shape !== 'polygon' ? ' hidden' : '') + '><div class="la-mode" role="group" aria-label="다각형 편집 방법"><button type="button" class="btn ghost" id="laDrawMode" data-la="draw-mode" aria-pressed="false">점 추가</button><button type="button" class="btn ghost" id="laEditMode" data-la="edit-mode" aria-pressed="false">그리기 마치기 · 모양 수정</button></div><p id="laPointState" class="muted" role="status" aria-live="polite"></p></div>';
+    const polygonActions = '<div id="laPolygonActions"' + (data.shape !== 'polygon' ? ' hidden' : '') + '><div class="la-tools" role="group" aria-label="경계 편집 도구"><button type="button" class="btn ghost sm" id="laUndo" data-la="undo-edit">되돌리기</button><button type="button" class="btn ghost sm" id="laRedo" data-la="redo-edit">다시하기</button><button type="button" class="btn ghost sm" id="laDeletePoint" data-la="delete-point">선택한 점 삭제</button><button type="button" class="btn ghost sm" data-la="fit-area">전체 범위 보기</button></div><p class="muted la-help">번호 점을 끌어 경계를 고쳐요. 모양 수정 중 선의 +를 누르면 중간 점이 생겨요. 점을 선택한 뒤 방향키로 이동하거나 Delete로 지울 수도 있어요.</p></div>';
+    const advanced = '<div id="laPolygonFields"' + (data.shape !== 'polygon' ? ' hidden' : '') + '><details id="laCoordinateDetails" class="la-coordinates"><summary>좌표 직접 입력 · 고급 설정</summary><label class="f" for="laVertices">경계점 (한 줄에 위도, 경도)</label><textarea class="f-in" id="laVertices" rows="5" spellcheck="false" placeholder="35.145000, 126.928000&#10;35.145100, 126.928000&#10;35.145100, 126.928200">' + E(draft.polygonText ?? verticesText(data.vertices)) + '</textarea><div class="la-tools"><button type="button" class="btn ghost sm" data-la="undo-point">마지막 점 취소</button><button type="button" class="btn ghost sm" data-la="clear-points">경계점 비우기</button></div></details></div>';
+    api.navigate(heading(data.effect === 'include' ? '보행로 예외 포함' : '검토 제외 구역') + '<div class="split"><button type="button" class="btn ghost sm" data-la="back">' + (draft.returnSection === 'light' ? '밝기 검토로' : '구역 목록으로') + '</button></div><form id="laForm" class="panel" data-record-id="' + E(draft.recordId) + '" data-editor-sequence="' + editorSequence + '"><fieldset' + (locked ? ' disabled' : '') + ' style="border:0;padding:0;min-width:0"><label class="f" for="laLabel">구역 이름</label><input class="f-in" id="laLabel" value="' + E(data.label) + '" maxlength="100" placeholder="예: 보행로 밖 산림" required><div class="grid2"><div><label class="f" for="laEffect">적용 방법</label><select class="f-in" id="laEffect">' + option(EFFECTS, data.effect) + '</select></div><div><label class="f" for="laReason">사유</label><select class="f-in" id="laReason">' + option(data.effect === 'include' ? { public_path: REASONS.public_path, other: REASONS.other } : Object.fromEntries(Object.entries(REASONS).filter(([k]) => k !== 'public_path')), data.reason) + '</select></div></div><label class="f" for="laShape">범위 지정 방식</label><select class="f-in" id="laShape">' + option({ circle: '중심과 반경', polygon: '경계선을 직접 지정' }, data.shape) + '</select>' + polygonTools + '<div id="laMap" class="gmap la-map" aria-label="검토 구역 범위 지도"></div><p id="laMapHint" class="muted">' + (locked ? '지도로 저장한 범위를 확인하세요.' : '지도에서 실제 제외 범위와 보행로를 확인해 주세요.') + '</p>' + polygonActions + '<p id="laGeometryHint" class="muted" role="status"></p>' + coordinates + advanced + '<label class="f" for="laNote">제외·예외 판단 근거</label><textarea class="f-in" id="laNote" rows="3" maxlength="1000" placeholder="예: 통행로 없는 산림 내부만 제외. 산책로는 별도 예외 구역으로 포함.">' + E(data.note) + '</textarea></fieldset><p class="notice">제외와 예외가 겹치면 보행로 예외가 우선해요. 이 설정은 시설이나 현장 기록을 삭제하지 않아요.</p>' +
       (old ? '<p class="muted">등록 ' + E(time(old.createdAt)) + ' · ' + E(api.state().names?.[old.createdBy] || old.createdBy) + '<br>수정 ' + E(time(old.updatedAt)) + ' · ' + E(api.state().names?.[old.updatedBy] || old.updatedBy) + ' · 버전 ' + E(old.revision) + (old.disabled ? ' · 현재 적용 해제' : '') + '</p>' : '') +
       '<p id="laSaveState" class="notice" role="status">' + E(draft.saveError || (draft.pending ? '저장 대기함에서 전송 결과를 확인해 주세요.' : draft.readonly ? '저장된 구역을 보고 있어요. 변경에는 관리자 권한이 필요해요.' : root.DGOffline.durable ? '초안은 이 기기에 보관돼요. 구역 저장 후 검토를 다시 실행하세요.' : '초안은 현재 창에서만 보관돼요.')) + '</p><div id="laDraftConflict"' + (draft.conflict ? '' : ' hidden') + '><button type="button" class="btn ghost" data-la="reload-draft">최신 초안 열기</button><button type="button" class="btn ghost" data-la="copy-draft">새 구역 초안으로 복사</button></div>' +
       (draft.pending ? '<button type="button" class="btn ghost" data-asec="outbox">저장 대기함</button>' : draft.readonly ? '' : '<div class="split"><button type="submit" class="btn" id="laSave">구역 저장</button>' + (old ? '<button type="button" class="btn ghost" data-la="toggle">' + (data.disabled ? '다시 적용' : data.effect === 'include' ? '예외 해제' : '제외 해제') + '</button>' : '') + '<button type="button" class="btn ghost" data-la="discard">초안 버리기</button></div>') + '</form>', { key: 'laedit', reopen: () => renderEditor(), back: draft.returnSection === 'light' && api.returnLightingReview ? () => api.returnLightingReview() : null });
@@ -211,12 +249,24 @@
   }
   function updateGeometry() {
     const draft = state.draft; if (!draft || Q('#laForm')?.dataset.recordId !== draft.recordId) return;
-    let hint = '';
+    let hint = '', valid = false;
     try {
-      const data = normalizedDraft({ ...draft, data: { ...draft.data, label: draft.data.label || '범위 미리보기' } });
+      const data = geometryPreview(draft); valid = true;
       hint = (data.shape === 'circle' ? '선택 반경 ' + data.radius + 'm' : '선택 경계 ' + data.vertices.length + '점') + ' · ' + EFFECTS[data.effect] + (data.disabled ? ' · 적용 해제 상태' : '');
     } catch (error) { hint = errorText(error); }
-    if (Q('#laGeometryHint')) Q('#laGeometryHint').textContent = hint;
+    const geometry = Q('#laGeometryHint'); if (geometry) { geometry.textContent = hint; geometry.dataset.valid = String(valid); }
+    const locked = draft.readonly || !!draft.pending || !!draft.conflict || !canWrite();
+    if (Q('#laSave')) Q('#laSave').disabled = locked || !valid;
+    if (draft.data.shape === 'polygon') {
+      const session = polygonSession(draft), editor = session.editor;
+      let points = []; try { points = parseVertices(draft.polygonText); } catch (_) {}
+      const count = points.length, selected = editor.selected;
+      for (const [id, disabled] of [['laDrawMode', locked || count >= 32], ['laEditMode', locked || !valid], ['laUndo', locked || !root.DGPolygonEditor.canUndo(editor)], ['laRedo', locked || !root.DGPolygonEditor.canRedo(editor)], ['laDeletePoint', locked || selected === null || selected >= count]]) { if (Q('#' + id)) Q('#' + id).disabled = disabled; }
+      Q('#laDrawMode')?.setAttribute('aria-pressed', String(session.mode === 'draw'));
+      Q('#laEditMode')?.setAttribute('aria-pressed', String(session.mode === 'edit'));
+      if (Q('#laPointState')) Q('#laPointState').textContent = count + '/32점 · ' + (locked ? '지금은 수정할 수 없어요.' : session.mode === 'draw' ? count < 3 ? '둘레를 따라 최소 3점을 찍어 주세요.' : '점을 더 찍거나 그리기를 마쳐 주세요.' : '모양 수정 중 · 지도 바탕을 눌러도 점이 추가되지 않아요.') + (selected !== null && selected < count ? ' · ' + (selected + 1) + '번 점 선택' : '');
+    }
+    if (Q('#laMapHint') && editorMap) Q('#laMapHint').textContent = locked ? '저장한 범위를 확인하세요. 현재 편집은 잠겨 있어요.' : draft.data.shape === 'circle' ? '지도를 눌러 중심을 지정하고 아래에서 반경을 정해 주세요.' : polygonSession(draft).mode === 'draw' ? '둘레를 차례대로 누르세요. 번호 점은 끌어서 고칠 수 있어요.' : '번호 점을 끌어 모양을 고치세요. 새 꼭짓점은 선의 +로 추가해요.';
     drawMap();
   }
   function initializeMap() {
@@ -225,18 +275,16 @@
     const draft = state.draft, sequence = editorSequence, scope = generation, form = Q('#laForm');
     try {
       const data = draft.data, center = pointValid(data) ? [+data.lat, +data.lng] : [35.145, 126.928];
-      editorMap = root.L.map(element, { zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false }).setView(center, pointValid(data) ? 17 : 14);
+      editorMap = root.L.map(element, { zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false, doubleClickZoom: false }).setView(center, pointValid(data) ? 17 : 14);
       root.DongguPWA.tileLayer(root.L).addTo(editorMap); mapLayer = root.L.layerGroup().addTo(editorMap);
       editorMap.on('click', event => {
-        if (!ownsView(form, draft, sequence, scope) || draft.readonly || draft.pending || !canWrite()) return;
+        if (!ownsView(form, draft, sequence, scope) || draft.readonly || draft.pending || draft.conflict || !canWrite()) return;
         readForm();
-        if (draft.data.shape === 'circle') { Q('#laLat').value = event.latlng.lat.toFixed(6); Q('#laLng').value = event.latlng.lng.toFixed(6); }
-        else {
-          let points; try { points = parseVertices(Q('#laVertices').value); } catch (error) { return api.toast(errorText(error)); }
-          if (points.length >= 32) return api.toast('경계점은 최대 32개예요. 마지막 점을 취소하거나 구역을 나누어 주세요.');
-          points.push({ lat: +event.latlng.lat.toFixed(6), lng: +event.latlng.lng.toFixed(6) }); Q('#laVertices').value = verticesText(points);
+        if (draft.data.shape === 'circle') { Q('#laLat').value = event.latlng.lat.toFixed(6); Q('#laLng').value = event.latlng.lng.toFixed(6); changed(); }
+        else if (polygonSession(draft).mode === 'draw') {
+          try { editPolygon(editor => root.DGPolygonEditor.add(editor, { lat: +event.latlng.lat.toFixed(6), lng: +event.latlng.lng.toFixed(6) })); }
+          catch (error) { api.toast(errorText(error)); }
         }
-        changed();
       });
       drawMap(true); editorMap.invalidateSize();
     } catch (error) { destroyMap(); element.hidden = true; Q('#laMapHint').textContent = '지도를 열지 못했어요. 좌표로 범위를 지정해 주세요. ' + errorText(error); }
@@ -250,26 +298,72 @@
   if (typeof root.matchMedia === 'function') { const mq = root.matchMedia('(prefers-color-scheme: dark)'); if (mq.addEventListener) mq.addEventListener('change', () => drawMap()); }
   function drawMap(fit = false) {
     if (!editorMap || !mapLayer || !state.draft || !Q('#laMap')?.isConnected) return;
+    const drawing = ++mapSequence;
     mapLayer.clearLayers(); const draft = state.draft, data = draft.data;
+    const form = Q('#laForm'), sequence = editorSequence, scope = generation;
     for (const record of state.records.filter(r => !r.disabled && r.id !== draft.recordId)) {
       const style = { color: areaColor(record.effect), weight: 1, opacity: .45, fillOpacity: .04, interactive: false };
       if (record.shape === 'circle') root.L.circle([record.lat, record.lng], { ...style, radius: record.radius }).addTo(mapLayer);
       else root.L.polygon(record.vertices.map(p => [p.lat, p.lng]), style).addTo(mapLayer);
     }
     const style = { color: areaColor(data.effect), weight: 3, dashArray: data.disabled ? '5 5' : null, fillOpacity: data.disabled ? .04 : .15, interactive: false };
-    let layer;
+    let layer, bounds;
     if (data.shape === 'circle' && pointValid(data) && +data.radius > 0 && +data.radius <= 1000) layer = root.L.circle([+data.lat, +data.lng], { ...style, radius: +data.radius }).addTo(mapLayer);
     else if (data.shape === 'polygon') {
       let points; try { points = parseVertices(draft.polygonText); } catch (_) { return; }
+      const session = polygonSession(draft), editor = session.editor, text = draft.polygonText;
+      const alive = () => drawing === mapSequence && polygonEditable(form, draft, sequence, scope) && draft.polygonText === text && polygonSession(draft) === session;
+      const editable = alive();
+      if (Q('#laGeometryHint')?.dataset.valid === 'false') { style.dashArray = '6 5'; style.fillOpacity = .06; }
       if (points.length >= 2) layer = (points.length >= 3 ? root.L.polygon : root.L.polyline)(points.map(p => [p.lat, p.lng]), style).addTo(mapLayer);
-      for (const point of points) root.L.circleMarker([point.lat, point.lng], { radius: 4, color: style.color, interactive: false }).addTo(mapLayer);
+      if (points.length) bounds = root.L.latLngBounds(points.map(p => [p.lat, p.lng]));
+      for (let index = 0; index < points.length; index++) {
+        const point = points[index], selected = editor.selected === index;
+        const marker = root.L.marker([point.lat, point.lng], { icon: root.L.divIcon({ className: 'la-vertex' + (selected ? ' is-selected' : ''), html: '<span>' + (index + 1) + '</span>', iconSize: [44, 44], iconAnchor: [22, 22] }), draggable: editable, keyboard: editable, bubblingMouseEvents: false, title: '경계점 ' + (index + 1), zIndexOffset: selected ? 1000 : 500 }).addTo(mapLayer);
+        const element = marker.getElement();
+        if (element) { element.setAttribute('aria-label', '경계점 ' + (index + 1)); element.setAttribute('data-point', String(index)); element.setAttribute('aria-pressed', String(selected)); if (!editable) { element.setAttribute('aria-disabled', 'true'); element.tabIndex = -1; } }
+        const choose = () => { if (!alive()) return; root.DGPolygonEditor.select(editor, index); updateGeometry(); focusPoint(index); };
+        marker.on('click', choose);
+        element?.addEventListener('keydown', event => {
+          if (!alive()) return;
+          if (event.key === ' ' || event.key === 'Enter') { root.L.DomEvent.stop(event); choose(); return; }
+          if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Delete', 'Backspace'].includes(event.key)) {
+            root.L.DomEvent.stop(event);
+            try {
+              if (event.key === 'Delete' || event.key === 'Backspace') editPolygon(ed => root.DGPolygonEditor.remove(ed, index));
+              else { const delta = event.shiftKey ? .00005 : .00001; editPolygon(ed => root.DGPolygonEditor.move(ed, index, { lat: +(point.lat + (event.key === 'ArrowUp' ? delta : event.key === 'ArrowDown' ? -delta : 0)).toFixed(6), lng: +(point.lng + (event.key === 'ArrowRight' ? delta : event.key === 'ArrowLeft' ? -delta : 0)).toFixed(6) }), true); }
+            } catch (error) { api.toast(errorText(error)); }
+          }
+        });
+        marker.on('drag', () => {
+          if (!alive()) return;
+          const moved = marker.getLatLng(), preview = points.map((p, i) => i === index ? [moved.lat, moved.lng] : [p.lat, p.lng]); layer?.setLatLngs(preview);
+        });
+        marker.on('dragend', () => {
+          if (!alive()) { if (ownsView(form, draft, sequence, scope)) drawMap(); return; }
+          const moved = marker.getLatLng();
+          try { editPolygon(ed => root.DGPolygonEditor.move(ed, index, { lat: +moved.lat.toFixed(6), lng: +moved.lng.toFixed(6) })); }
+          catch (error) { api.toast(errorText(error)); drawMap(); }
+        });
+        if (editable && session.mode === 'edit' && points.length >= 3 && points.length < 32) {
+          const next = points[(index + 1) % points.length], mid = [(point.lat + next.lat) / 2, (point.lng + next.lng) / 2];
+          const add = root.L.marker(mid, { icon: root.L.divIcon({ className: 'la-midpoint', html: '<span aria-hidden="true">+</span>', iconSize: [44, 44], iconAnchor: [22, 22] }), keyboard: true, bubblingMouseEvents: false, title: (index + 1) + '번과 ' + ((index + 1) % points.length + 1) + '번 사이에 점 추가' }).addTo(mapLayer);
+          const addElement = add.getElement(); if (addElement) addElement.setAttribute('aria-label', add.options.title);
+          const insert = () => { if (!alive() || session.mode !== 'edit') return; try { editPolygon(ed => root.DGPolygonEditor.insert(ed, index), true); } catch (error) { api.toast(errorText(error)); } };
+          add.on('click', insert);
+          addElement?.addEventListener('keydown', event => { if (event.key === ' ' || event.key === 'Enter') { root.L.DomEvent.stop(event); insert(); } });
+        }
+      }
     }
-    if (fit && layer?.getBounds && layer.getBounds().isValid()) editorMap.fitBounds(layer.getBounds().pad(.3), { maxZoom: 18, animate: false });
+    if (!bounds && layer?.getBounds) bounds = layer.getBounds();
+    if (fit && bounds?.isValid()) editorMap.fitBounds(bounds.pad(.3), { maxZoom: 18, animate: false });
   }
   function changed() {
-    const draft = readForm(); if (!draft || draft.readonly || draft.pending) return;
+    const draft = readForm(); if (!draft || draft.readonly || draft.pending || draft.conflict || !canWrite()) return;
+    const session = polygonSession(draft); root.DGPolygonEditor.update(session.editor, draft.polygonText, session.editor.text === draft.polygonText ? session.editor.selected : null);
     if (Q('#laCircleFields')) Q('#laCircleFields').hidden = draft.data.shape !== 'circle';
     if (Q('#laPolygonFields')) Q('#laPolygonFields').hidden = draft.data.shape !== 'polygon';
+    for (const id of ['laPolygonTools', 'laPolygonActions']) if (Q('#' + id)) Q('#' + id).hidden = draft.data.shape !== 'polygon';
     updateGeometry(); writeDraft(draft).catch(error => api.toast(errorText(error)));
   }
   async function settleSynced(job, owner = null) {
@@ -350,10 +444,27 @@
       await discardDraft(draft.recordId); if (!ownsView(form, draft, sequence, scope)) return;
       editorSequence++; returnFromEditor(draft); return;
     }
-    if (action === 'undo-point' || action === 'clear-points') {
-      if (!state.draft || state.draft.readonly || state.draft.pending) return;
-      const lines = Q('#laVertices').value.trim().split(/\r?\n/); if (action === 'undo-point') lines.pop(); else lines.length = 0;
-      Q('#laVertices').value = lines.join('\n'); changed(); return;
+    if (action === 'fit-area') { drawMap(true); return; }
+    if (action === 'draw-mode' || action === 'edit-mode') {
+      const draft = state.draft;
+      if (!draft || !polygonEditable(Q('#laForm'), draft, editorSequence, generation)) return;
+      readForm(); if (action === 'edit-mode') geometryPreview(draft);
+      polygonSession(draft).mode = action === 'draw-mode' ? 'draw' : 'edit'; updateGeometry(); return;
+    }
+    if (['undo-edit', 'redo-edit', 'delete-point', 'undo-point'].includes(action)) {
+      return editPolygon(editor => {
+        if (action === 'undo-edit') root.DGPolygonEditor.undo(editor);
+        else if (action === 'redo-edit') root.DGPolygonEditor.redo(editor);
+        else { const index = action === 'undo-point' ? root.DGPolygonEditor.points(editor.text).length - 1 : editor.selected; if (index !== null && index >= 0) root.DGPolygonEditor.remove(editor, index); }
+      });
+    }
+    if (action === 'clear-points') {
+      const draft = state.draft, form = Q('#laForm'), sequence = editorSequence, scope = generation;
+      if (!draft || !polygonEditable(form, draft, sequence, scope)) return;
+      readForm(); const text = draft.polygonText; if (!text.trim()) return;
+      if (!await ask('찍어 둔 경계점을 모두 비울까요? 되돌리기로 복구할 수 있어요.', { title: '경계점 비우기', ok: '모두 비우기', cancel: '유지하기' })) return;
+      if (!polygonEditable(form, draft, sequence, scope) || draft.polygonText !== text) return;
+      editPolygon(editor => root.DGPolygonEditor.update(editor, '')); return;
     }
     if (action === 'reload-draft') {
       if (!await ask('현재 창의 저장되지 않은 입력 대신 최신 초안을 열까요?', { ok: '최신 초안 열기', cancel: '현재 입력 유지' })) return;

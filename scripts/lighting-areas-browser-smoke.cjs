@@ -97,8 +97,9 @@ async function poll(page, predicate, argument, label) {
       await page.locator('#laMap').click({ position });
     }
     assert.equal((await page.locator('#laVertices').inputValue()).split('\n').length, 3);
-    await page.locator('[data-la="undo-point"]').click(); assert.equal((await page.locator('#laVertices').inputValue()).split('\n').length, 2);
+    await page.locator('#laUndo').click(); assert.equal((await page.locator('#laVertices').inputValue()).split('\n').length, 2);
     const vertices = [{ lat: latitude - .0002, lng: lngAt(100) }, { lat: latitude + .0002, lng: lngAt(100) }, { lat: latitude + .0002, lng: lngAt(150) }, { lat: latitude - .0002, lng: lngAt(150) }];
+    await page.locator('#laCoordinateDetails > summary').click();
     await page.locator('#laVertices').fill(vertices.map(p => p.lat + ', ' + p.lng).join('\n'));
     const polygonId = await currentId(); await save(polygonId);
     row = await page.evaluate(id => DGLightingAreas.state.records.find(r => r.id === id), polygonId);
@@ -180,6 +181,7 @@ async function poll(page, predicate, argument, label) {
     const conflictId = await currentId(); await page.evaluate(async id => { await DGLightingAreas.persistActive(); const old = await DGOffline.get('lightingAreaDraft', id); old.data.note = '다른 탭의 최신 기록'; await DGOffline.putIfCurrent('lightingAreaDraft', id, old, old.draftRevision); }, conflictId);
     await page.locator('#laNote').fill('현재 탭에서 작성한 내용');
     await page.locator('#laDraftConflict').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#laNote').isDisabled(), true, 'Conflict locks further edits while keeping copy/reload actions available.');
     assert.equal(await page.evaluate(async id => (await DGOffline.get('lightingAreaDraft', id)).data.note, conflictId), '다른 탭의 최신 기록');
     await page.locator('[data-la="copy-draft"]').click();
     await poll(page, oldId => DGLightingAreas.state.draft.recordId !== oldId, conflictId, 'conflicted draft copied');

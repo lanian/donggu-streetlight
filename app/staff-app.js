@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v68-official-report";
+const APP_VER="v69-polygon-editor";
 const RELEASE_NOTES=[
+  {v:"v69-polygon-editor",d:"2026-11-08",t:"다각형 구역을 지도에서 끌어 수정하고 중간 점 추가·선택 삭제·되돌리기 지원"},
   {v:"v68-official-report",d:"2026-11-08",t:"주민 QR 신고를 운영서비스로 연결하고 확인한 표찰·고장 메모를 선택 복사"},
   {v:"v67-roadlighting",d:"2026-11-08",t:"운영 대장 안전 반입, 점검·보수·사진 전달 묶음과 사용자 등록 확인 이력 추가"},
   {v:"v66-reports",d:"2026-11-08",t:"A4 보고서·사진 출력 개선, 페이지 번호·전체 점검 선택·긴 메모 보존과 출력 중 화면·계정 변경 보호"},
