@@ -70,3 +70,4 @@ jobs:
           node scripts/report-output-browser-smoke.cjs
           node scripts/roadlighting-registry-browser-smoke.cjs
           node scripts/roadlighting-bridge-browser-smoke.cjs
+          node scripts/official-report-import-browser-smoke.cjs

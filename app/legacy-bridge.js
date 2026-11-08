@@ -60,6 +60,7 @@ function initializeOperations() {
   DGIntegration.attach(api);
   DGWorkflows.attach(api);
   DGRoadlightingBridge.attach(api);
+  DGOfficialReportImport.attach(api);
   const originalClose = closeSheet;
   closeSheet = function (fromHistory) { DGOperations.persistActive().catch(e => toast(e.message)); globalThis.DGLightingAreas?.persistActive().catch(e => toast(e.message)); DGIntegration.persistDraft().catch(e => toast(e.message)); DGIntegration.persistPatrol().catch(e => toast(e.message)); return originalClose(fromHistory); };
   const originalLight = openLight;
@@ -127,6 +128,7 @@ function initializeOperations() {
     dashboard: { t: '업무 현황', d: '기간 실적·기한 초과·반복 고장·자재비', body: () => DGManagement.dashboard() },
     registryupdate: { t: '대장 갱신 비교', d: '새 대장 비교·현장 수정 보존·번호 변경 추적', admin: true, body: () => DGManagement.registryView() },
     roadlighting: { t: '운영 시스템 연계', d: '대장 반입·전달 파일·등록 확인', admin: true, body: () => DGRoadlightingBridge.view() },
+    officialreports: { t: '운영 신고 파일 검토', d: '협의 전 준비 양식·체험 반입', admin: true, body: () => DGOfficialReportImport.view() },
     inventory: { t: '자재·재고', d: '입출고 이력·보수 검수와 재고 연동', admin: true, body: () => DGManagement.inventoryView() },
     operationsettings: { t: '업무 기준·보관 기간', d: '점검 주기·연락처 파기·기기 저장', admin: true, body: () => DGManagement.settingsView() },
     audit: { t: '변경 감사 기록', d: '서버 변경 이벤트·행위자·처리 이력', admin: true, body: () => DGManagement.auditView() }

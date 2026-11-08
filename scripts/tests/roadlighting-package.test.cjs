@@ -104,8 +104,9 @@ test('legacy inline photo evidence is preserved without lookup and photo exclusi
 
 test('bounds parallel photo requests and hung originals fall back without hanging a package', async () => {
   const input = fixture(); input.inspections[0].thumbs = Array.from({ length: 12 }, (_, n) => ({ id: 'p' + n, t: photo })); let active = 0, max = 0;
-  const out = await build(input, { photoTimeoutMs: 25, resolvePhoto: id => { active++; max = Math.max(max, active); if (id === 'p0') return new Promise(() => {}); return new Promise(resolve => setTimeout(() => { active--; resolve({ lightId: 'p101', data: photo }); }, 2)); } });
-  assert.ok(max <= 3); assert.equal(out.fallbackPhotos, 1); assert.equal(out.summary.photos, 12);
+  // Settled originals resolve asynchronously without assuming a 2ms timer wins under worker load.
+  const out = await build(input, { photoTimeoutMs: 25, resolvePhoto: id => { active++; max = Math.max(max, active); if (id === 'p0') return new Promise(() => {}); return Promise.resolve().then(() => { active--; return { lightId: 'p101', data: photo }; }); } });
+  assert.ok(max >= 2 && max <= 3); assert.equal(out.fallbackPhotos, 1); assert.equal(out.summary.photos, 12);
 });
 
 test('scope cancellation aborts an unresolved photo preparation promptly and never returns a stale package', async () => {

@@ -1,0 +1,9 @@
+/* File preparation uses existing staff colors and keeps private raw columns off-screen. */
+.oir-panel{min-width:0}.oir-heading{margin:0 0 20px}.oir-heading h3{margin:8px 0;font-size:23px;letter-spacing:-.02em}.oir-heading p{color:var(--ink-2);font-size:14px}
+.oir-tag{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:12px;font-weight:700;color:var(--ink-2)}
+.oir-panel h4{font-size:16px;margin:0 0 14px}.oir-panel .panel{margin:16px 0}.oir-panel .split{flex-wrap:wrap}.oir-panel input[type=file]{max-width:100%;font-size:14px;padding:12px}
+.oir-counts{display:flex;gap:8px;flex-wrap:wrap}.oir-counts span{padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px}.oir-counts b{font-size:18px;margin-left:6px}
+.oir-format{margin-top:12px}.oir-format summary{min-height:44px;padding:12px 0;cursor:pointer;font-size:13px;font-weight:700}.oir-format p{font-size:13px;color:var(--ink-2)}
+.oir-table{overflow-x:auto;max-width:100%;margin:12px 0;border:1px solid var(--line);border-radius:8px}.oir-table table{border-collapse:collapse;width:100%;min-width:580px;table-layout:fixed;font-size:13px}.oir-table th,.oir-table td{text-align:left;padding:10px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}.oir-table th:first-child{width:58px}.oir-table small{display:block;margin-top:5px;font-size:11px;color:var(--ink-2)}.oir-table input[type=checkbox]{width:22px;height:22px;accent-color:var(--sodium);cursor:pointer}
+.oir-decision{font-size:12px}.oir-decision[data-decision=new]{color:var(--ok)}.oir-actions{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}.oir-actions .btn{flex:1;min-width:160px;font-size:14px;word-break:keep-all}.oir-error{border-left:3px solid var(--sodium)}
+.oir-scroll-hint{display:none}@media(max-width:640px){.oir-scroll-hint{display:block;font-size:12px}}
