@@ -23,11 +23,16 @@ function reportPage(config, { search = '', response } = {}) {
       this.checked = false;
       this.children = [];
       this.listeners = {};
+      this.attributes = {};
     }
     addEventListener(name, listener) { this.listeners[name] = listener; }
     appendChild(child) { this.children.push(child); return child; }
     replaceChildren(...children) { this.children = children; }
     focus() {}
+    select() {}
+    setAttribute(name, value) { this.attributes[name] = String(value); }
+    getAttribute(name) { return this.attributes[name] ?? null; }
+    removeAttribute(name) { delete this.attributes[name]; }
     scrollIntoView() {}
   }
   const nodes = new Map();
@@ -48,13 +53,14 @@ function reportPage(config, { search = '', response } = {}) {
     },
     navigator: { userAgent: 'Offline test', clipboard: { writeText: async () => {} } },
     location: { search },
-    URLSearchParams, crypto: require('node:crypto').webcrypto,
+    URL, URLSearchParams, crypto: require('node:crypto').webcrypto,
     fetch: async (url, options) => {
       requests.push({ url, options, body: JSON.parse(options.body) });
       return response ? response() : { ok: true, json: async () => ({ receipt: 'R261022-TEST0001', id: 'test-document' }) };
     }
   };
   vm.createContext(sandbox);
+  vm.runInContext(readSource(path.join(root, 'report/official-handoff.js'), 'utf8'), sandbox);
   vm.runInContext(reportScript, sandbox, { filename: 'report/index.html' });
   const run = source => vm.runInContext(source, sandbox);
   run('st.issue = "불이 꺼져 있어요";if(!st.code)st.code="산수동 1";');
@@ -185,10 +191,15 @@ test('admin edit map and custom light options escape database text', async () =>
   assert.ok(sheetHtml.includes('&lt;/option&gt;&lt;/select&gt;&lt;img src=x onerror=&quot;window.bad=true&quot;&gt;'));
 });
 
-test('shipped intake waits for a verified gateway and never writes directly to Firestore', async () => {
+test('shipped resident page hands off to the official service without collecting or submitting', async () => {
   const config = shippedConfig();
-  assert.equal(config.backend, 'gateway'); assert.equal(config.phone, '');
+  assert.equal(config.backend, 'official'); assert.equal(config.phone, '');
   const page = reportPage(config);
+  assert.equal(page.nodes.get('#officialEntry').hidden, false);
+  assert.equal(page.nodes.get('#privateInputs').hidden, true);
+  assert.equal(page.nodes.get('#legacySubmit').hidden, true);
+  assert.equal(page.nodes.get('#officialOpen').href, 'https://gjd.roadlighting.kr/slamp/repair/map');
+  assert.equal(page.nodes.get('#officialStatus').href, 'https://gjd.roadlighting.kr/slamp/repair/status');
   assert.equal(page.nodes.get('#send').disabled, true);
   await page.submit();
   assert.equal(page.requests.length, 0); assert.equal(page.nodes.get('#done').hidden, true);
@@ -198,6 +209,20 @@ test('a stale direct-intake configuration cannot reopen public database writes',
   const page = reportPage({ ...shippedConfig(), backend: 'firestore' });
   assert.equal(page.nodes.get('#send').disabled, true);
   await page.submit(); assert.equal(page.requests.length, 0); assert.equal(page.nodes.get('#done').hidden, true);
+});
+
+test('editing a QR plate keeps the visible plate in the memo and removes its verified identity', () => {
+  const page = reportPage(shippedConfig(), { search: '?c=%EC%82%B0%EC%88%98%EB%8F%99%2042' });
+  page.run('st.lightId="p42";st.facility={id:"p42",code:"산수동 42",lampId:"42"};updateOfficialSummary();');
+  page.nodes.get('#codeEdit').onclick();
+  assert.equal(page.nodes.get('#codeIn').value, '산수동 42');
+  assert.equal(page.run('st.code'), '산수동 42');
+  assert.equal(page.run('st.lightId'), null);
+  assert.equal(page.run('st.facility'), null);
+  assert.equal(page.nodes.get('#codeKnown').hidden, true);
+  assert.equal(page.nodes.get('#codeAsk').hidden, false);
+  assert.match(page.nodes.get('#officialSummary').value, /입력한 표찰\(대장 미확인\): 산수동 42/);
+  assert.doesNotMatch(page.nodes.get('#officialSummary').value, /운영 시설번호:/);
 });
 
 test('gateway retries keep their request ID and a conflicting response never claims success', async () => {

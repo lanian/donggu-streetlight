@@ -59,6 +59,7 @@ jobs:
           node scripts/patrol-field-browser-smoke.cjs
           node scripts/offline-reload-browser-smoke.cjs
           node scripts/report-page-browser-smoke.cjs
+          node scripts/official-report-browser-smoke.cjs
           node scripts/work-improvements-browser-smoke.cjs
           node scripts/inventory-improvements-browser-smoke.cjs
           node scripts/patrol-functional-browser-smoke.cjs

@@ -232,10 +232,10 @@ async function fbSignOut(){
    fault (no login) and, when the server lookup is on, check a report's progress. Staff records stay behind the login
    and the server rules; nothing here reads them. */
 function residentPanel(){
-  const c=window.REPORT_CONFIG||{},status=c.backend==="gateway"&&/^https:\/\//.test(c.statusUrl||"");
-  return `<div class="panel resident" style="margin-top:12px"><h3>주민이세요?</h3><p class="muted">가로등이 꺼졌거나 고장 났으면 로그인 없이 바로 신고할 수 있어요. 기둥의 QR을 찍어도 같은 신고 화면이 열려요.</p>
+  const c=window.REPORT_CONFIG||{},official=c.backend==="official",status=official?c.officialStatusUrl==="https://gjd.roadlighting.kr/slamp/repair/status":c.backend==="gateway"&&/^https:\/\//.test(c.statusUrl||"");
+  return `<div class="panel resident" style="margin-top:12px"><h3>주민이세요?</h3><p class="muted">${official?"가로등 고장 신고는 운영서비스에서 마쳐 주세요. 아래 안내 화면과 기둥의 QR에서 운영서비스로 이동할 수 있어요.":"가로등이 꺼졌거나 고장 났으면 로그인 없이 바로 신고할 수 있어요. 기둥의 QR을 찍어도 같은 신고 화면이 열려요."}</p>
     <a class="btn ghost block linkbtn-block" href="${esc(REPORT_URL)}">가로등 고장 신고하기</a>${status?`<a class="btn ghost block linkbtn-block" href="${esc(REPORT_URL)}?status=1">내 신고 처리 상태 보기</a>`:""}
-    <p class="muted" style="font-size:12px;margin:8px 0 0">신고 내용과 연락처는 담당 부서만 봐요. 점검 기록은 직원으로 로그인해야 보여요.</p></div>`;
+    <p class="muted" style="font-size:12px;margin:8px 0 0">${official?"이 앱에서는 신고를 접수하지 않아요. 사진·연락처 입력과 처리상태 확인은 운영서비스에서 진행해 주세요.":"신고 내용과 연락처는 담당 부서만 봐요. 점검 기록은 직원으로 로그인해야 보여요."}</p></div>`;
 }
 function vSignIn(){return `<div class="panel" style="margin-top:12px"><h3>직원 로그인</h3><p class="muted">구청 Google 계정으로 로그인하면 점검·순찰 기록이 공유 저장소에 저장돼요. 역할(관리자·점검자)은 관리자가 지정해요.</p><button class="btn sodium block" id="fbSignIn">Google로 로그인</button></div>${residentPanel()}${DGSecurity.devicePanel()}`}
 function vConnectionError(){return `<div class="panel" style="margin-top:12px"><h3>공유 저장소에 연결하지 못했어요</h3><p class="muted">인터넷 연결을 확인한 뒤 다시 열어 주세요. 문제가 계속되면 관리자에게 연결 설정을 확인해 달라고 하세요.</p><button class="btn sodium block" id="fbRetry">다시 연결</button></div>`}
@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v67-roadlighting";
+const APP_VER="v68-official-report";
 const RELEASE_NOTES=[
+  {v:"v68-official-report",d:"2026-11-08",t:"주민 QR 신고를 운영서비스로 연결하고 확인한 표찰·고장 메모를 선택 복사"},
   {v:"v67-roadlighting",d:"2026-11-08",t:"운영 대장 안전 반입, 점검·보수·사진 전달 묶음과 사용자 등록 확인 이력 추가"},
   {v:"v66-reports",d:"2026-11-08",t:"A4 보고서·사진 출력 개선, 페이지 번호·전체 점검 선택·긴 메모 보존과 출력 중 화면·계정 변경 보호"},
   {v:"v65-markers",d:"2026-11-08",t:"겹친 시설 목록 선택, 순찰 방향 보정, 필터·검색 선택 보호와 추정 좌표 조명 범위 제외"},
@@ -1566,7 +1567,8 @@ function inboxSection(){
   <div class="split">${dl&&S.reports.length?`<button class="btn ghost sm" id="csv8">신고 CSV</button>`:""}${fsReady()?`<button class="btn ghost sm" id="ibImport" ${IB.importing?"disabled":""}>${IB.importing?"가져오는 중…":"QR 신고 가져오기"}</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${IB.importMsg||(fsReady()?"신고 페이지로 들어온 건을 서버에서 받아요 (Google 로그인)":"자동 접수(Firestore)는 report/config.js에 설정하면 켜져요")}</span></div>`;
 }
 /* ---------- stage 2: pull citizen reports from Firestore (staff Google sign-in), file them in the inbox ---------- */
-function fsReady(){const c=window.REPORT_CONFIG;return !!(c&&["gateway","firestore"].includes(c.backend)&&c.firestore&&c.firestore.projectId&&c.firestore.apiKey)}
+// The resident delivery choice must not hide earlier reports from authorized staff.
+function fsReady(){const c=window.REPORT_CONFIG;return !!(c&&["gateway","firestore","official"].includes(c.backend)&&c.firestore&&c.firestore.projectId&&c.firestore.apiKey)}
 const SCRIPT_LOADS=new Map();
 function loadScript(src,integrity){
   if(SCRIPT_LOADS.has(src))return SCRIPT_LOADS.get(src);

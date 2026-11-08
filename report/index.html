@@ -19,18 +19,39 @@
   </header>
 
   <main id="form">
+    <section id="officialEntry" class="official-entry" aria-labelledby="officialTitle" hidden>
+      <span class="official-tag">비공식 신고 안내</span>
+      <h2 id="officialTitle">운영서비스에서 신고를 마쳐 주세요</h2>
+      <p>실제 접수와 접수번호 발급은 <strong id="officialName">운영서비스</strong>에서 진행해요. 이 페이지에서는 신고를 접수하지 않아요.</p>
+      <div class="official-actions"><a class="btn sodium block" id="officialOpen" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" aria-disabled="true" tabindex="-1">운영서비스에서 신고하기 ↗</a></div>
+      <p id="officialDestinationNotice" class="muted" role="status">새 창의 운영서비스에서 시설 선택·휴대폰 확인 등 필요한 절차를 진행해 주세요.</p>
+      <a id="officialStatus" class="official-status" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" hidden>이미 접수했다면 처리상태 보기 ↗</a>
+    </section>
+
     <h2>어느 등인가요</h2>
     <div class="panel">
       <div id="codeKnown" hidden><div class="muted">기둥 표찰 번호</div><div class="code" id="codeText"></div><div class="muted ok" id="codeConfirmed" hidden style="color:var(--ok);font-size:13px;margin-top:2px">✓ 가로등 대장에서 확인한 번호예요</div><button type="button" class="btn ghost" id="codeEdit" style="margin-top:8px;min-height:40px;padding:8px 14px;font-size:14px">번호가 다르면 고치기</button></div>
-      <div id="codeAsk"><label class="muted" for="codeIn">기둥에 붙은 표찰 번호 (예: 산수동 642, 지호로 65-5). 모르면 비워 두고 아래 위치를 적어 주세요.</label><input class="f-in" id="codeIn" placeholder="산수동 642" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-describedby="codeHint" style="margin-top:6px"><div id="codeHint" class="codehint" aria-live="polite"></div></div>
+      <div id="codeAsk"><label class="muted" id="codeLabel" for="codeIn">기둥에 붙은 표찰 번호 (예: 산수동 642, 지호로 65-5). 모르면 비워 두고 아래 위치를 적어 주세요.</label><input class="f-in" id="codeIn" placeholder="산수동 642" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-describedby="codeHint" style="margin-top:6px"><div id="codeHint" class="codehint" aria-live="polite"></div></div>
     </div>
+    <p id="officialFacilityState" class="muted" role="status" hidden></p>
 
+    <details id="contentAssist" class="content-assist" open>
+    <summary id="assistSummary" hidden>신고 내용을 미리 정리하기 <span class="muted">(선택)</span></summary>
     <h2>무슨 문제인가요</h2>
     <div class="chips" id="issues"></div>
 
     <h2>자세한 내용 <span class="muted" style="font-weight:400">(선택)</span></h2>
     <textarea class="f-in" id="desc" maxlength="500" placeholder="예: 저녁 7시부터 계속 꺼져 있어요. ○○마트 앞 두 번째 기둥."></textarea>
+    <div id="officialCopyActions" class="official-copy" hidden>
+      <p class="muted">표찰·고장·메모만 복사해 운영서비스에 붙여 넣을 수 있어요. 사진·연락처는 운영서비스에서 직접 첨부·입력해 주세요. 메모에는 개인정보를 적지 마세요. 시설 선택은 자동으로 이어지지 않아요.</p>
+      <label for="officialSummary" class="muted">복사할 접수 전 메모</label>
+      <textarea class="f-in" id="officialSummary" rows="6" readonly></textarea>
+      <div class="row official-copy-buttons"><button type="button" class="btn ghost" id="officialCopy">신고 내용 복사</button><a class="btn sodium" id="officialOpenAfterCopy" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" aria-disabled="true" tabindex="-1">운영서비스 열기 ↗</a></div>
+      <p id="officialCopyState" class="muted" role="status" aria-live="polite"></p>
+    </div>
+    </details>
 
+    <div id="privateInputs">
     <h2>사진 <span class="muted" style="font-weight:400">(선택, 1장)</span></h2>
     <div class="row"><button type="button" class="btn ghost" id="photoBtn">사진 찍기</button><button type="button" class="btn ghost" id="photoLibBtn">앨범에서</button><button type="button" class="btn ghost" id="photoDel" hidden>빼기</button></div>
     <input type="file" id="photo" accept="image/*" capture="environment" hidden><input type="file" id="photoLib" accept="image/*" hidden>
@@ -44,12 +65,14 @@
     <h2>연락처 <span class="muted" style="font-weight:400">(선택)</span></h2>
     <input class="f-in" id="contact" inputmode="tel" placeholder="처리 결과를 받고 싶으면 전화번호" maxlength="40">
     <label class="ck"><input type="checkbox" id="consent"> 처리 결과 안내 목적으로 연락처를 <span id="pdays"></span>일 보관하는 데 동의해요</label>
+    </div>
 
     <div id="deliveryNotice" class="notice" role="status" hidden></div>
     <div id="err" class="err" hidden></div>
-    <div style="margin-top:18px"><button type="button" class="btn sodium block" id="send">신고 보내기</button></div>
+    <div id="legacySubmit" style="margin-top:18px"><button type="button" class="btn sodium block" id="send">신고 보내기</button></div>
     <div id="alt" class="row" style="margin-top:10px;flex-wrap:wrap" hidden></div>
-    <p class="foot"><span id="footLead">이 페이지는 신고만 받아요. 접수 상태 확인은 </span><span id="phoneLine"></span>로 문의해 주세요. 신고 내용·사진·위치는 가로등 고장 처리 목적으로만 쓰이고, 연락처는 처리 안내 후 지워요.</p>
+    <p class="foot" id="legacyFoot"><span id="footLead">이 페이지는 신고만 받아요. 접수 상태 확인은 </span><span id="phoneLine"></span>로 문의해 주세요. 신고 내용·사진·위치는 가로등 고장 처리 목적으로만 쓰이고, 연락처는 처리 안내 후 지워요.</p>
+    <p class="foot" id="officialFoot" hidden>운영서비스에서 접수번호와 처리상태를 확인해 주세요. 개인정보 수집·보관과 휴대폰 확인은 운영서비스의 안내를 확인해 주세요. 이 페이지의 복사·이동은 접수 완료가 아니에요.</p>
   </main>
 
   <section id="statusView" hidden>
@@ -77,6 +100,7 @@
   </section>
 </div>
 <script src="config.js"></script>
+<script src="official-handoff.js"></script>
 <script src="report.js"></script>
 </body>
 </html>
