@@ -41,7 +41,7 @@ const server = http.createServer((req, res) => {
     await poll(page, () => DGLighting.state.loaded, null, 'lighting records ready');
     await page.evaluate(() => { window.__workflowDownloads = []; dl = { save: async options => window.__workflowDownloads.push(options) }; });
     // a leftover dialog or a sheet still closing can cover the tab bar on a slow runner: settle both before moving on
-    const close = async () => { await page.evaluate(() => { if (window.DGDialog && DGDialog.isOpen()) DGDialog.cancel(); }); if (await page.locator('#sheet.open').count()) { await page.evaluate(() => closeSheet('all')); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); } await page.waitForFunction(() => !NAV.stack.length && !(window.DGDialog && DGDialog.isOpen())); };
+    const close = async () => { await page.waitForFunction(() => !NAV.leaving && !NAV.syncing); await page.evaluate(() => { if (window.DGDialog && DGDialog.isOpen()) DGDialog.cancel(); }); if (await page.locator('#sheet.open').count()) { await page.evaluate(() => closeSheet('all')); await page.locator('#sheet.open').waitFor({ state: 'hidden' }); } await page.waitForFunction(() => !NAV.stack.length && !NAV.leaving && !(window.DGDialog && DGDialog.isOpen())); };
     const section = async key => { await close(); await page.locator('[data-tab="admin"]').click(); await page.locator('[data-asec="' + key + '"]').first().click(); };
     const minute = await page.evaluate(() => DGLightingModel.minuteOfKst(Date.now())), time = String(Math.floor(minute / 60)).padStart(2, '0') + ':' + String(minute % 60).padStart(2, '0');
     const review = async () => { await section('light'); await page.locator('[data-rvmode="pairs"]').click(); await page.locator('#rvTime').fill(time); await page.locator('#rvRun').click(); await poll(page, () => S.review?.historyState === 'synced', null, 'complete review archive'); };
@@ -82,6 +82,10 @@ const server = http.createServer((req, res) => {
     await page.locator('#lwObservation').selectOption(observationId); await page.locator('#lwCompletion').fill('합성 현장 관찰 확인. 실제 운영 데이터가 아닙니다.'); await page.locator('[data-lw="task-complete"]').click();
     await poll(page, async id => (await db.doc('lightingTasks/' + id).get()).data()?.status === 'completed', taskId, 'task completion');
     assert.equal(await page.evaluate(async id => (await db.doc('lightingTasks/' + id).get()).data().observationId, taskId), observationId);
+    // A committed document precedes draft cleanup and the browser's asynchronous Back.
+    // Wait for the acknowledged editor close before the next section requests its own history movement.
+    await page.locator('#lwTaskForm').waitFor({ state: 'detached' });
+    await page.waitForFunction(() => !NAV.leaving && !NAV.syncing);
     record('candidate → assigned follow-up → observation → completion with preserved source link');
 
     const csv = 'id,name,lat,lng,updated_at\nexternal-a,타기관 정문,35.14,126.93,2026-01-01\nexternal-b,타기관 후문,35.141,126.931,2026-01-01\nexternal-a,파일 중복,35.14,126.93,2026-01-01\ninvalid,좌표 누락,,126.93,2026-01-01';
@@ -93,6 +97,7 @@ const server = http.createServer((req, res) => {
     assert.equal(imported.length, 2); assert.ok(imported.every(r => !r.nightConfirmed && r.status === 'unknown' && r.schedule === 'unknown'));
     await page.evaluate(id => DGLighting.openEditor(null, null, id), imported[0].id); await page.locator('#lcNote').fill('현장에서 별도로 수정한 근거'); await page.locator('#lcSave').click();
     await poll(page, id => DGLighting.state.records.find(r => r.id === id)?.note === '현장에서 별도로 수정한 근거', imported[0].id, 'field edit');
+    await page.locator('#lcForm').waitFor({ state: 'detached' });
     await uploadCSV();
     assert.deepEqual(await page.evaluate(() => DGLightingWorkflows.state.import.preview.counts), { new: 0, protected: 2, duplicate: 1, invalid: 1 });
     assert.equal(await page.locator('[data-lw="import-apply"]').isDisabled(), true);
