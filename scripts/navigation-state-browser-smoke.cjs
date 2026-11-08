@@ -130,16 +130,19 @@ const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcS
       await page.evaluate(() => closeSheet('all')); await page.waitForFunction(() => !document.querySelector('#sheet').classList.contains('open'));
       // map: pan/zoom to a light, filter, open a facility from its card, come back to the same view and filters
       await page.evaluate(() => openMap('filtered')); await page.waitForFunction(() => gmap && gmapLayer);
-      const at = await page.evaluate(() => { const l = S.lights.find(x => Number.isFinite(x.lat) && x.kind === '보안등'); gmap.setView([l.lat, l.lng], 18); return { lat: +l.lat.toFixed(4), lng: +l.lng.toFixed(4) }; });
+      const at = await page.evaluate(() => { const l = S.lights.find(x => Number.isFinite(x.lat) && x.kind === '보안등'); gmap.setView([l.lat, l.lng], 18, { animate: false }); return { id: l.id, lat: +l.lat.toFixed(4), lng: +l.lng.toFixed(4) }; });
       await page.locator('#mapKind [data-kind="보안등"]').click(); await page.waitForTimeout(200);
-      await page.evaluate(() => { const m = gmapLayer.getLayers().find(l => l instanceof L.CircleMarker); m.fire('click'); });
+      const grouped = await page.evaluate(id => { const ids = GM.groups.get(id); if (ids) { showMapGroup(ids); return true; } showMapCard(id); return false; }, at.id);
+      if (grouped) await page.locator('#mapCard [data-map-choice="' + at.id + '"]').click();
+      await page.waitForFunction(() => !gmap._panAnim?._inProgress);
+      const departure = await page.evaluate(() => ({ lat: +gmap.getCenter().lat.toFixed(4), lng: +gmap.getCenter().lng.toFixed(4), zoom: gmap.getZoom() }));
       await page.locator('#mapCard [data-map-open]').click(); await page.locator('#iMemo').waitFor();
       await page.goBack(); await page.waitForFunction(() => gmap && document.querySelector('#gmap'));
       await page.waitForTimeout(300);
       const view = await page.evaluate(() => ({ lat: +gmap.getCenter().lat.toFixed(4), lng: +gmap.getCenter().lng.toFixed(4), zoom: gmap.getZoom() }));
       assert.equal(await page.locator('#mapKind [data-kind="보안등"]').getAttribute('aria-pressed'), 'true', 'the kind filter survives the round trip');
       assert.equal(await page.evaluate(() => !document.querySelector('#mapCard').hidden && document.querySelector('#mapCard b').textContent.length > 0), true, 'the selected light card is back');
-      assert.deepEqual(view, { ...at, zoom: 18 }, 'the map comes back where it was left');
+      assert.deepEqual(view, departure, 'the map comes back to its actual departure view after revealing the selected card');
     });
     assert.deepEqual(errors, []); console.log(JSON.stringify({ results, browserErrors: errors }, null, 2));
   } finally { await context.close(); await browser.close(); server.close(); }

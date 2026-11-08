@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v64-map-control";
+const APP_VER="v65-markers";
 const RELEASE_NOTES=[
+  {v:"v65-markers",d:"2026-11-08",t:"겹친 시설 목록 선택, 순찰 방향 보정, 필터·검색 선택 보호와 추정 좌표 조명 범위 제외"},
   {v:"v64-map-control",d:"2026-11-08",t:"지도 배경 선택창을 작은 배경 버튼으로 접기, 선택·Escape·바깥 클릭으로 닫기와 지도 편집 보호"},
   {v:"v63-vworld",d:"2026-11-08",t:"일반·위성/항공사진·사진+도로명 지도 전환, 브이월드 개발키 연결, 위치·시설 표시 유지와 영상 오류 복귀"},
   {v:"v60-workflows",d:"2026-11-07",t:"순찰·GPS·복구·보고서 오류 개선, 작업 정보·일괄 수정, 자재 부족 예상, 좌표 정비와 순찰 목표 관리"},
@@ -1234,12 +1235,14 @@ document.addEventListener("click",async e=>{
   if(t.dataset.camstart!==undefined){startCam();return}
   if(t.id==="openOnly"){S.stat=S.stat&&S.stat!=="정상"?null:"__open";S.limit=60;render();return}
   if(t.dataset.kind&&t.closest("#kindFilter")){S.kind=t.dataset.kind;S.limit=60;render();return}
-  if(t.dataset.kind&&t.closest("#mapKind")){gmapKind=t.dataset.kind;document.querySelectorAll("#mapKind button").forEach(b=>b.setAttribute("aria-pressed",b===t));drawMapMarkers();return}
-  if(t.dataset.mstat&&t.closest("#mapStat")){GM.status=t.dataset.mstat;document.querySelectorAll("#mapStat button").forEach(b=>b.setAttribute("aria-pressed",b===t));hideMapCard();drawMapMarkers();if(GM.near)mapNear(),mapNear();return}
-  if(t.dataset.legend&&t.closest("#mapLegend")){if(GM.hidden.has(t.dataset.legend))GM.hidden.delete(t.dataset.legend);else GM.hidden.add(t.dataset.legend);t.setAttribute("aria-pressed",String(!GM.hidden.has(t.dataset.legend)));t.title=GM.hidden.has(t.dataset.legend)?"다시 보이기":"잠시 숨기기";drawMapMarkers();return}
+  if(t.dataset.kind&&t.closest("#mapKind")){gmapKind=t.dataset.kind;document.querySelectorAll("#mapKind button").forEach(b=>b.setAttribute("aria-pressed",b===t));mapApplyFilters();return}
+  if(t.dataset.mstat&&t.closest("#mapStat")){GM.status=t.dataset.mstat;document.querySelectorAll("#mapStat button").forEach(b=>b.setAttribute("aria-pressed",b===t));mapApplyFilters();return}
+  if(t.dataset.legend&&t.closest("#mapLegend")){if(GM.hidden.has(t.dataset.legend))GM.hidden.delete(t.dataset.legend);else GM.hidden.add(t.dataset.legend);t.setAttribute("aria-pressed",String(!GM.hidden.has(t.dataset.legend)));t.title=GM.hidden.has(t.dataset.legend)?"다시 보이기":"잠시 숨기기";mapApplyFilters();return}
   if(t.dataset.maphit){mapFocus(t.dataset.maphit);return}
   if(t.id==="mapNear"){mapNear();return}
-  if(t.dataset.mapCardclose!==undefined){hideMapCard();return}
+  if(t.dataset.mapCardclose!==undefined){hideMapCard(true);return}
+  if(t.dataset.mapChoice){showMapCard(t.dataset.mapChoice,true);return}
+  if(t.dataset.mapGroup!==undefined){showMapGroup(GM.group||[]);return}
   if(t.dataset.mapRoute){mapRoute(t.dataset.mapRoute);return}
   if(t.dataset.kind&&t.closest("#arKind")){ar.kind=t.dataset.kind;document.querySelectorAll("#arKind button").forEach(b=>b.setAttribute("aria-pressed",b===t));arList();arDraw();return}
   if(t.dataset.ck&&draft){draft.checks[t.dataset.ck]=t.dataset.v;t.parentElement.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b===t));suggestResult();return}
@@ -1418,7 +1421,7 @@ document.addEventListener("click",async e=>{
 });
 $("#sheetBg").addEventListener("click",()=>closeSheet());
 document.addEventListener("keydown",e=>{if(e.defaultPrevented)return;if(e.key==="/"&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.target.closest("input,textarea,select,[contenteditable]")&&!(window.DGDialog&&DGDialog.isOpen())){const box=document.querySelector("#sheet.open #mapQ")||document.querySelector("#sheet.open input[type=search]")||(!document.querySelector("#sheet.open")&&$("#q"));if(box){e.preventDefault();box.focus();box.select&&box.select();return}}if(e.key==="Enter"&&e.target.id==="mapQ"){e.preventDefault();const first=document.querySelector("#mapHits [data-maphit]");if(first)first.click();return}const tab=e.target.closest('[role="tab"]');if(tab&&["ArrowLeft","ArrowRight","Home","End"].includes(e.key)){const tabs=[...document.querySelectorAll('nav [role="tab"]')].filter(b=>!b.hidden);const i=tabs.indexOf(tab),n=e.key==="Home"?0:e.key==="End"?tabs.length-1:(i+(e.key==="ArrowRight"?1:-1)+tabs.length)%tabs.length;e.preventDefault();tabs[n].focus();tabs[n].click()}});
-document.addEventListener("input",e=>{if(e.target.id==="mapQ"){clearTimeout(window.mapQTimer);window.mapQTimer=setTimeout(()=>mapSearchInput(e.target.value),120);return}if(e.target.id==="rvQuery"){S.rvQuery=e.target.value;if(S.review)S.review.show=20;clearTimeout(window.rvQueryTimer);if(e.isComposing||window.rvQueryComposing)return;window.rvQueryTimer=setTimeout(()=>{if(document.getElementById("rvQuery"))render()},150);return}if(e.target.id==="ibNum"){delete e.target.dataset.lightId;delete e.target.dataset.lightCode;return}if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;renderList();return}if(e.target.id==="rmQ"){S.rmq=e.target.value;S.rmlimit=60;const t=document.createElement("div");t.innerHTML=removedSection();for(const id of["rmList","rmCount"]){const a=$("#"+id),b=t.querySelector("#"+id);if(a&&b)a.replaceWith(b)}}});
+document.addEventListener("input",e=>{if(e.target.id==="mapQ"){mapCancelFocus();clearTimeout(window.mapQTimer);const input=e.target,owner=gmap;window.mapQTimer=setTimeout(()=>{if(gmap===owner&&input.isConnected&&$("#mapQ")===input)mapSearchInput(input.value)},120);return}if(e.target.id==="rvQuery"){S.rvQuery=e.target.value;if(S.review)S.review.show=20;clearTimeout(window.rvQueryTimer);if(e.isComposing||window.rvQueryComposing)return;window.rvQueryTimer=setTimeout(()=>{if(document.getElementById("rvQuery"))render()},150);return}if(e.target.id==="ibNum"){delete e.target.dataset.lightId;delete e.target.dataset.lightCode;return}if(e.target.id==="qrQ"){QR.q=e.target.value;clearTimeout(QR.t);QR.t=setTimeout(()=>{const pos=e.target.selectionStart;render();const x=$("#qrQ");if(x){x.focus();x.setSelectionRange(pos,pos)}},300);return}if(e.target.id==="q"){S.q=e.target.value;S.limit=60;renderList();return}if(e.target.id==="rmQ"){S.rmq=e.target.value;S.rmlimit=60;const t=document.createElement("div");t.innerHTML=removedSection();for(const id of["rmList","rmCount"]){const a=$("#"+id),b=t.querySelector("#"+id);if(a&&b)a.replaceWith(b)}}});
 document.addEventListener("compositionstart",e=>{if(e.target.id==="rvQuery"){window.rvQueryComposing=true;clearTimeout(window.rvQueryTimer)}});
 document.addEventListener("compositionend",e=>{if(e.target.id==="rvQuery"){window.rvQueryComposing=false;S.rvQuery=e.target.value;if(S.review)S.review.show=20;clearTimeout(window.rvQueryTimer);window.rvQueryTimer=setTimeout(()=>{if(document.getElementById("rvQuery"))render()},150)}});
 document.addEventListener("change",async e=>{
@@ -2601,7 +2604,7 @@ function roadAreas(G){
 /* ---------- street map (Leaflet + OpenStreetMap) ---------- */
 let gmap=null,gmapLayer=null,gmapMe=null,gmapPts=[],gmapKind="전체";
 /* map view state: status chip, statuses hidden through the legend, search text, selected light, the "내 주변" list */
-const GM={status:"전체",hidden:new Set(),q:"",sel:null,near:false,bound:false,route:null,labelMax:300,cellPx:72,clusterBelow:16,labelFrom:18};
+const GM={status:"전체",hidden:new Set(),q:"",sel:null,group:null,groups:new Map(),targets:[],focusSeq:0,focusTimer:null,near:false,bound:false,route:null,labelMax:300,cellPx:72,clusterBelow:16,labelFrom:18};
 const MAP_STATUS=["전체","고장","점검필요","수리중","정상","주기 경과"];
 // marker fill = status, marker ring = kind (plate colour); the kind chips above the map filter it
 /* Leaflet's canvas renderer schedules its redraw on the next frame; when a map is removed in that same frame (closing a
@@ -2614,25 +2617,46 @@ function mapVisiblePts(){return gmapPts.filter(l=>(gmapKind==="전체"||(l.kind|
 function mapStatusCounts(arr){const c={"전체":arr.length};arr.forEach(l=>{c[l.status]=(c[l.status]||0)+1;if(isDue(l))c["주기 경과"]=(c["주기 경과"]||0)+1});return c}
 function statusChips(cur,id,counts){return `<div class="seg kindseg mapstat" id="${id}">${MAP_STATUS.filter(s=>s==="전체"||counts[s]).map(s=>`<button type="button" data-mstat="${s}" aria-pressed="${s===cur}">${s==="전체"?"":`<i style="background:${s==="주기 경과"?"#B86E00":STAT_COL[s]};border-radius:50%"></i>`}${s}${s!=="전체"?` <span class="muted" style="font-size:11px">${counts[s]}</span>`:""}</button>`).join("")}</div>`}
 function mapLegend(){return LSTAT.map(s=>`<button type="button" class="st-${s}" data-legend="${s}" aria-pressed="${!GM.hidden.has(s)}" title="${GM.hidden.has(s)?"다시 보이기":"잠시 숨기기"}"><i></i>${s}</button>`).join("")}
-function mapFilterState(){return {kind:gmapKind,status:GM.status,hidden:[...GM.hidden],q:GM.q,sel:GM.sel}}
+function mapFilterState(){return {kind:gmapKind,status:GM.status,hidden:[...GM.hidden],q:GM.q,sel:GM.sel,group:GM.group?GM.group.slice():null}}
+/* A count marker stays at an actual member coordinate. Circular 44 px targets have separated anchors. */
+function mapMarkerGroups(lights,z,exact=false){
+  if(exact){const groups=new Map();for(const l of lights){const key=l.lat+","+l.lng;if(!groups.has(key))groups.set(key,{pts:[],lat:l.lat,lng:l.lng});groups.get(key).pts.push(l)}return [...groups.values()]}
+  const size=44,cells=new Map(),groups=[];
+  for(const l of [...lights].sort((a,b)=>String(a.id).localeCompare(String(b.id)))){
+    if(!byId(l.id)){groups.push({pts:[l],lat:l.lat,lng:l.lng});continue}
+    const p=gmap.project([l.lat,l.lng],z),x=Math.floor(p.x/size),y=Math.floor(p.y/size);let best=null,distance=size;
+    for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(const group of cells.get((x+dx)+":"+(y+dy))||[]){const d=Math.hypot(group.x-p.x,group.y-p.y);if(d<distance){best=group;distance=d}}
+    if(best)best.pts.push(l);else{const group={pts:[l],x:p.x,y:p.y,lat:l.lat,lng:l.lng};groups.push(group);const key=x+":"+y;if(!cells.has(key))cells.set(key,[]);cells.get(key).push(group)}
+  }
+  return groups;
+}
 /* Markers are drawn for the current view only. Zoomed out, lights are grouped into screen-space cells with a count
    (and the number needing attention); a tap on a group zooms into it. From zoom 18 each marker carries its plate code. */
 function drawMapMarkers(){
   if(!gmap||!gmapLayer||gmap._dgClosing||!document.getElementById("mapKind"))return;gmapLayer.clearLayers();
   const pts=mapVisiblePts();const c=$("#mapCount");if(c)c.textContent=`${pts.length.toLocaleString()}개`;
   const z=gmap.getZoom(),bounds=gmap.getBounds().pad(.25);
-  const inView=pts.filter(l=>bounds.contains([l.lat,l.lng]));GM.singles=[];
+  const inView=pts.filter(l=>bounds.contains([l.lat,l.lng]));GM.singles=[];GM.targets=[];GM.groups=new Map();let selectedLayer=null;
+  const stack=group=>{
+    const ids=group.pts.map(l=>l.id),n=ids.length,selected=ids.includes(GM.sel),issues=group.pts.filter(l=>l.status!=="정상").length;
+    ids.forEach(id=>GM.groups.set(id,ids));GM.targets.push(group);
+    const label=`가까운 시설 ${n}개${issues?`, 조치 필요 ${issues}개`:""}. 시설 목록 열기`;
+    const marker=L.marker([group.lat,group.lng],{icon:L.divIcon({className:"mapstack"+(selected?" sel":"")+(issues?" issue":""),html:`<button type="button" aria-label="${esc(label)}"><span aria-hidden="true">${n}</span></button>`,iconSize:[44,44],iconAnchor:[22,22]}),keyboard:false,zIndexOffset:selected?900:500});
+    marker.on("click",()=>showMapGroup(ids));marker.addTo(gmapLayer);
+  };
   const single=l=>{GM.singles.push(l);
+    GM.targets.push({pts:[l],lat:l.lat,lng:l.lng});
     const sel=GM.sel===l.id,many=inView.length>800;
     const m=L.circleMarker([l.lat,l.lng],{radius:sel?11:l.reg?9:l.status==="정상"?(many?4:6):8,color:sel?"#FFCE67":l.reg?"#E89A0C":KIND_COL[l.kind]||"#fff",weight:sel?4:l.reg?3:many&&l.status==="정상"?1.5:2.5,dashArray:l.reg||l.posApprox?"3 3":null,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95,bubblingMouseEvents:false});
     m.on("click",()=>showMapCard(l.id));m.addTo(gmapLayer);
+    if(sel)selectedLayer=m;
     if(z>=GM.labelFrom&&(inView.length<=80||z>=GM.labelFrom+1)&&inView.length<=GM.labelMax)m.bindTooltip(esc(l.code),{permanent:true,direction:"right",offset:[8,0],className:"maplbl",interactive:false});
   };
   if(GM.route){ // a visit plan: the stops in order, numbered, joined by a dashed line; done stops are greyed
-    const stops=GM.route.ids.map(id=>byId(id)).filter(l=>l&&typeof l.lat==="number"&&pts.includes(l));
+    const visible=new Map(pts.map(l=>[l.id,l])),stops=GM.route.ids.map(id=>visible.get(id)).filter(l=>l&&typeof l.lat==="number");
     // one dashed line in plan order; the number is the stop's place in the plan, so hidden stops do not shift it
     if(stops.length>1)L.polyline(stops.map(l=>[l.lat,l.lng]),{color:"#2F5DA8",weight:3,dashArray:"6 6",opacity:.7,interactive:false}).addTo(gmapLayer);
-    stops.forEach(l=>{const n=GM.route.order.indexOf(l.id)+1,done=GM.route.done.has(l.id),sel=GM.sel===l.id,next=GM.route.next===l.id;const m=L.marker([l.lat,l.lng],{icon:L.divIcon({className:"maprt"+(done?" done":"")+(sel?" sel":"")+(next?" next":""),html:`<div style="background:${done?"#8A98B3":STAT_COL[l.status]||"#2F3B52"}">${n}</div>`,iconSize:[28,28],iconAnchor:[14,14]}),zIndexOffset:sel?900:next?800:500,keyboard:false});m.bindTooltip(`${n}. ${esc(l.code)}${done?" · 완료":next?" · 다음 방문지":""}`,{direction:"top",offset:[0,-14]});m.on("click",()=>showMapCard(l.id));m.addTo(gmapLayer)});
+    for(const group of mapMarkerGroups(stops,z,true)){if(group.pts.length>1){stack(group);continue}const l=group.pts[0];GM.targets.push(group);const n=GM.route.order.indexOf(l.id)+1,done=GM.route.done.has(l.id),sel=GM.sel===l.id,next=GM.route.next===l.id;const m=L.marker([l.lat,l.lng],{icon:L.divIcon({className:"maprt"+(done?" done":"")+(sel?" sel":"")+(next?" next":""),html:`<div style="background:${done?"#8A98B3":STAT_COL[l.status]||"#2F3B52"}">${n}</div>`,iconSize:[28,28],iconAnchor:[14,14]}),zIndexOffset:sel?900:next?800:500,keyboard:false});m.bindTooltip(`${n}. ${esc(l.code)}${done?" · 완료":next?" · 다음 방문지":""}`,{direction:"top",offset:[0,-14]});m.on("click",()=>showMapCard(l.id));m.addTo(gmapLayer)}
     return;
   }
   if(z<GM.clusterBelow&&inView.length>60){
@@ -2646,7 +2670,17 @@ function drawMapMarkers(){
       m.on("click",()=>{const b=L.latLngBounds(cell.pts.map(l=>[l.lat,l.lng]));if(b.isValid()&&b.getNorthEast().distanceTo(b.getSouthWest())>30)gmap.fitBounds(b.pad(.2),{maxZoom:GM.labelFrom,animate:true});else gmap.setView(b.getCenter(),GM.labelFrom,{animate:true})});
       m.addTo(gmapLayer);
     }
-  }else inView.forEach(single);
+  }else for(const group of mapMarkerGroups(inView,z)){if(group.pts.length>1)stack(group);else single(group.pts[0])}
+  selectedLayer?.bringToFront();
+}
+function mapGroupRows(ids){const visible=new Map(mapVisiblePts().map(l=>[l.id,l]));return [...new Set(ids)].map(id=>visible.get(id)).filter(l=>l&&byId(l.id)).sort((a,b)=>GM.route?GM.route.order.indexOf(a.id)-GM.route.order.indexOf(b.id):String(a.code).localeCompare(String(b.code),"ko",{numeric:true}))}
+function showMapGroup(ids){
+  if(!gmap||gmap._dgClosing||!gmap.getContainer().isConnected)return;const card=$("#mapCard"),rows=mapGroupRows(ids);if(!card||!rows.length)return;
+  if(rows.length===1){showMapCard(rows[0].id,true);return}
+  mapCancelFocus();GM.sel=null;GM.group=rows.map(l=>l.id);
+  const approx=rows.filter(l=>l.posApprox).length;
+  card.innerHTML=`<button type="button" class="x" data-map-cardclose aria-label="목록 닫기">×</button><h4 class="mapgroup-title">가까운 시설 ${rows.length}개</h4><p class="muted small">표찰 번호를 확인하고 시설을 선택하세요.</p>${approx?`<p class="mapcard-approx">${approx}개는 분전함 기준 추정 위치예요. 현장에서 표찰과 실제 위치를 확인하세요.</p>`:""}<div class="mapgroup-list">${rows.map(l=>`<button type="button" data-map-choice="${esc(l.id)}">${kindBadge(l.kind)}<b>${GM.route?`${GM.route.order.indexOf(l.id)+1}. `:""}${esc(l.code)}</b><span class="stc st-${esc(l.status)}">${esc(l.status)}</span>${GM.route?.done.has(l.id)?'<small>완료</small>':GM.route?.next===l.id?'<small>다음 방문지</small>':""}</button>`).join("")}</div>`;
+  card.hidden=false;drawMapMarkers();card.querySelector("[data-map-choice]")?.focus({preventScroll:true});
 }
 function mapCardHtml(l){
   const due=isDue(l);
@@ -2655,21 +2689,32 @@ function mapCardHtml(l){
       <div>${kindBadge(l.kind)}${l.reg?`<span class="reg">${esc(l.reg)}</span>`:""}<b>${esc(l.code)}</b> <span class="mapcard-st stc st-${esc(l.status)}">${esc(l.status)}</span></div>
       <div class="muted">${esc(l.dong)}${l.lampType?` · ${esc(l.lampType)}`:""}${l.address?`<br>${esc(l.address)}`:""}</div>
       <div class="muted small">마지막 점검 ${fmtD(l.lastInspected)}${due?' · <span style="color:var(--warn)">주기 경과</span>':""}</div></div></div>
+    ${l.posApprox?'<p class="mapcard-approx">분전함 기준 추정 위치예요. 현장에서 표찰과 실제 위치를 확인하세요.</p>':""}
+    ${GM.group&&mapGroupRows(GM.group).length>1?`<button type="button" class="mapgroup-back" data-map-group>가까운 시설 ${mapGroupRows(GM.group).length}개 목록</button>`:""}
     <div class="mapcard-btns"><button class="btn sm" data-map-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button><button class="btn sm ghost" data-map-route="${esc(l.id)}">${DEV.field?"길찾기":"지도 앱·좌표"}</button></div>`;
 }
-function showMapCard(id){
-  const l=byId(id),card=$("#mapCard");if(!l||!card)return;
+function showMapCard(id,focus=false){
+  const l=mapVisiblePts().find(l=>l.id===id),card=$("#mapCard");if(!l||!byId(id)||!card||!gmap||gmap._dgClosing||!gmap.getContainer().isConnected)return;
+  mapCancelFocus();if(!GM.group?.includes(id))GM.group=GM.groups.get(id)||null;
   GM.sel=id;card.innerHTML=mapCardHtml(l);card.hidden=false;drawMapMarkers();
+  if(focus)card.querySelector("[data-map-open]")?.focus({preventScroll:true});
   const pt=gmap.latLngToContainerPoint([l.lat,l.lng]),h=gmap.getSize().y;if(pt.y>h-card.offsetHeight-24)gmap.panBy([0,pt.y-(h-card.offsetHeight)/2],{animate:true}); // keep the marker above the card
 }
-/* the drawn single marker nearest to a tap, within a finger's width (24 px); markers are 4–11 px circles */
+/* A tap near a small marker resolves to the current anchor, including its facility chooser. */
 const MAP_TAP_PX=24;
-function mapNearestMarker(pt){
-  if(!gmap||!pt||!GM.singles)return null;let best=null,bd=MAP_TAP_PX;
-  for(const l of GM.singles){const q=gmap.latLngToContainerPoint([l.lat,l.lng]),d=Math.hypot(q.x-pt.x,q.y-pt.y);if(d<=bd){bd=d;best=l.id}}
-  return best;
+function mapPickTarget(point){
+  if(!gmap||!point)return;let best=null,distance=MAP_TAP_PX;
+  for(const target of GM.targets||[]){const p=gmap.latLngToContainerPoint([target.lat,target.lng]),d=p.distanceTo(point);if(d<distance){best=target;distance=d}}
+  if(best?.pts.length>1)showMapGroup(best.pts.map(l=>l.id));else if(best)showMapCard(best.pts[0].id);
 }
-function hideMapCard(){const card=$("#mapCard");if(card){card.hidden=true;card.innerHTML=""}if(GM.sel){GM.sel=null;drawMapMarkers()}}
+function mapCancelFocus(){GM.focusSeq++;if(GM.focusTimer!=null)clearTimeout(GM.focusTimer);GM.focusTimer=null}
+function hideMapCard(focus=false){mapCancelFocus();const card=$("#mapCard");if(card){card.hidden=true;card.innerHTML=""}const drawn=GM.sel||GM.group;GM.sel=null;GM.group=null;if(drawn)drawMapMarkers();if(focus)gmap?.getContainer().focus({preventScroll:true})}
+function mapRefreshHits(){
+  if(GM.near){const items=meFine()?mapVisiblePts().map(l=>({l,d:distM(ME.pos,l)})).filter(x=>x.d<=300).sort((a,b)=>a.d-b.d).slice(0,8):[];mapHitsRender(items,"near");return}
+  if(GM.q.trim()){mapHitsRender(mapSearch(GM.q).map(l=>({l,d:meFine()?distM(ME.pos,l):null})),"search");return}
+  const box=$("#mapHits");if(box){box.hidden=true;box.innerHTML=""}
+}
+function mapApplyFilters(){clearTimeout(window.mapQTimer);if(!GM.near)GM.q=$("#mapQ")?.value??GM.q;hideMapCard();drawMapMarkers();mapRefreshHits()}
 /* 길찾기: hand the light's position to the map app the person prefers */
 async function mapRoute(id){
   const l=byId(id);if(!l||typeof l.lat!=="number")return;const name=encodeURIComponent(`${l.kind||"가로등"} ${l.code}`);
@@ -2692,10 +2737,11 @@ function mapHitsRender(items,mode){
   if(!items.length){box.innerHTML=`<div class="muted" style="padding:8px 4px">${mode==="near"?"주변 300m 안에 표시 중인 등이 없어요.":"일치하는 등이 없어요."}</div>`;box.hidden=false;return}
   box.innerHTML=items.map(({l,d})=>`<button type="button" data-maphit="${esc(l.id)}">${kindBadge(l.kind)}<b>${esc(l.code)}</b> <span class="stc st-${esc(l.status)}">${esc(l.status)}</span><span class="muted">${esc(l.address||l.dong)}</span>${d!=null?`<span class="d">${d<1000?Math.round(d)+"m":(d/1000).toFixed(1)+"km"}</span>`:""}</button>`).join("");box.hidden=false;
 }
-function mapSearchInput(v){GM.q=v;GM.near=false;$("#mapNear")?.setAttribute("aria-pressed","false");const hits=mapSearch(v);if(!v.trim()){const box=$("#mapHits");if(box){box.hidden=true;box.innerHTML=""}return}mapHitsRender(hits.map(l=>({l,d:meFine()?distM(ME.pos,l):null})),"search")}
+function mapSearchInput(v){mapCancelFocus();GM.q=v;GM.near=false;$("#mapNear")?.setAttribute("aria-pressed","false");const hits=mapSearch(v);if(!v.trim()){const box=$("#mapHits");if(box){box.hidden=true;box.innerHTML=""}return}mapHitsRender(hits.map(l=>({l,d:meFine()?distM(ME.pos,l):null})),"search")}
 function meFine(){return !!(ME.pos&&Number.isFinite(ME.pos.acc)&&ME.pos.acc<=POSITION_MAP_FOLLOW_MAX_M)}
-function mapFocus(id){const l=byId(id);if(!l||!gmap)return;gmap.setView([l.lat,l.lng],Math.max(gmap.getZoom(),GM.labelFrom),{animate:true});setTimeout(()=>showMapCard(id),250);const box=$("#mapHits");if(box&&!GM.near){box.hidden=true;box.innerHTML=""}}
+function mapFocus(id){const l=mapVisiblePts().find(l=>l.id===id),owner=gmap;if(!l||!byId(id)||!owner)return;mapCancelFocus();clearTimeout(window.mapQTimer);const sequence=GM.focusSeq;owner.setView([l.lat,l.lng],Math.max(owner.getZoom(),GM.labelFrom),{animate:true});GM.focusTimer=setTimeout(()=>{if(gmap!==owner||owner._dgClosing||!owner.getContainer().isConnected||GM.focusSeq!==sequence||!mapVisiblePts().some(l=>l.id===id))return;GM.focusTimer=null;showMapCard(id)},250);const box=$("#mapHits");if(box&&!GM.near){box.hidden=true;box.innerHTML=""}}
 function mapNear(){
+  hideMapCard();clearTimeout(window.mapQTimer);
   const btn=$("#mapNear");
   if(GM.near){GM.near=false;btn?.setAttribute("aria-pressed","false");const box=$("#mapHits");if(box){box.hidden=true;box.innerHTML=""}return}
   if(!ME.pos){toast("내 위치를 먼저 켜 주세요.");mapLocate();return}
@@ -2707,14 +2753,16 @@ function mapNear(){
 }
 const STAT_COL={"정상":"#2C7A57","점검필요":"#B86E00","고장":"#C2372B","수리중":"#2F5DA8"};
 function openMap(scope,one){
+  mapCancelFocus();
+  clearTimeout(window.mapQTimer);
   const pts=(scope==="one"?S.lights.filter(l=>l===one||(typeof l.lat==="number"&&distM(one,l)<=150)):scope==="filtered"?filtered():scope==="open"?S.lights.filter(l=>l.status!=="정상"):scope==="custom"?one.pts:S.lights).filter(l=>typeof l.lat==="number"&&typeof l.lng==="number");
   const title=esc(scope==="one"?`지도 · ${one.code}`:scope==="filtered"?"지도 · 현재 목록":scope==="open"?"지도 · 조치 필요":scope==="custom"?one.title:"지도 · 전체");
   // the saved view of this level (coming back) is only handed over inside openSheet, so peek at it first for the chips
   const pre=(NAV.restoring&&NAV.restoring.gen===NAV.gen&&NAV.restoring.e&&NAV.restoring.e.map)||NAV.mapView||null;const f=pre&&pre.filters;
-  gmapKind=f?f.kind:"전체";GM.status=f?f.status:"전체";GM.hidden=new Set(f?f.hidden:[]);GM.q=f?f.q||"":"";GM.sel=f?f.sel:null;GM.near=false;
+  gmapKind=f?f.kind:"전체";GM.status=f?f.status:"전체";GM.hidden=new Set(f?f.hidden:[]);GM.q=f?f.q||"":"";GM.sel=f?f.sel:null;GM.group=Array.isArray(f?.group)?f.group.slice():null;GM.near=false;
   GM.route=scope==="custom"&&one&&one.ordered?{ids:pts.map(l=>l.id),order:one.order||pts.map(l=>l.id),done:new Set(one.done||[]),next:one.next||null}:null;
   navRoute("map:"+scope+(scope==="one"&&one?":"+one.id:scope==="custom"&&one?":"+(one.title||""):""),()=>openMap(scope,one));
-  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted" id="mapCount">${pts.length.toLocaleString()}개</span></h3><div class="muted">마커 속은 상태, 테두리는 종류예요. 멀리서는 묶음 숫자로 보여요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted" id="mapCount">${pts.length.toLocaleString()}개</span></h3><div class="muted">마커 속은 상태, 테두리는 종류예요. 확대 후 겹친 숫자를 누르면 시설 목록이 열려요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="mapfilters">${kindChips(gmapKind,"mapKind",kindCounts(pts))}${statusChips(GM.status,"mapStat",mapStatusCounts(pts))}</div>
     <div class="mapsearch"><input id="mapQ" type="search" placeholder="표찰 번호·주소로 찾기" enterkeyhint="search" autocomplete="off" value="${esc(GM.q)}" aria-label="지도에서 등 찾기"><button type="button" class="btn sm ghost" id="mapNear" aria-pressed="false">내 주변</button></div>
     <div class="maphits" id="mapHits" hidden></div>
@@ -2729,6 +2777,7 @@ function openMap(scope,one){
   let errs=0;tiles.on("tileerror",event=>{const note=$("#mapNote");if(!mapActive()||!note||(event.mode&&event.mode!=="street"))return;if(++errs===4)note.textContent="지도 배경을 불러올 수 없어요. 마커 위치만 표시돼요."});
   tiles.on("mapmodechange",()=>{if(!mapActive())return;errs=0;const note=$("#mapNote");if(note)note.textContent=""});
   gmapLayer=L.layerGroup().addTo(gmap);gmapPts=pts;
+  const visibleIds=new Set(mapVisiblePts().map(l=>l.id));if(!visibleIds.has(GM.sel))GM.sel=null;if(GM.group){GM.group=GM.group.filter(id=>visibleIds.has(id));if(GM.group.length<2)GM.group=null}
   const back=NAV.mapView||pre;NAV.mapView=null;
   if(back&&back.center)gmap.setView(back.center,back.zoom); // coming back from a screen opened on this map: same view as before
   else if(scope==="one"&&one)gmap.setView([one.lat,one.lng],18);
@@ -2736,9 +2785,9 @@ function openMap(scope,one){
   else gmap.setView([35.146,126.923],13);
   drawMapMarkers();drawGu(gmap);
   // a tap that just misses a small marker; taps on the card, buttons and controls inside the map box are not map taps
-  gmap.on("click",e=>{const t=e.originalEvent&&e.originalEvent.target;if(t&&t.closest&&t.closest(".mapcard,.locbtn,.leaflet-control,button,a,input"))return;const id=mapNearestMarker(e.containerPoint);if(id)showMapCard(id)});
+  gmap.on("click",e=>{const t=e.originalEvent&&e.originalEvent.target;if(t&&t.closest&&t.closest(".mapcard,.locbtn,.leaflet-control,button,a,input"))return;mapPickTarget(e.containerPoint)});
   gmap.on("moveend zoomend",()=>{if(gmap&&!gmap._dgClosing&&$("#gmap"))drawMapMarkers()});
-  if(GM.sel&&byId(GM.sel))showMapCard(GM.sel);
+  if(GM.sel&&mapVisiblePts().some(l=>l.id===GM.sel))showMapCard(GM.sel);else if(GM.group?.length)showMapGroup(GM.group);
   // field devices show their position at once; a PC asks for location only when 내 위치 is pressed (no surprise prompt, no ±km ring)
   meStop();if(DEV.field)setTimeout(()=>{if(gmap)meStart(false)},300);
   setTimeout(()=>gmap&&gmap.invalidateSize(),250);
@@ -3015,7 +3064,7 @@ function ptMapDraw(force){
   pt.mapMe.setLatLng(ll);
   // heading-up while following: the map turns so the road ahead points up and the car points up; otherwise north-up with a turning car
   const rotDeg=pt.mapFollow&&pt.headUp&&pt.heading!=null?-pt.heading:0;ptMapRotate(rotDeg);
-  const car=pt.mapMe.getElement()&&pt.mapMe.getElement().querySelector(".car");if(car)car.style.transform=`rotate(${pt.heading==null?0:Math.round(pt.heading+rotDeg)}deg)`;
+  const car=pt.mapMe.getElement()&&pt.mapMe.getElement().querySelector(".car");if(car)car.style.transform=`rotate(${pt.heading==null?0:Math.round(pt.mapFollow&&pt.headUp?-pt.mapRotAcc:pt.heading)}deg)`;
   if(pt.mapFollow){ // keep the car about 70% down the visible box so the road ahead gets most of the space, whatever the box height
     const h=pt.heading;const box=$("#ptMapBox");const off=h==null?0:Math.max(30,Math.min(160,(box?box.clientHeight:300)*0.2));
     const z=pt.map.getZoom();const px=pt.map.project(ll,z);const ahead=h==null?ll:pt.map.unproject(px.add([off*Math.sin(h*Math.PI/180),-off*Math.cos(h*Math.PI/180)]),z);

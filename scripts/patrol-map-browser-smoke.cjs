@@ -28,6 +28,14 @@ const server=http.createServer((req,res)=>{
  const numbers=()=>page.evaluate(()=>[...document.querySelectorAll('#ptMapBox .ptmapnum div')].map(d=>d.textContent).sort((a,b)=>a-b));
  // rotation angle of the number badges, read from the computed matrix once the transition has settled
  const badgeAngles=()=>page.evaluate(()=>[...new Set([...document.querySelectorAll('#ptMapBox .ptmapnum div')].map(d=>{const m=new DOMMatrixReadOnly(getComputedStyle(d).transform);return Math.round(Math.atan2(m.b,m.a)*180/Math.PI)}))]);
+ const carScreenBearing=()=>page.evaluate(()=>{
+   const car=pt.mapMe.getElement().querySelector('.car');let matrix=new DOMMatrixReadOnly();
+   // Compose every actual DOM ancestor, including Leaflet's marker panes and the turning map plate.
+   // A direction vector has w=0, so layout translations and transform origins cannot affect its bearing.
+   for(let element=car;element;element=element.parentElement){const transform=getComputedStyle(element).transform;if(transform&&transform!=='none')matrix=new DOMMatrixReadOnly(transform).multiply(matrix)}
+   const v=new DOMPoint(0,-1,0,0).matrixTransform(matrix);return ((Math.atan2(v.x,-v.y)*180/Math.PI)%360+360)%360;
+ });
+ const assertCarScreenBearing=async(expected,context)=>{const actual=await carScreenBearing(),error=Math.abs((((actual-expected)%360+540)%360)-180);assert.ok(error<1,context+': expected screen '+expected+'°, got '+actual.toFixed(3)+'°')};
  try{
    await page.goto(origin);
    await page.waitForFunction(()=>S.live&&DGOffline.ready&&S.me==='local'&&DGIntegration.initialized&&!!window.DGPatrolHistory);
@@ -54,7 +62,7 @@ const server=http.createServer((req,res)=>{
    await page.waitForTimeout(600); // let the .45s rotation transition settle
    assert.equal(await page.evaluate(()=>pt.headUp&&pt.mapFollow),true);
    assert.equal(await page.evaluate(()=>$('#ptMapRot').style.transform),'rotate(-40deg)');
-   assert.equal(await page.evaluate(()=>pt.mapMe.getElement().querySelector('.car').style.transform),'rotate(0deg)','the car points up the screen while heading-up');
+   await assertCarScreenBearing(0,'heading-up composes the car and parent rotations');
    assert.equal(await page.evaluate(()=>$('#ptMapBox').style.getPropertyValue('--ptrot')),'-40deg');
    assert.deepEqual(await badgeAngles(),[40],'number badges are counter-rotated so they read upright');
    assert.equal(await page.locator('#ptMapHeadUp').getAttribute('aria-pressed'),'true');
@@ -124,6 +132,21 @@ const server=http.createServer((req,res)=>{
    assert.equal(await page.locator('#ptMapFollow').getAttribute('aria-pressed'),'false');
    await page.locator('#ptMapFollow').click();await page.waitForTimeout(300);
    assert.equal(await page.evaluate(()=>pt.mapFollow&&$('#ptMapRot').style.transform==='rotate(-40deg)'),true,'따라가기 restores heading-up');
+
+   // Parent and car rotations both contribute to what the user sees. Inline rotate(0deg) alone is not evidence
+   // that the car points up when the entire Leaflet map above it is rotated.
+   checks.push('composed screen heading covers cardinal bearings, wrap-around, head-up and follow combinations');
+   for(const headUp of [true,false])for(const follow of [true,false])for(const heading of [0,90,180,270,359,1]){
+     await page.evaluate(({headUp,follow,heading})=>{pt.headUp=headUp;pt.mapFollow=follow;pt.heading=heading;ptMapDraw(true)},{headUp,follow,heading});
+     await page.waitForTimeout(520);
+     await assertCarScreenBearing(headUp&&follow?0:heading,JSON.stringify({headUp,follow,heading}));
+   }
+   await page.evaluate(()=>{pt.headUp=true;pt.mapFollow=true;pt.heading=359;ptMapDraw()});await page.waitForTimeout(520);
+   const wrap=await page.evaluate(()=>{const before=pt.mapRotAcc;pt.heading=1;ptMapDraw();return pt.mapRotAcc-before});
+   assert.equal(wrap,-2,'359° to 1° rotates the parent by the short two-degree arc');
+   await page.waitForTimeout(150);await assertCarScreenBearing(0,'heading-up stays upright during the 359° to 1° animation');
+   await page.waitForTimeout(400);await assertCarScreenBearing(0,'heading-up stays upright across 359° to 1°');
+   await page.evaluate(()=>{pt.headUp=true;pt.mapFollow=true;pt.heading=40;ptMapDraw(true)});await page.waitForTimeout(520);
 
    // 6. many records: the list scrolls inside the open panel and its last row is reachable (regression: PR #17 removed its height cap)
    checks.push('record list scrolls with many records');

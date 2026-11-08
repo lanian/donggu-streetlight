@@ -57,7 +57,7 @@ const server = http.createServer((req, res) => {
     const markers = await page.evaluate(() => gmapLayer.getLayers().filter(l => l instanceof L.CircleMarker).length);
     const labels = await page.locator('#gmap .maplbl').count();
     assert.ok(markers > 0 && labels === markers, `every marker in view carries its code (${labels}/${markers})`);
-    assert.ok(await page.evaluate(code => [...document.querySelectorAll('#gmap .maplbl')].some(e => e.textContent === code), seeded.first.code));
+    assert.ok(await page.evaluate(first => GM.groups.has(first.id) || [...document.querySelectorAll('#gmap .maplbl')].some(e => e.textContent === first.code), seeded.first), 'the first facility has either its own plate label or a selectable overlap group');
 
     // 3. status chip and legend toggles filter the markers
     checks.push('status chips and legend toggles');
@@ -94,7 +94,8 @@ const server = http.createServer((req, res) => {
 
     // 4. the card: tap a marker → card with the code, 점검하기 and 길찾기; 길찾기 offers map apps with the coordinates
     checks.push('info card and 길찾기');
-    await page.evaluate(id => { gmapLayer.getLayers().find(l => l instanceof L.CircleMarker && l.getLatLng().lat === byId(id).lat && l.getLatLng().lng === byId(id).lng).fire('click'); }, seeded.first.id);
+    const grouped = await page.evaluate(id => { const group = GM.groups.get(id); if (group) { showMapGroup(group); return true; } gmapLayer.getLayers().find(l => l instanceof L.CircleMarker && l.getLatLng().lat === byId(id).lat && l.getLatLng().lng === byId(id).lng).fire('click'); return false; }, seeded.first.id);
+    if (grouped) await page.locator('#mapCard [data-map-choice="' + seeded.first.id + '"]').click();
     await page.locator('#mapCard:not([hidden])').waitFor();
     assert.equal(await page.locator('#mapCard b').first().textContent(), seeded.first.code);
     assert.equal(await page.locator('#mapCard [data-map-open]').count(), 1);
