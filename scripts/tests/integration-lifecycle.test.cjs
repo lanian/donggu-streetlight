@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const root = process.env.DONGGU_TEST_ROOT || path.resolve(__dirname, '../..');
 const read = file => readSource(path.join(root, file), 'utf8');
 const html = read('index.html');
-const sources = ['app/operations-core.js', 'app/operations.js', 'app/workflows.js', 'app/integration.js', 'app/roadlighting.js', 'app/official-report-import-core.js', 'app/official-report-import-commands.js', 'app/official-report-import.js', 'app/legacy-bridge.js'].map(file => [file, read(file)]);
+const sources = ['app/operations-core.js', 'app/operations.js', 'app/workflows.js', 'app/integration.js', 'app/roadlighting.js', 'app/official-report-import-core.js', 'app/official-ledger-connector.js', 'app/official-report-import-commands.js', 'app/official-report-import.js', 'app/legacy-bridge.js'].map(file => [file, read(file)]);
 const copy = value => JSON.parse(JSON.stringify(value));
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const turn = () => new Promise(resolve => setImmediate(resolve));

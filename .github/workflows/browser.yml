@@ -71,3 +71,4 @@ jobs:
           node scripts/roadlighting-registry-browser-smoke.cjs
           node scripts/roadlighting-bridge-browser-smoke.cjs
           node scripts/official-report-import-browser-smoke.cjs
+          node scripts/official-ledger-connector-browser-smoke.cjs
