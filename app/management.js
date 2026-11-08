@@ -4,6 +4,7 @@
   const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   const C = root.DGOperationsCore;
   let api, attached = false, loading = null, registryLoad = 0;
+  let registryContext = null, registryApply = null;
   let inventoryRequest = 0, inventoryEditRequest = 0, inventoryWrites = Promise.resolve();
   const inventoryDrafts = new Map();
   const today = new Date(), localDate = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -52,53 +53,67 @@
     return [['기간', state.loadedRange], ['조회 시각', api.fmtDT(state.at)], ['자료 출처', sourceLabel(state.dashboardSource)], ['조회 범위', state.dashboardComplete ? '전체 조회' : '참고용 · 누락된 자료가 있을 수 있음'], ['지표', '값'], ['기간 점검', a.inspectionCount], ['점검 시설', a.uniqueInspected], ['기간 작업 접수', a.opened], ['기간 검수 완료 횟수', a.verified], ['현재 미완료', a.unresolved], ['현재 기한 초과', a.overdue], ['현재 미처리 신고', a.pendingReports], ['평균 완료 일수', a.averageDays == null ? '' : a.averageDays.toFixed(2)], ['기간 자재비 증감', a.cost], [], ['반복 고장 시설', '횟수'], ...a.repeated.map(([id, n]) => [(api.byId(id) || {}).code || id, n]), [], ['점멸기', '고장 점검'], ...a.circuits];
   }
   function registryView() {
+    if (registryContext && !registryCurrent(registryContext)) { state.registry = null; state.registryError = ''; }
     const diff = state.registry;
-    return '<div class="panel"><p>새 대장 JSON을 비교한 뒤 적용해요. 시설 ID는 유지되며 점검·사진·신고·보수 이력은 같은 ID에 연결돼요.</p><label class="f" for="dgRegistryFile">새 대장 JSON</label><input id="dgRegistryFile" type="file" accept="application/json,.json"><p class="muted">cols/rows 형식 또는 시설 배열 · 최대 30MB. 원본 getPoint.json은 저장소의 대장 변환 스크립트로 변환해 주세요.</p>' + (!supported() ? '<p class="notice">안전한 갱신은 이 기기 저장 또는 Firebase 공유 저장에서 지원해요.</p>' : '') + '</div>' +
+    return '<div class="panel"><p>새 대장 JSON을 비교한 뒤 적용해요. 시설 ID는 유지되며 점검·사진·신고·보수 이력은 같은 ID에 연결돼요.</p><label class="f" for="dgRegistryFile">새 대장 JSON</label><input id="dgRegistryFile" type="file" accept="application/json,.json"><p class="muted">운영 시스템 getPoint.json 원본 · cols/rows 형식 또는 시설 배열 · 최대 30MB. 제공하지 않은 필드와 현장 수정은 보존해요.</p>' + (!supported() ? '<p class="notice">안전한 갱신은 이 기기 저장 또는 Firebase 공유 저장에서 지원해요.</p>' : '') + '</div>' +
       (state.registryError ? '<div class="notice" role="alert">' + E(state.registryError) + '</div>' : '') +
-      (diff ? '<div class="panel"><h3>' + E(state.source) + '</h3><p>신규 ' + diff.added.length + '개 · 변경 ' + diff.changed.length + '개 · 새 대장에서 빠짐 ' + diff.missing.length + '개 · 동일 ' + diff.unchanged + '개</p><label class="dg-option"><input id="dgKeepOverrides" type="checkbox" checked> 현장에서 수정한 값은 유지</label><label class="dg-option"><input id="dgRemoveMissing" type="checkbox"> 새 대장에 빠진 시설은 철거 표시</label><p class="muted">기본값은 누락 시설 유지예요. 현장 수정 보존을 끄면 아래 충돌 필드에도 새 대장 값을 적용해요. 표찰 변경 전 번호는 검색 별칭으로 남겨요.</p><button class="btn sodium" data-mgmt="registry-apply"' + (!supported() ? ' disabled' : '') + '>검토한 변경 적용</button><p id="dgRegistryProgress" role="status">' + E(state.registryProgress) + '</p></div><div class="dg-table"><table><thead><tr><th>시설</th><th>구분</th><th>변경 필드 / 충돌</th></tr></thead><tbody>' + [...diff.added.slice(0, 40).map(r => '<tr><td>' + E(r.code) + '</td><td>신규</td><td>' + E(r.id) + '</td></tr>'), ...diff.changed.slice(0, 160).map(r => '<tr><td>' + E(r.code) + '</td><td>변경</td><td>' + E(Object.keys(r.changes).join(', ')) + (r.conflicts.length ? '<strong class="dg-conflict">현장 수정: ' + E(r.conflicts.join(', ')) + '</strong>' : '') + '</td></tr>'), ...diff.missing.slice(0, 40).map(r => '<tr><td>' + E(r.code) + '</td><td>새 대장에서 빠짐</td><td>기본값: 유지</td></tr>')].join('') + '</tbody></table></div><p class="muted">화면에는 신규·누락 각각 40개, 변경 160개까지 표시해요. 전체 비교 내역을 CSV로 확인할 수 있어요.</p><button class="btn ghost" data-mgmt="registry-csv">전체 비교 CSV</button>' : '');
+      (diff ? '<div class="panel"><h3>' + E(state.source) + '</h3>' + (diff.scope ? '<p class="notice">' + E(diff.scopeLabel) + ' 범위만 비교해요. 다른 출처 ' + diff.retainedOtherCount + '개는 그대로 유지해요. 운영 자료에서 빠진 시설도 자동 철거하지 않아요.</p>' : '') + '<p>신규 ' + diff.added.length + '개 · 변경 ' + diff.changed.length + '개 · 새 대장에서 빠짐 ' + diff.missing.length + '개 · 동일 ' + diff.unchanged + '개</p><label class="dg-option"><input id="dgKeepOverrides" type="checkbox" checked> 현장에서 수정한 값은 유지</label><label class="dg-option"><input id="dgRemoveMissing" type="checkbox"' + (diff.allowRemoveMissing === false ? ' disabled' : '') + '> 새 대장에 빠진 시설은 철거 표시</label><p class="muted">기본값은 누락 시설 유지예요. 현장 수정 보존을 끄면 아래 충돌 필드에도 새 대장 값을 적용해요. 표찰 변경 전 번호는 검색 별칭으로 남겨요.</p><button class="btn sodium" data-mgmt="registry-apply"' + (!supported() || registryApply && registryCurrent(registryApply.owner) ? ' disabled' : '') + '>검토한 변경 적용</button><p id="dgRegistryProgress" role="status">' + E(state.registryProgress) + '</p></div><div class="dg-table"><table><thead><tr><th>시설</th><th>구분</th><th>변경 필드 / 충돌</th></tr></thead><tbody>' + [...diff.added.slice(0, 40).map(r => '<tr><td>' + E(r.code) + '</td><td>신규</td><td>' + E(r.id) + '</td></tr>'), ...diff.changed.slice(0, 160).map(r => '<tr><td>' + E(r.code) + '</td><td>변경</td><td>' + E(Object.keys(r.changes).join(', ')) + (r.conflicts.length ? '<strong class="dg-conflict">현장 수정: ' + E(r.conflicts.join(', ')) + '</strong>' : '') + '</td></tr>'), ...diff.missing.slice(0, 40).map(r => '<tr><td>' + E(r.code) + '</td><td>새 대장에서 빠짐</td><td>기본값: 유지</td></tr>')].join('') + '</tbody></table></div><p class="muted">화면에는 신규·누락 각각 40개, 변경 160개까지 표시해요. 전체 비교 내역을 CSV로 확인할 수 있어요.</p><button class="btn ghost" data-mgmt="registry-csv">전체 비교 CSV</button>' : '');
   }
+  function registryOwner() { return { actor: api.state().me, database: api.database?.(), firebase: api.firebase(), namespace: root.DGOffline.namespace, generation: api.navGen?.() }; }
+  function registryCurrent(owner) { return !!owner && api.can('admin') && api.state().me === owner.actor && api.database?.() === owner.database && api.firebase() === owner.firebase && root.DGOffline.namespace === owner.namespace && (owner.generation == null || !api.navAlive || api.navAlive(owner.generation)); }
   async function registryFile(file) {
-    const token = ++registryLoad;
-    state.registryError = ''; state.registry = null; state.registryProgress = '';
+    const token = ++registryLoad, owner = registryOwner(), current = () => token === registryLoad && registryCurrent(owner);
+    if (!current()) return;
+    registryContext = owner; state.registryError = ''; state.registry = null; state.registryProgress = ''; state.source = '';
     try {
       if (file.size > 30 * 1024 * 1024) throw new Error('대장 파일은 30MB 이하로 선택해 주세요.');
-      const values = C.normalizeRegistry(JSON.parse(await file.text()));
-      if (token !== registryLoad) return;
+      const text = await file.text(); if (!current()) return;
+      const raw = JSON.parse(text), native = root.DGRoadlightingRegistry?.isNative(raw);
+      const values = C.normalizeRegistry(native ? root.DGRoadlightingRegistry.normalize(raw) : raw);
+      if (!current()) return;
       const base = api.registry(), known = new Set(base.map(l => l.id));
       const prior = [...base, ...(api.state().allLights || api.state().lights).filter(l => !known.has(l.id) && l.registryJobId)];
-      state.registry = C.registryDiff(prior, values, api.overrides()); state.source = file.name;
-    } catch (error) { if (token !== registryLoad) return; state.registryError = error.message || '대장 형식을 확인해 주세요.'; }
+      const scoped = native || root.DGRoadlightingRegistry && values.every(root.DGRoadlightingRegistry.isRoadlighting);
+      state.registry = scoped ? root.DGRoadlightingRegistry.scopedDiff(prior, values, api.overrides(), C) : C.registryDiff(prior, values, api.overrides()); state.source = file.name;
+    } catch (error) { if (!current()) return; state.registryError = error.message || '대장 형식을 확인해 주세요.'; }
+    if (!current()) return;
     const input = Q('#dgRegistryFile'); if (input) input.value = '';
     notify();
   }
   async function applyRegistry(button) {
     if (!api.can('admin') || !supported() || !state.registry) return;
-    const keep = Q('#dgKeepOverrides').checked, removeMissing = Q('#dgRemoveMissing').checked, diff = state.registry;
-    const entries = [], overrides = api.overrides(), snapshot = v => JSON.parse(JSON.stringify(v));
-    for (const row of diff.added) entries.push({ id: row.id, added: true, before: {}, patch: { ...row, status: '정상', lastInspected: null }, registryValues: row });
-    for (const row of diff.changed) {
-      const patch = {}, current = row.overrideBefore || {}, before = { registryJobId: current.registryJobId || null };
-      for (const [field, value] of Object.entries(row.changes)) {
-        if (keep && row.conflicts.includes(field)) continue;
-        if (JSON.stringify(current[field] == null ? null : current[field]) === JSON.stringify(value)) continue;
-        patch[field] = value; before[field] = current[field] == null ? null : snapshot(current[field]);
-      }
-      entries.push({ id: row.id, oldCode: current.code || row.before.code, before, patch, registryValues: row.registryValues });
-    }
-    if (removeMissing) for (const row of diff.missing) {
-      const current = row.overrideBefore || {}; if (current.removed) continue;
-      entries.push({ id: row.id, before: { removed: current.removed || null, registryJobId: current.registryJobId || null }, patch: { removed: true, removedAt: Date.now() } });
-    }
-    if (!entries.length) return api.toast('보존 정책을 적용하면 변경할 항목이 없어요.');
-    if (!await ask(entries.length + '개 시설의 대장 정보를 적용해요.' + (removeMissing ? ' 새 대장에 빠진 시설에 철거 표시가 추가돼요.' : ''), { title: '대장을 적용할까요?', ok: '적용', danger: removeMissing })) return;
-    const job = { id: root.DGOperations.uuid('registry'), actor: api.state().me, at: Date.now(), source: state.source, preserveOverrides: keep, markMissingRemoved: removeMissing, entries, counts: { added: diff.added.length, changed: diff.changed.length, missing: diff.missing.length } };
+    const diff = state.registry, owner = registryContext || registryOwner();
+    if (!registryCurrent(owner) || registryApply && registryCurrent(registryApply.owner)) return;
+    const active = registryApply = { owner, diff }, current = () => registryCurrent(owner) && state.registry === diff && registryApply === active;
+    const keep = Q('#dgKeepOverrides').checked, removeMissing = diff.allowRemoveMissing !== false && Q('#dgRemoveMissing').checked, source = state.source;
     button.disabled = true;
     try {
+      const entries = [], overrides = api.overrides(), snapshot = v => JSON.parse(JSON.stringify(v));
+      for (const row of diff.added) entries.push({ id: row.id, added: true, before: {}, patch: { ...row, status: '정상', lastInspected: null }, registryValues: row });
+      for (const row of diff.changed) {
+        const patch = {}, current = row.overrideBefore || {}, before = { registryJobId: current.registryJobId || null };
+        for (const [field, value] of Object.entries(row.changes)) {
+          if (keep && row.conflicts.includes(field)) continue;
+          if (JSON.stringify(current[field] == null ? null : current[field]) === JSON.stringify(value)) continue;
+          patch[field] = value; before[field] = current[field] == null ? null : snapshot(current[field]);
+        }
+        entries.push({ id: row.id, oldCode: current.code || row.before.code, before, patch, registryValues: row.registryValues });
+      }
+      if (removeMissing) for (const row of diff.missing) {
+        const current = row.overrideBefore || {}; if (current.removed) continue;
+        entries.push({ id: row.id, before: { removed: current.removed || null, registryJobId: current.registryJobId || null }, patch: { removed: true, removedAt: Date.now() } });
+      }
+      if (!entries.length) return api.toast('보존 정책을 적용하면 변경할 항목이 없어요.');
+      if (!await ask(entries.length + '개 시설의 대장 정보를 적용해요.' + (removeMissing ? ' 새 대장에 빠진 시설에 철거 표시가 추가돼요.' : ''), { title: '대장을 적용할까요?', ok: '적용', danger: removeMissing })) return;
+      if (!current()) return;
+      const job = { id: root.DGOperations.uuid('registry'), actor: owner.actor, at: Date.now(), source, preserveOverrides: keep, markMissingRemoved: removeMissing, entries, counts: { added: diff.added.length, changed: diff.changed.length, missing: diff.missing.length } };
+      active.jobId = job.id;
       const result = await root.DGOffline.submit('registry', job, { id: job.id, summary: '대장 갱신 · ' + entries.length + '개' });
+      if (!current()) return;
       if (result.state === 'synced') { if (state.registry === diff) state.registry = null; api.toast('대장 갱신을 완료했어요.'); }
       else if (['failed', 'conflict'].includes(result.state)) { state.registryError = result.error + ' 이미 반영된 청크는 유지돼요. 저장 대기함에서 재시도하거나 새 비교를 만들어 주세요.'; }
       else api.toast('대장 갱신을 저장 대기함에서 계속 처리해요.');
-    } finally { button.disabled = false; notify(); }
+    } finally { if (registryApply === active) registryApply = null; button.disabled = false; if (registryCurrent(owner)) notify(); }
   }
   function inventoryView() {
     const O = root.DGOperations;
@@ -370,7 +385,7 @@
   }
   function attach(context) {
     api = context;
-    root.DGOffline.register('registry', job => root.DGRegistryCommands.execute(job, { db: api.database(), fb: api.firebase(), user: api.state().me, admin: api.can('admin'), progress: (n, all) => { state.registryProgress = n + '/' + all + '개 처리'; const el = Q('#dgRegistryProgress'); if (el) el.textContent = state.registryProgress; } }));
+    root.DGOffline.register('registry', job => root.DGRegistryCommands.execute(job, { db: api.database(), fb: api.firebase(), user: api.state().me, admin: api.can('admin'), progress: (n, all) => { if (!registryApply || registryApply.jobId !== job.id || !registryCurrent(registryApply.owner) || state.registry !== registryApply.diff) return; state.registryProgress = n + '/' + all + '개 처리'; const el = Q('#dgRegistryProgress'); if (el) el.textContent = state.registryProgress; } }));
     root.DGOffline.register('privacy', job => root.DGPrivacy.execute(job, { database: api.database(), firebase: api.firebase(), actor: api.state().me, admin: api.can('admin') }));
     if (attached) return; attached = true;
     document.addEventListener('click', e => { const b = e.target.closest('[data-mgmt]'); if (b) Promise.resolve().then(() => handle(b)).catch(error => api.toast(error.message || '처리하지 못했어요.')); });
@@ -381,5 +396,5 @@
       captureInventoryDraft(draft); persistInventoryDraft(draft).catch(error => api.toast(error.message || '수정 초안을 기기에 보관하지 못했어요.'));
     });
   }
-  root.DGManagement = { privateLeft, privatePatch, attach, dashboard, registryView, inventoryView, settingsView, auditView, healthView, resumeInventoryDraft, discardInventoryDraft, state };
+  root.DGManagement = { privateLeft, privatePatch, attach, dashboard, registryView, registryFile, inventoryView, settingsView, auditView, healthView, resumeInventoryDraft, discardInventoryDraft, state };
 })(globalThis);

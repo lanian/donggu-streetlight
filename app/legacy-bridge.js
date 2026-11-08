@@ -14,7 +14,7 @@ function initializeOperations() {
     invalidateLighting: reason => invalidateLightingReview(reason),
     download: async options => {
       if (dl) return dl.save(options);
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([options.data], { type: 'text/csv;charset=utf-8' })); a.download = options.filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      const a = document.createElement('a'); a.href = URL.createObjectURL(options.data instanceof Blob ? options.data : new Blob([options.data], { type: 'text/csv;charset=utf-8' })); a.download = options.filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     },
     // route = { key, reopen, back?, replace? }: how to rebuild this screen when the user comes back to it
     navigate: (html, route) => { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; S.asec = null; if (route) navRoute(route.key, route.reopen, route); openSheet(html); },
@@ -59,6 +59,7 @@ function initializeOperations() {
   };
   DGIntegration.attach(api);
   DGWorkflows.attach(api);
+  DGRoadlightingBridge.attach(api);
   const originalClose = closeSheet;
   closeSheet = function (fromHistory) { DGOperations.persistActive().catch(e => toast(e.message)); globalThis.DGLightingAreas?.persistActive().catch(e => toast(e.message)); DGIntegration.persistDraft().catch(e => toast(e.message)); DGIntegration.persistPatrol().catch(e => toast(e.message)); return originalClose(fromHistory); };
   const originalLight = openLight;
@@ -125,6 +126,7 @@ function initializeOperations() {
     outbox: { t: '저장 대기함·초안', d: '미전송 작업 재시도·작성 내용 복구', write: true, n: () => DGOperations.state.jobs.filter(j => j.state !== 'synced').length || null, body: () => DGOperations.queueView() },
     dashboard: { t: '업무 현황', d: '기간 실적·기한 초과·반복 고장·자재비', body: () => DGManagement.dashboard() },
     registryupdate: { t: '대장 갱신 비교', d: '새 대장 비교·현장 수정 보존·번호 변경 추적', admin: true, body: () => DGManagement.registryView() },
+    roadlighting: { t: '운영 시스템 연계', d: '대장 반입·전달 파일·등록 확인', admin: true, body: () => DGRoadlightingBridge.view() },
     inventory: { t: '자재·재고', d: '입출고 이력·보수 검수와 재고 연동', admin: true, body: () => DGManagement.inventoryView() },
     operationsettings: { t: '업무 기준·보관 기간', d: '점검 주기·연락처 파기·기기 저장', admin: true, body: () => DGManagement.settingsView() },
     audit: { t: '변경 감사 기록', d: '서버 변경 이벤트·행위자·처리 이력', admin: true, body: () => DGManagement.auditView() }

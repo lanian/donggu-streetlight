@@ -256,7 +256,7 @@ async function boot(){
     sub(db.collection("patrols").orderBy("start","desc").limit(30),"patrols",ptIndex);
     sub(db.collection("roles"),"roles");
     try{S.demoRole=localStorage.getItem("dg-role")||null}catch(e){}
-    dl={save:async({filename,data})=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([data],{type:"text/csv"}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)}};
+    dl={save:async({filename,data})=>{const a=document.createElement("a");a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data],{type:"text/csv"}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)}};
     return;
   }
   try{
@@ -418,7 +418,7 @@ async function devModeChoose(){
 }
 window.addEventListener("dgdevice",()=>{try{const sh=$("#sheet");if(sh&&sh.classList.contains("open"))sh.classList.toggle("wide",sheetWide(navTop()&&navTop().key));render()}catch(e){}});
 /* Desk screens (tables, maps, reports) open across the whole PC workspace instead of the 860px side panel. */
-const WIDE_SECTIONS=new Set(["works","due","hist","inbox","dashboard","report","registryupdate","audit","light","lightinghistory","lightingareas","lightingimport","lightingcontext","lightingtasks","map","dong","kind","open","pend","np","edit","inventory","qr","patrol","health"]);
+const WIDE_SECTIONS=new Set(["works","due","hist","inbox","dashboard","report","roadlighting","registryupdate","audit","light","lightinghistory","lightingareas","lightingimport","lightingcontext","lightingtasks","map","dong","kind","open","pend","np","edit","inventory","qr","patrol","health"]);
 function sheetWide(key){if(DEV.field||!key)return false;if(/^(map|ptmap):/.test(key))return true;const m=/^asec:(.+)$/.exec(key);return !!(m&&WIDE_SECTIONS.has(m[1]))}
 /* ---------- app update: say plainly what is kept and what must be finished first ----------
    A reload keeps everything already stored on this device (drafts, unsent work) when the device keeps records; what is
@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v66-reports";
+const APP_VER="v67-roadlighting";
 const RELEASE_NOTES=[
+  {v:"v67-roadlighting",d:"2026-11-08",t:"운영 대장 안전 반입, 점검·보수·사진 전달 묶음과 사용자 등록 확인 이력 추가"},
   {v:"v66-reports",d:"2026-11-08",t:"A4 보고서·사진 출력 개선, 페이지 번호·전체 점검 선택·긴 메모 보존과 출력 중 화면·계정 변경 보호"},
   {v:"v65-markers",d:"2026-11-08",t:"겹친 시설 목록 선택, 순찰 방향 보정, 필터·검색 선택 보호와 추정 좌표 조명 범위 제외"},
   {v:"v64-map-control",d:"2026-11-08",t:"지도 배경 선택창을 작은 배경 버튼으로 접기, 선택·Escape·바깥 클릭으로 닫기와 지도 편집 보호"},
@@ -768,14 +769,14 @@ function refreshAdminSection(){
 /* The management menu in groups. PC (desk work) lists every group in order; a phone (field work) lists what is used on
    site first and folds desk work (backup, registry diff, audit, QR printing…) under "PC 업무", still one tap away. */
 const MENU_GROUPS=[
-  {t:"접수·조치",keys:["dashboard","works","inbox","hist","due","open","outbox"]},
+  {t:"접수·조치",keys:["dashboard","works","inbox","roadlighting","hist","due","open","outbox"]},
   {t:"대장·등록",keys:["reg","pend","np","edit","removed","registryupdate","qr"]},
   {t:"현장 기록",keys:["patrol","lightingcontext","lightingtasks"]},
   {t:"밝기 검토",keys:["light","lightinghistory","lightingareas","lightingimport"]},
   {t:"현황·보고",keys:["report","map","kind","dong"]},
   {t:"관리",keys:["inventory","operationsettings","roles","audit","health","backup"]}];
 const FIELD_ORDER=["outbox","works","due","reg","patrol","np","inbox","lightingcontext","lightingtasks","open","hist","pend","edit","map","dong","kind","light","lightingareas"];
-const DESK_ONLY=new Set(["backup","qr","registryupdate","audit","inventory","operationsettings","lightingimport","lightinghistory","roles","health","report","dashboard"]);
+const DESK_ONLY=new Set(["backup","qr","registryupdate","roadlighting","audit","inventory","operationsettings","lightingimport","lightinghistory","roles","health","report","dashboard"]);
 function menuBtn(k){const x=ADMIN_SECTIONS[k];if(!x)return"";const n=x.n?x.n():null;return `<button type="button" data-asec="${k}"><span class="mt">${esc(x.t)}${n!=null?`<span class="secnum">${n}</span>`:""}</span><span class="md">${esc(x.d)}</span></button>`}
 function adminMenu(keys){
   const have=new Set(keys),grouped=new Set(MENU_GROUPS.flatMap(g=>g.keys)),rest=keys.filter(k=>!grouped.has(k));

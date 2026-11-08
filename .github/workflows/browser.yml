@@ -66,3 +66,5 @@ jobs:
           node scripts/marker-selection-browser-smoke.cjs
           node scripts/print-lifecycle-browser-smoke.cjs
           node scripts/report-output-browser-smoke.cjs
+          node scripts/roadlighting-registry-browser-smoke.cjs
+          node scripts/roadlighting-bridge-browser-smoke.cjs

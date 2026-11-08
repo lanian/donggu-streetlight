@@ -253,7 +253,7 @@
       ids.add(id);
       if (row.lat === '' || row.lat == null || row.lng === '' || row.lng == null) fail('시설 좌표가 비어 있어요: ' + id);
       const out = { id, lat: finite(row.lat, -90, 90, '위도'), lng: finite(row.lng, -180, 180, '경도') };
-      for (const field of FIELDS) if (field !== 'lat' && field !== 'lng' && row[field] != null) out[field] = FLAGS.includes(field) ? !!row[field] : text(row[field], 200);
+      for (const field of FIELDS) if (field !== 'lat' && field !== 'lng' && Object.prototype.hasOwnProperty.call(row, field)) out[field] = row[field] == null ? null : FLAGS.includes(field) ? !!row[field] : text(row[field], 200);
       if (!out.code) fail('시설 표찰/이름이 비어 있어요: ' + id);
       return out;
     });
@@ -265,6 +265,7 @@
       if (!previous) { added.push(row); continue; }
       const changes = {}, conflicts = [];
       for (const field of FIELDS) {
+        if (!Object.prototype.hasOwnProperty.call(row, field)) continue;
         const scalar = value => value == null ? null : FLAGS.includes(field) ? !!value : value;
         const a = scalar(previous[field]), b = scalar(row[field]);
         if (a !== b) {
@@ -272,7 +273,12 @@
           if (overrides && overrides[row.id] && Object.prototype.hasOwnProperty.call(overrides[row.id], field) && scalar(overrides[row.id][field]) !== a && scalar(overrides[row.id][field]) !== b) conflicts.push(field);
         }
       }
-      if (Object.keys(changes).length) changed.push({ id: row.id, code: row.code, before: previous, changes, conflicts, registryValues: clone(row), overrideBefore: clone(overrides && overrides[row.id] || {}) });
+      if (Object.keys(changes).length) {
+        const registryValues = { id: row.id };
+        for (const field of FIELDS) if (Object.prototype.hasOwnProperty.call(previous, field)) registryValues[field] = clone(previous[field]);
+        Object.assign(registryValues, clone(row));
+        changed.push({ id: row.id, code: row.code, before: previous, changes, conflicts, registryValues, overrideBefore: clone(overrides && overrides[row.id] || {}) });
+      }
     }
     for (const row of base) if (!seen.has(row.id)) missing.push({ ...row, overrideBefore: clone(overrides && overrides[row.id] || {}) });
     return { added, changed, missing, unchanged: incoming.length - added.length - changed.length, incomingCount: incoming.length };

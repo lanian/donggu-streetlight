@@ -1,0 +1,24 @@
+/* The bridge uses the existing field application's ink, sodium and night-theme tokens. */
+.dg-roadlighting{--rl-accent:var(--sodium,#b86609);line-height:1.55}
+.dg-roadlighting .rl-intro{border-top:4px solid var(--rl-accent);padding:16px 0 18px}
+.dg-roadlighting .rl-eyebrow{font-size:11px;letter-spacing:.12em;font-weight:750;color:var(--ink-2)}
+.dg-roadlighting .rl-intro h3{font-size:24px;letter-spacing:-.04em;margin:5px 0 8px}
+.dg-roadlighting .rl-intro p{margin:0 0 12px}.dg-roadlighting .rl-status-line{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--ink-2)}
+.dg-roadlighting .rl-tag{display:inline-block;padding:3px 8px;border:1px solid var(--line);font-size:11px;font-weight:700;color:var(--ink);border-radius:4px}
+.dg-roadlighting .rl-start{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;padding:16px 0 22px;border-top:1px solid var(--line)}
+.dg-roadlighting .rl-start p{margin:3px 0 10px;font-size:12px}.dg-roadlighting .rl-start>a{flex:none;text-decoration:none}
+.dg-roadlighting .panel{margin:0 0 16px}.dg-roadlighting h4{font-size:16px;margin:0 0 15px;letter-spacing:-.02em;display:flex;align-items:center;gap:9px}
+.dg-roadlighting .rl-step{width:23px;height:23px;display:inline-grid;place-items:center;border:1px solid var(--line);color:var(--ink-2);font-size:11px;border-radius:50%;flex:none}
+.dg-roadlighting .rl-types,.dg-roadlighting .rl-options{display:flex;gap:10px 22px;align-items:center;flex-wrap:wrap;margin:15px 0}
+.dg-roadlighting .rl-types label,.dg-roadlighting .rl-options label{display:flex;align-items:center;gap:7px;font-size:13px}
+.dg-roadlighting .rl-options{padding:11px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.dg-roadlighting .rl-counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border:1px solid var(--line)}
+.dg-roadlighting .rl-counts>div{padding:11px 14px;min-width:0;border-right:1px solid var(--line)}.dg-roadlighting .rl-counts>div:last-child{border-right:0}
+.dg-roadlighting .rl-counts b{display:block;font-size:24px;line-height:1.2;font-variant-numeric:tabular-nums}.dg-roadlighting .rl-counts span{display:block;font-size:11px;color:var(--ink-2);margin-top:5px}
+.dg-roadlighting .rl-package{padding:13px 0 0;margin:12px 0 0;border-top:1px solid var(--line)}.dg-roadlighting .rl-package>span{display:block;font-size:11px;color:var(--ink-2);overflow-wrap:anywhere;margin-top:3px}.dg-roadlighting .rl-package p{font-size:12px;margin-bottom:0}
+.dg-roadlighting .rl-history-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.dg-roadlighting .rl-history-heading h4{margin-bottom:0}
+.dg-roadlighting .rl-batches{border-top:1px solid var(--line)}.dg-roadlighting .rl-batch{appearance:none;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);width:100%;padding:14px 10px;display:flex;gap:14px;align-items:center;justify-content:space-between;text-align:left;font-family:inherit;font-size:12px;cursor:pointer}
+.dg-roadlighting .rl-batch.selected{box-shadow:inset 3px 0 0 var(--rl-accent);background:var(--bg)}.dg-roadlighting .rl-batch>span{min-width:0}.dg-roadlighting .rl-batch>span:last-child{text-align:right;flex:none}.dg-roadlighting .rl-batch b{font-size:12px}.dg-roadlighting .rl-batch small{display:block;font-size:10px;color:var(--ink-2);overflow-wrap:anywhere;margin-top:4px}
+.dg-roadlighting .rl-batch:focus-visible{outline:2px solid var(--rl-accent);outline-offset:2px}.dg-roadlighting .rl-receipt{padding-top:20px;margin-top:18px;border-top:2px solid var(--line)}.dg-roadlighting .rl-receipt>p{font-size:12px}.dg-roadlighting .rl-receipt textarea{resize:vertical;min-height:70px}
+.dg-roadlighting .rl-error{margin-bottom:16px}.dg-roadlighting .small{font-size:12px}.dg-roadlighting .f-in{max-width:100%}
+@media(max-width:600px){.dg-roadlighting .rl-start{align-items:stretch;flex-direction:column}.dg-roadlighting .rl-start>a{align-self:flex-start}.dg-roadlighting .rl-counts{grid-template-columns:repeat(2,minmax(0,1fr))}.dg-roadlighting .rl-counts>div:nth-child(2){border-right:0}.dg-roadlighting .rl-counts>div:nth-child(-n+2){border-bottom:1px solid var(--line)}.dg-roadlighting .rl-batch{align-items:flex-start;flex-direction:column;gap:8px}.dg-roadlighting .rl-batch>span:last-child{text-align:left}.dg-roadlighting .rl-history-heading{align-items:flex-start}.dg-roadlighting .rl-types{gap:12px 18px}}
