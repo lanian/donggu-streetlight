@@ -48,6 +48,7 @@ jobs:
           node scripts/dialog-browser-smoke.cjs
           node scripts/map-view-browser-smoke.cjs
           node scripts/visit-plan-browser-smoke.cjs
+          node scripts/visit-driving-browser-smoke.cjs
           node scripts/dark-mode-browser-smoke.cjs
           node scripts/device-profile-browser-smoke.cjs
           node scripts/update-check-browser-smoke.cjs

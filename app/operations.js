@@ -8,6 +8,7 @@
   const draftVersions = new WeakMap(), editorTokens = new WeakMap(), draftOwners = new WeakMap();
   let subscriptions = null, watchedWorkKey = '', watchedReportId = '';
   let editConflict = null;
+  let drivingSession = null, drivingToken = 0;
   const clone = value => JSON.parse(JSON.stringify(value));
   const state = { orders: [], inventory: [], reports: [], settings: { inspectionDays: 90, privacyDays: 90 }, loaded: false, error: '', at: 0, filter: 'open', mine: false, deadline: 'all', urgent: false, workDong: '전체', show: 40, cursor: null, hasMore: false, workQueryKey: '', queryAt: Date.now(), workMeta: null, draft: null, completion: null, edit: null, currentOrder: null, reportVersions: {}, lightVersion: null, plan: null, dueFilter: 'needed', dueDong: '전체', dueShow: 60, dueSort: 'priority', pos: null, planPick: new Set(), workPick: new Map(), bulk: null, jobs: [], drafts: [] };
   const uuid = prefix => prefix + '-' + (root.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -598,6 +599,76 @@
     }
     if (url) root.open(url, '_blank', 'noopener');
   }
+  // Vehicle routes are a view of the plan: opening a map never saves or completes visits.
+  function drivingVisible(s) {
+    return s && drivingSession === s && state.plan === s.plan && ownsContext(s.owner) &&
+      api.state().tab === 'admin' && api.state().asec === 'due' && !!Q('#dgDrivingPlan') && !!Q('#sheet.open');
+  }
+  function drivingOrigin(s) {
+    const p = s.origin;
+    return p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180 &&
+      Number.isFinite(p.acc) && p.acc >= 0 && p.acc <= 100 && Date.now() >= p.at && Date.now() - p.at <= 300000 ? p : null;
+  }
+  function drivingSnapshot(s) {
+    const plan = C.reconcilePlan(s.plan, api.byId), origin = drivingOrigin(s);
+    const stops = plan.stops.flatMap((stop, i) => stopDone(plan, stop) ? [] : [{ id: stop.id, code: stop.code, lat: stop.lat, lng: stop.lng, ordinal: i + 1 }]);
+    return { routes: root.DGVisitDriving.makeBatches(stops, origin), planKey: JSON.stringify({ plan, stops }), key: JSON.stringify({ plan, origin, stops }) };
+  }
+  const drivingCurrent = (s, model) => drivingVisible(s) && drivingSnapshot(s).key === model.key;
+  function drivingView(plan) {
+    const s = drivingSession;
+    if (!root.DGVisitDriving || !s || s.plan !== plan || !ownsContext(s.owner)) return '';
+    const snapshot = drivingSnapshot(s), origin = drivingOrigin(s);
+    s.model = { ...snapshot, token: String(++drivingToken) };
+    const count = snapshot.routes.reduce((n, route) => n + route.stops.length, 0);
+    const status = s.origin && !origin && !s.locating ? '출발 위치를 확인한 지 5분이 지났어요. 카카오맵을 쓰려면 내 위치를 다시 확인해 주세요.' : s.status || (origin ? '확인한 내 위치에서 출발해요. 위치는 5분 동안 사용하며 다시 확인할 수 있어요.' : '첫 구간은 네이버 지도앱의 현재 위치에서 출발해요. 카카오맵을 쓰려면 내 위치를 확인해 주세요.');
+    return '<section class="dg-driving" id="dgDrivingPlan" aria-labelledby="dgDrivingTitle"><div class="dg-driving-head"><div><small>차량 방문</small><h3 id="dgDrivingTitle">차량 이동 노선</h3><p>남은 ' + count + '곳 · ' + snapshot.routes.length + '개 구간</p></div><button type="button" class="btn ghost sm" data-dg="driving-close">노선 접기</button></div>' +
+      '<p class="muted">방문 순서대로 최대 6곳씩 나눴어요. 실제 도로 경로와 운전 시간은 선택한 지도에서 확인해요. 경로를 열어도 방문 완료로 처리하지 않아요.</p>' +
+      '<div class="dg-driving-location"><button type="button" class="btn ghost sm" data-dg="driving-locate"' + (s.locating ? ' disabled' : '') + '>' + (s.locating ? '내 위치 확인 중…' : origin ? '출발 위치 다시 확인' : '내 위치 확인') + '</button><p id="dgDrivingStatus" role="status" aria-live="polite">' + E(status) + '</p></div>' +
+      (count ? '<div class="dg-driving-legs">' + snapshot.routes.map(route => '<details class="dg-driving-leg"' + (!route.index ? ' open' : '') + '><summary><b>구간 ' + (route.index + 1) + '</b><span>' + E(route.stops[0].code) + (route.stops.length > 1 ? ' → ' + E(route.stops[route.stops.length - 1].code) : '') + '</span><small>' + route.stops.length + '곳</small></summary><div class="dg-driving-body"><p class="muted">출발: ' + E(route.index ? '이전 구간 도착지 · ' + route.start.code : origin ? '확인한 내 위치 (±' + Math.round(origin.acc) + 'm)' : '네이버 지도앱의 현재 위치') + '</p><ol>' + route.stops.map(stop => '<li value="' + stop.ordinal + '">' + E(stop.code) + '</li>').join('') + '</ol><button type="button" class="btn sodium" data-dg="driving-open" data-index="' + route.index + '" data-token="' + s.model.token + '">구간 ' + (route.index + 1) + ' 차량 경로 열기</button></div></details>').join('') + '</div>' : '<p class="notice">남은 방문지가 없어요. 방문 대상과 완료 상태를 확인해 주세요.</p>') + '</section>';
+  }
+  function showDriving() {
+    if (!state.plan || !root.DGVisitDriving) return api.toast('방문 계획을 먼저 만들어 주세요.');
+    drivingSession = { plan: state.plan, owner: captureOwner(), origin: null, status: '', request: 0, locating: false, choosing: false, model: null };
+    notify(); Q('#dgDrivingPlan')?.scrollIntoView({ block: 'start', behavior: 'auto' });
+  }
+  function locateDriving() {
+    const s = drivingSession;
+    if (!drivingVisible(s) || s.locating) return;
+    if (!root.navigator?.geolocation) { s.status = '이 기기에서는 위치를 확인할 수 없어요. 네이버 지도앱의 현재 위치로 경로를 열 수 있어요.'; return notify(); }
+    const model = drivingSnapshot(s), request = ++s.request;
+    s.locating = true; s.status = '차량 출발 위치를 확인하고 있어요.'; notify();
+    const finish = (position, message) => {
+      if (s.request !== request) return;
+      s.locating = false;
+      if (!drivingVisible(s) || drivingSnapshot(s).planKey !== model.planKey) { if (drivingVisible(s)) { s.status = '방문 계획이 바뀌어 출발 위치를 적용하지 않았어요. 내 위치를 다시 확인해 주세요.'; notify(); } return; }
+      const p = position?.coords;
+      s.origin = p ? { lat: p.latitude, lng: p.longitude, acc: p.accuracy, at: Date.now(), code: '내 위치' } : null;
+      s.status = drivingOrigin(s) ? '확인한 내 위치에서 출발해요 (±' + Math.round(s.origin.acc) + 'm). 카카오·네이버 차량 경로를 열 수 있어요.' : message || '위치가 정확하지 않아요. 다시 확인하거나 네이버 지도앱의 현재 위치를 사용해 주세요.';
+      if (!drivingOrigin(s)) s.origin = null;
+      notify();
+    };
+    try { root.navigator.geolocation.getCurrentPosition(p => finish(p), () => finish(null, '내 위치를 확인하지 못했어요. 위치 권한을 확인하거나 네이버 지도앱의 현재 위치로 경로를 열어 주세요.'), { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }); }
+    catch (_) { finish(null, '내 위치를 확인하지 못했어요. 네이버 지도앱의 현재 위치로 경로를 열 수 있어요.'); }
+  }
+  async function openDriving(button) {
+    const s = drivingSession, model = s?.model;
+    if (!model || !drivingVisible(s) || s.choosing || button.dataset.token !== model.token) return;
+    if (!drivingCurrent(s, model)) { notify(); return api.toast('방문 계획이나 시설 위치가 바뀌었어요. 최신 노선을 확인하고 다시 열어 주세요.'); }
+    const index = Number(button.dataset.index), route = model.routes[index];
+    if (!Number.isSafeInteger(index) || index < 0 || !route) return;
+    const choices = [
+      ...(route.start ? [{ value: 'kakao-web', label: '카카오맵 · 차량 (웹)', hint: 'PC·휴대폰 브라우저에서 확인' }, { value: 'kakao-app', label: '카카오맵 · 차량 (앱)', hint: '카카오맵 앱이 설치된 기기에서 사용' }] : []),
+      { value: 'naver', label: '네이버 지도 · 차량 (앱)', hint: '네이버 지도 앱 설치 필요' + (route.start ? '' : ' · 지도앱의 현재 위치에서 출발') }
+    ];
+    s.choosing = true;
+    try {
+      const provider = root.DGDialog ? await root.DGDialog.choose(route.stops.map(stop => stop.code).join(' → ') + (route.start ? '' : '\n카카오맵은 내 위치 확인 후 사용할 수 있어요.'), { title: '구간 ' + (index + 1) + ' 차량 경로', options: choices }) : null;
+      if (!provider || !choices.some(choice => choice.value === provider)) return;
+      if (!drivingCurrent(s, model)) { if (drivingVisible(s)) { notify(); api.toast('방문 계획이나 시설 위치가 바뀌었어요. 최신 노선을 확인하고 다시 열어 주세요.'); } return; }
+      root.open(root.DGVisitDriving.makeUrl(route, provider), '_blank', 'noopener,noreferrer');
+    } finally { s.choosing = false; }
+  }
   function dueView() {
     if (state.plan) Object.assign(state.plan, C.reconcilePlan(state.plan, api.byId));
     ensure(); const rows = dueLights(), plan = state.plan, shown = rows.slice(0, state.dueShow);
@@ -620,7 +691,9 @@
       '<p>방문지 사이 직선 약 ' + fmtM(plan.distance) + (left.open.length && left.open.length < plan.stops.length || left.fromMe ? ' · 남은 ' + left.open.length + '곳 약 ' + fmtM(left.meters) + (left.fromMe ? '(내 위치부터)' : '') : '') + ' · ' + (plan.createdAt ? time(plan.createdAt) + ' 작성' : '') + (plan.filters ? ' · 보수 작업 조건에서 만든 계획' : '') + '</p>' +
       (next ? '<div class="dg-plan-next"><small>다음 방문지 ' + (nextIndex + 1) + '/' + plan.stops.length + (fromMe != null ? ' · 내 위치에서 ' + fmtM(fromMe) : '') + '</small><b>' + E(next.code) + '</b> <span class="muted">' + E(next.dong) + (nextLight ? ' · ' + E(C.inspectionState(nextLight, Number(state.settings.inspectionDays) || 90, Date.now()).label) : '') + '</span><div class="split"><button class="btn sodium sm" data-light="' + E(next.id) + '">점검하기</button><button class="btn ghost sm" data-dg="plan-route" data-id="' + E(next.id) + '">길찾기</button><button class="btn ghost sm" data-dg="plan-visit" data-index="' + nextIndex + '">방문 완료</button></div></div>' : (plan.stops.length ? '<div class="dg-plan-next done"><b>모든 방문지를 마쳤어요.</b> <span class="muted">계획을 지우거나 새 계획을 만들 수 있어요.</span></div>' : '<div class="dg-plan-next"><b>방문 순서를 만들 시설이 없어요.</b> <span class="muted">제외된 시설의 좌표를 확인하거나 대상을 다시 골라 주세요.</span></div>')) +
       '<p class="muted">직선 거리로 교차하는 구간을 줄여 제안한 방문 순서예요. 차량 통행·일방통행·도로 진입 경로는 현장에서 확인해 주세요. 방문 표시로 점검 결과가 바뀌지는 않아요. 계획을 만든 뒤 점검을 저장한 시설은 자동으로 완료로 표시돼요.</p>' +
+      (left.open.length ? '<button type="button" class="btn sodium block dg-driving-create" data-dg="plan-driving">차량 이동 노선 만들기</button>' : '') +
       '<div class="split">' + (left.open.length > 1 ? '<button class="btn ghost sm" data-dg="plan-route-ahead">다음 ' + Math.min(ROUTE_STOPS, left.open.length) + '곳 경로</button>' : '') + '<button class="btn ghost" data-ptplan>이 계획으로 야간 순찰</button><button class="btn ghost sm" data-dg="plan-map">계획 지도</button><button class="btn ghost sm" data-dg="plan-reorder">내 위치에서 다시 정렬</button><button class="btn ghost sm" data-dg="plan-csv">계획 CSV</button><button class="btn ghost sm" data-dg="clear-plan">계획 지우기</button></div>' +
+      drivingView(plan) +
       plan.stops.map((s, i) => '<div class="dg-plan-stop' + (done[i] ? ' done' : '') + (i === nextIndex ? ' next' : '') + '"><label><input type="checkbox" data-plan-visited="' + i + '"' + (s.visited ? ' checked' : '') + (done[i] && !s.visited ? ' disabled title="점검을 저장해 완료됐어요"' : '') + '> <span class="n">' + (i + 1) + '</span> <b>' + E(s.code) + '</b><small>' + E(s.dong) + (i ? (s.distanceFromPrevious < 15 ? ' · 앞 시설과 같은 자리' : ' · +' + fmtM(s.distanceFromPrevious)) : ' · 출발') + (done[i] && !s.visited ? ' · <span class="dg-auto">점검 완료</span>' : '') + '</small></label><span class="dg-plan-acts"><button class="btn ghost sm" data-light="' + E(s.id) + '">점검</button>' + (s.workIds || []).map((id, n) => '<button class="btn ghost sm" data-dg="open-work" data-id="' + E(id) + '">보수 ' + (n + 1) + '</button>').join('') + '<button class="btn ghost sm" data-dg="plan-up" data-index="' + i + '"' + (!i ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 위로">위로</button><button class="btn ghost sm" data-dg="plan-down" data-index="' + i + '"' + (i === plan.stops.length - 1 ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 아래로">아래로</button></span></div>').join('') + '</div>';
   }
   async function refreshQueue() {
@@ -641,6 +714,10 @@
   }
   async function handle(button) {
     const action = button.dataset.dg;
+    if (action === 'plan-driving') return showDriving();
+    if (action === 'driving-locate') return locateDriving();
+    if (action === 'driving-open') return openDriving(button);
+    if (action === 'driving-close') { drivingSession = null; return notify(); }
     if (action === 'new-work') return newWork(button.dataset.lightId, button.dataset.reportId);
     if (action === 'resume-stale-work-edit') return resumeStaleEdit(true);
     if (action === 'edit-latest-work') return resumeStaleEdit(false);

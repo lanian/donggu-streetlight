@@ -42,7 +42,7 @@ test('a plan containing only excluded positions is awaiting verification rather 
   const source = readSource(path.join(__dirname, '../../app/operations.js'), 'utf8');
   const code = source.slice(source.indexOf('  function planView('), source.indexOf('  async function refreshQueue('));
   const plan = { stops: [], distance: 0, excludedApproximate: [{ id: 'a', code: 'A' }] };
-  const html = vm.runInNewContext(code + '\nplanView(plan)', { plan, state: { pos: null }, root: {}, api: { byId: () => null }, E: String, fmtM: String, stopDone: () => false, remaining: () => ({ open: [], meters: 0 }) });
+  const html = vm.runInNewContext(code + '\nplanView(plan)', { plan, drivingView: () => '', state: { pos: null }, root: {}, api: { byId: () => null }, E: String, fmtM: String, stopDone: () => false, remaining: () => ({ open: [], meters: 0 }) });
   assert.doesNotMatch(html, /모든 방문지를 마쳤어요/); assert.match(html, /좌표.*확인/);
 });
 
