@@ -35,7 +35,7 @@
 
 ## 실제 공개 반영 전 조건
 
-현재 Firebase CLI의 연결 계정이 없어 실제 서버 규칙 읽기·반영은 아직 수행하지 않았다. 사용자가 이 PC에서 로그인하는 방식을 선택했고 로그인 명령과 별도 PowerShell 창을 준비했다. 비밀번호·토큰·인증코드를 채팅으로 요청하거나 저장소에 기록하지 않는다.
+초기에는 Firebase CLI의 연결 계정이 없었으며, 이후 사용자가 직접 브라우저 인증을 완료했다. `donggu-light` 기본 Firestore의 현재 규칙을 읽기 전용으로 내려받아 공개 v72 원본과 정규화 기준 일치함을 확인했다. 실제 규칙 반영은 후보의 원격 CI 성공 후 진행한다. 비밀번호·토큰·인증코드를 채팅으로 요청하거나 저장소에 기록하지 않는다.
 
 로그인 후 `donggu-light` 기본 Firestore의 현재 규칙을 읽기 전용으로 내려받아 v72/후보와 비교한다. 승인된 후보와 다른 운영 변경이 있으면 보존·검토한 뒤 반영한다. 필수 규칙이 없는 상태에서 새 앱을 main/Pages에 먼저 공개하지 않는다. 서버 복원 함수나 주민 게이트웨이·예약 작업을 임의로 활성화하지 않는다.
 
@@ -49,4 +49,6 @@
 - 점검 소유권 RED/GREEN/영향 검사: `inspection-session-red.log`, `inspection-session-green.log`, `inspection-session-affected-green.log`
 - 브라우저 전체: `browser-suite.log`, `browser\results.json`와 스크립트별 로그
 - 최종 시각 근거: `visual\2026-11-12T12-51-05-897Z\capture.json` 및 같은 폴더의 PNG 20개 (초기 toast 포함 촬영본은 최종 근거에서 제외)
+- 운영 규칙 사전 읽기: `live-before\firestore.rules`, `live-before\metadata.json` (v72 원본 일치, 아직 변경하지 않음)
+- 최초 원격 브라우저 CI는 `ubuntu-latest`가 26.04를 사용해 Playwright 1.58.2 설치 단계에서 실패했다. 앱 시나리오는 실행되지 않았으며, 브라우저 job만 지원되는 `ubuntu-24.04`로 고정했다. 근거: `ci-browser-failed.log`.
 - [통합·배포 계획](plans/2026-11-12-maintenance-release.md), [기존 v61 기능 설명](essential-maintenance-implementation-2026-11-07.md)
