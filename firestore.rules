@@ -10,7 +10,7 @@ service cloud.firestore {
     function isStaff(){ return myRole() in ["admin","inspector"]; }
     function setupDone(){ return exists(/databases/$(db)/documents/meta/setup); }
     function validStatus(value){ return value in ['정상','점검필요','고장','수리중']; }
-    function optionalText(data, key, max){ return data.get(key, '') is string && data.get(key, '').size() <= max; }
+    function optionalText(data, key, max){ let value=data.get(key,''); return value is string && value.size()<=max; }
 
     // 점검자는 상태·표찰·대표 사진과 좌표 제안만 바꿀 수 있다.
     // 좌표 원본, 광원, 철거, 대장반영, 변경 이력 등은 관리자가 처리한다.
@@ -107,7 +107,7 @@ service cloud.firestore {
     }
     function inspectionFields(){
       return ['lightId','code','dong','date','checks','faults','result','memo','inspector',
-        'tiltDeg','pos','posDist','photo','thumbs','photoN','patrol','patrolId'];
+        'tiltDeg','pos','posDist','photo','thumbs','photoN','patrol','patrolId','inspectionComplete','checkReasons','readings'];
     }
     function validInspection(data){
       return data.keys().hasOnly(inspectionFields())
@@ -118,11 +118,61 @@ service cloud.firestore {
         && optionalText(data,'dong',40) && optionalImage(data,'photo',900000)
         && (!('photoN' in data) || (data.photoN is int && data.photoN>=0 && data.photoN<=6));
     }
+    // Exact map equality binds the allowed fields, unit and author.
+    function validReading(r,limit,author,units){
+      let value=r.value;let at=r.at;return r=={'kind':r.kind,'unit':units[r.kind],'value':value,'at':at,'by':author}
+        && value is number && value>=0 && value<=1000000000 && at is int && at>0 && at<=limit;
+    }
+    function validCheckReason(reason,check){let n=reason.size();return reason is string && n<=300
+      && (!(check in ['uninspected','na']) || n>0);}
+    function measurementProjection(id,d){return {'schemaVersion':1,'inspectionId':id,'lightId':d.lightId,'date':d.date,'inspector':d.inspector,'readings':d.readings};}
+    function matchingInspectionMeasurements(id,d){return getAfter(/databases/$(db)/documents/inspectionMeasurements/$(id)).data==measurementProjection(id,d);}
+    function validInspectionExtras(id,d){
+      let r=d.readings;let checks=d.checks;let values=checks.values();let reasons=d.checkReasons;
+      let complete=!values.hasAny(['uninspected']) && values.hasAny(['ok','bad']);
+      return d.inspectionComplete is bool && checks.size()==8 && checks.keys().hasOnly(['lamp','flicker','fixture','pole','base','cabinet','leak','tree'])
+        && values.hasOnly(['ok','bad','uninspected','na'])
+        && reasons is map && reasons.keys().hasOnly(checks.keys())
+        && (reasons.size()==0 ? !values.hasAny(['uninspected','na']) : (validCheckReason(reasons.get('lamp',''),checks.lamp) && validCheckReason(reasons.get('flicker',''),checks.flicker)
+          && validCheckReason(reasons.get('fixture',''),checks.fixture) && validCheckReason(reasons.get('pole',''),checks.pole)
+          && validCheckReason(reasons.get('base',''),checks.base) && validCheckReason(reasons.get('cabinet',''),checks.cabinet)
+          && validCheckReason(reasons.get('leak',''),checks.leak) && validCheckReason(reasons.get('tree',''),checks.tree)))
+        && d.inspectionComplete==complete && (complete || d.result!='정상')
+        && (d.result!='정상' || !values.hasAny(['bad']))
+        && (!(checks.lamp=='bad' || checks.leak=='bad' || checks.pole=='bad') || d.result=='고장')
+        && r is list && r.size()<=10 && (r.size()==0 || matchingInspectionMeasurements(id,d));
+    }
+    function validInspectionMeasurements(id,d){
+      let detail=getAfter(/databases/$(db)/documents/inspectionDetails/$(id)).data;
+      let r=d.readings;let n=r.size();let limit=d.date+300000;let author=d.inspector;
+      let units={'insulationResistance':'MΩ','leakageCurrent':'mA'};
+      return d==measurementProjection(id,detail) && d.inspector==request.auth.uid && d.lightId is string && d.date is int && d.date>0
+        && r is list && n>0 && n<=10 && validReading(r[0],limit,author,units)
+        && (n<2 || validReading(r[1],limit,author,units)) && (n<3 || validReading(r[2],limit,author,units))
+        && (n<4 || validReading(r[3],limit,author,units)) && (n<5 || validReading(r[4],limit,author,units))
+        && (n<6 || validReading(r[5],limit,author,units)) && (n<7 || validReading(r[6],limit,author,units))
+        && (n<8 || validReading(r[7],limit,author,units)) && (n<9 || validReading(r[8],limit,author,units))
+        && (n<10 || validReading(r[9],limit,author,units));
+    }
     function ownUnreviewedInspection(inspId, lightId){
       let inspection = getAfter(/databases/$(db)/documents/inspections/$(inspId)).data;
       return inspId is string && inspection.inspector == request.auth.uid
         && inspection.lightId == lightId && inspection.get('reviewedAt', null) == null;
     }
+    // Immutable detail and measurement documents split typed validation across
+    // the same atomic write while preserving the public inspection payload.
+    function inspectionDetailsEqual(d,record){return d.lightId==record.lightId && d.date==record.date && d.inspector==record.inspector
+      && d.checks==record.checks && d.checkReasons==record.checkReasons && d.inspectionComplete==record.inspectionComplete
+      && d.readings==record.readings && d.result==record.result;}
+    function matchingInspectionDetails(id,d){let detail=getAfter(/databases/$(db)/documents/inspectionDetails/$(id)).data;
+      return detail.schemaVersion==1 && detail.inspectionId==id && inspectionDetailsEqual(detail,d);}
+    function keepsInspectionDetails(id,d,old){return exists(/databases/$(db)/documents/inspectionDetails/$(id)) ? matchingInspectionDetails(id,d)
+      : (!(d.keys().hasAny(['inspectionComplete','checkReasons','readings']) || old.keys().hasAny(['inspectionComplete','checkReasons','readings']))
+        || !d.diff(old).affectedKeys().hasAny(['lightId','date','inspector','checks','checkReasons','inspectionComplete','readings','result']) || matchingInspectionDetails(id,d));}
+    function validInspectionDetails(id,d){let record=getAfter(/databases/$(db)/documents/inspections/$(id)).data;
+      return d=={'schemaVersion':1,'inspectionId':id,'lightId':record.lightId,'date':record.date,'inspector':request.auth.uid,
+        'checks':record.checks,'checkReasons':record.checkReasons,'inspectionComplete':record.inspectionComplete,'readings':record.readings,'result':record.result}
+        && record.inspector==request.auth.uid && d.lightId is string && d.date is int && d.date>0 && validInspectionExtras(id,d);}
 
     // 최초 관리자는 scripts/admin-setup.cjs에서 승인된 UID로 역할과 잠금을 원자적으로 생성한다.
     match /roles/{uid} {
@@ -173,13 +223,19 @@ service cloud.firestore {
     match /inspections/{id} {
       allow read: if isStaff();
       // 검수·재점검 관리 필드는 점검자 생성 요청에도 넣을 수 없다.
-      allow create: if (validInspection(request.resource.data) && inspectionEvidence(id,request.resource.data) && isStaff()) || (isAdmin() && thumbList(request.resource.data));
+      allow create: if (!request.resource.data.keys().hasAny(['inspectionComplete','checkReasons','readings'])
+        || (request.resource.data.inspector==request.auth.uid && request.resource.data.lightId is string && request.resource.data.date is int && request.resource.data.date>0 && matchingInspectionDetails(id,request.resource.data)))
+        && ((validInspection(request.resource.data) && inspectionEvidence(id,request.resource.data) && isStaff()) || (isAdmin() && thumbList(request.resource.data)));
       // 저장된 점검은 불변. 통신 재시도의 완전히 동일한 쓰기만 허용한다.
-      allow update: if (isAdmin() && thumbList(request.resource.data)
+      allow update: if keepsInspectionDetails(id,request.resource.data,resource.data) && ((isAdmin() && thumbList(request.resource.data)
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['reviewedAt','reviewedBy']) || inspectionEvidence(id,request.resource.data))) || (isStaff() && resource.data.inspector == request.auth.uid
-        && request.resource.data == resource.data);
-      allow delete: if isAdmin();
+        && request.resource.data == resource.data));
+      allow delete: if isAdmin() && !exists(/databases/$(db)/documents/inspectionDetails/$(id));
     }
+    match /inspectionDetails/{id}{allow read:if isStaff();allow create:if isStaff() && validInspectionDetails(id,request.resource.data);
+      allow update:if isStaff() && resource.data.inspector==request.auth.uid && request.resource.data==resource.data;allow delete:if false;}
+    match /inspectionMeasurements/{id}{allow read:if isStaff();allow create:if isStaff() && validInspectionMeasurements(id,request.resource.data);
+      allow update:if isStaff() && resource.data.inspector==request.auth.uid && request.resource.data==resource.data;allow delete:if false;}
     function reportLinkKeys(){return ['lightId','code','dong','linkRevision','linkEventId','linkUpdatedBy'];}
     function inactiveReportWork(d){let key=d.get('workId','');let ref=/databases/$(db)/documents/workOrders/$(key==''?'__none__':key);
       return key=='' || !exists(ref) || get(ref).data.status in ['verified','cancelled'];}
@@ -232,7 +288,7 @@ service cloud.firestore {
         && request.resource.data.at is int
         && (!('inspId' in request.resource.data)
           || ownUnreviewedInspection(request.resource.data.inspId, request.resource.data.lightId))
-        && (!('workId' in request.resource.data) || ownWorkPhoto(request.resource.data)) && isStaff()) || isAdmin();
+        && ('workId' in request.resource.data ? ownWorkPhoto(request.resource.data) : isStaff())) || isAdmin();
       // 작성자도 증빙 사진 내용을 덮어쓸 수 없다. 구버전의 최초 점검 연결만 허용한다.
       allow update: if isAdmin() || (isStaff() && resource.data.by == request.auth.uid && (
         request.resource.data == resource.data
@@ -560,16 +616,39 @@ service cloud.firestore {
         && (ps.size()<4 || workPhoto(ps[3],id,data.lightId)) && (ps.size()<5 || workPhoto(ps[4],id,data.lightId))
         && (ps.size()<6 || workPhoto(ps[5],id,data.lightId));
     }
-    function validWork(data){
+    function validHold(value){return value==null || (value is map && value.keys().hasOnly(['reason','note','nextAt','nextAction','since','by'])
+      && value.reason in ['material','external','equipment','weather','other'] && optionalText(value,'note',500) && (value.reason!='other' || value.note.size()>0)
+      && optionalText(value,'nextAction',500) && value.nextAction.size()>0 && value.nextAt is int && value.since is int && value.since>0 && value.nextAt>value.since && value.by is string);}
+    function validWorkExtras(d){
+      let ack=d.get('acknowledgedAt',0);let by=d.get('acknowledgedBy','');let hold=d.get('hold',null);let diagnosis=d.get('diagnosis','');let action=d.get('repairAction','');
+      return !d.keys().hasAny(['workflowVersion','acknowledgedAt','acknowledgedBy','hold','diagnosis','repairAction']) || (d.get('workflowVersion',2)==2 && ack is int && ack>=0
+        && by is string && by.size()<=128 && (ack==0 ? by=='' : by==d.assignedTo && ack<=d.updatedAt)
+        && validHold(hold) && (hold==null || (!(d.status in ['verified','cancelled']) && hold.since<=d.updatedAt))
+        && diagnosis in ['','lamp','power','controller','fixture','pole','wiring','external','unknown'] && action in ['','replace','repair','adjust','restore_power','inspect','refer','none']
+        && (!('workflowVersion' in d) || !(d.status in ['completed','verified']) || (diagnosis!='' && action!='')));}
+    function ownWorkProcess(old,d){let changed=d.diff(old).affectedKeys();return old.status in ['assigned','in_progress'] && d.status==old.status
+      && changed.hasOnly(['acknowledgedAt','acknowledgedBy','hold','updatedAt','updatedBy','revision'])
+      && (!changed.hasAny(['acknowledgedAt','acknowledgedBy']) || (d.acknowledgedBy==request.auth.uid && d.acknowledgedAt==d.updatedAt && d.acknowledgedAt>0))
+      && (!changed.hasAny(['hold']) || d.get('hold',null)==null || d.hold.by==request.auth.uid);}
+    // Unchanged extension fields were validated on their prior write. Validate only changes to keep large evidence transactions within the rule expression budget.
+    function validUpdatedWorkExtras(d,old,changed){
+      return (!changed.hasAny(['acknowledgedAt','acknowledgedBy','assignedTo']) || validWorkAck(d))
+        && (!changed.hasAny(['hold']) || d.get('hold',null)==null || (validHold(d.hold) && d.hold.by==request.auth.uid && d.hold.since<=d.updatedAt))
+        && (!changed.hasAny(['diagnosis']) || d.diagnosis in ['','lamp','power','controller','fixture','pole','wiring','external','unknown'])
+        && (!changed.hasAny(['repairAction']) || d.repairAction in ['','replace','repair','adjust','restore_power','inspect','refer','none'])
+        && (!(d.status in ['verified','cancelled']) || d.get('hold',null)==null)
+        && (!('workflowVersion' in d) || !(d.status in ['completed','verified']) || (d.diagnosis!='' && d.repairAction!=''));
+    }
+    function validWorkAck(d){let ack=d.get('acknowledgedAt',0);let by=d.get('acknowledgedBy','');return ack is int && ack>=0 && by is string && by.size()<=128 && (ack==0 ? by=='' : by==d.assignedTo && ack<=d.updatedAt);}
+    function validWork(data,changed){
       let accounted=data.get('accountedCost',0);
       let stock=data.get('stockApplied',{});
-      return data.keys().hasOnly(['schemaVersion','lightId','code','dong','title','description','type','priority','status','assignedTo','dueAt','createdAt','createdBy','updatedAt','updatedBy','revision','reportIds','inspectionIds','beforePhotos','afterPhotos','completionNote','completedAt','completedBy','verificationNote','verifiedAt','verifiedBy','parts','costTotal','measurements','stockApplied','accountedCost'])
+      return data.keys().hasOnly(['schemaVersion','lightId','code','dong','title','description','type','priority','status','assignedTo','dueAt','createdAt','createdBy','updatedAt','updatedBy','revision','reportIds','inspectionIds','beforePhotos','afterPhotos','completionNote','completedAt','completedBy','verificationNote','verifiedAt','verifiedBy','parts','costTotal','measurements','stockApplied','accountedCost','workflowVersion','acknowledgedAt','acknowledgedBy','hold','diagnosis','repairAction'])
       && data.schemaVersion==1 && data.lightId is string && data.createdBy is string
-      && optionalText(data,'title',200) && optionalText(data,'description',2000)
+      && (!changed.hasAny(['title','description','type','priority','dueAt']) || validWorkDescription(data))
       && optionalText(data,'completionNote',2000) && optionalText(data,'verificationNote',2000)
-      && data.type in ['수리','재점검','신설검토','철거','기타'] && data.priority in ['긴급','높음','보통','낮음']
       && data.status in ['draft','assigned','in_progress','completed','verified','cancelled']
-      && data.assignedTo is string && data.createdAt is int && data.updatedAt is int && data.dueAt is int
+      && data.assignedTo is string && data.createdAt is int && data.updatedAt is int
       && data.revision is int && data.revision>=1 && data.updatedBy==request.auth.uid
       && data.reportIds is list && data.reportIds.size()<=50 && data.inspectionIds is list && data.inspectionIds.size()<=50
       && data.beforePhotos is list && data.beforePhotos.size()<=6 && data.afterPhotos is list && data.afterPhotos.size()<=6
@@ -577,6 +656,11 @@ service cloud.firestore {
       && data.costTotal is number && data.costTotal>=0 && accounted is number && accounted>=0
       && stock is map && stock.keys().size()<=30;
     }
+    // Descriptive fields are immutable during field completion. Revalidate their
+    // whole group when edited, and on creation, without charging every evidence
+    // photo transition for the same previously validated strings and enums.
+    function validWorkDescription(data){return optionalText(data,'title',200) && optionalText(data,'description',2000)
+      && data.type in ['수리','재점검','신설검토','철거','기타'] && data.priority in ['긴급','높음','보통','낮음'] && data.dueAt is int;}
     function workTransition(old,next){return old==next
       || (old=='draft' && next in ['assigned','cancelled'])
       || (old=='assigned' && next in ['in_progress','cancelled'])
@@ -589,14 +673,16 @@ service cloud.firestore {
       let data=request.resource.data;
       let previous=resource.data;
       let changed=data.diff(previous).affectedKeys();
-      return role in ['admin','inspector'] && validWork(data)
+      return role in ['admin','inspector'] && validWork(data,changed)
+        && validUpdatedWorkExtras(data,previous,changed)
         && data.lightId==previous.lightId && data.createdBy==previous.createdBy
         && data.createdAt==previous.createdAt && data.revision==previous.revision+1
+        && !changed.hasAny(['workflowVersion'])
         && workTransition(previous.status,data.status)
         && (admin || (previous.assignedTo==request.auth.uid
-          && changed.hasOnly(['status','updatedAt','updatedBy','revision','beforePhotos','afterPhotos','completionNote','completedAt','completedBy','parts','costTotal','measurements'])
+          && ((changed.hasOnly(['status','updatedAt','updatedBy','revision','beforePhotos','afterPhotos','completionNote','completedAt','completedBy','parts','costTotal','measurements','diagnosis','repairAction','hold'])
           && ((previous.status=='assigned' && data.status=='in_progress')
-            || (previous.status=='in_progress' && data.status in ['in_progress','completed']))))
+            || (previous.status=='in_progress' && data.status in ['in_progress','completed']))) || ownWorkProcess(previous,data))))
         && (!changed.hasAny(['stockApplied','accountedCost']) || (admin && previous.status=='completed' && data.status=='verified'))
         && (data.status!='completed' || (workEvidence(id,data) && data.completedAt is int
           && (data.completedBy==request.auth.uid || (admin && previous.status=='completed'
@@ -606,12 +692,70 @@ service cloud.firestore {
     }
     match /workOrders/{id} {
       allow read: if isStaff();
-      allow create: if isAdmin() && validWork(request.resource.data)
+      allow create: if isAdmin() && validWork(request.resource.data,request.resource.data.keys()) && validWorkExtras(request.resource.data)
         && request.resource.data.createdBy==request.auth.uid && request.resource.data.status in ['draft','assigned']
         && request.resource.data.revision==1 && request.resource.data.get('stockApplied',{}).size()==0 && request.resource.data.get('accountedCost',0)==0;
       allow update: if canUpdateWork(id);
       allow delete: if false;
     }
+    function assetCollection(entity){return entity=='cabinet'?'cabinets':(entity=='circuit'?'circuits':(entity=='link'?'assetLinks':(entity=='incident'?'outageIncidents':'assetReplacements')));}
+    function assetMeta(d){return d.schemaVersion==1 && d.createdAt is int && d.createdAt>0 && d.createdBy is string
+      && d.updatedAt is int && d.updatedAt>=d.createdAt && d.updatedAt<=request.time.toMillis()+300000 && d.updatedBy==request.auth.uid
+      && d.revision is int && d.revision>=1 && d.operationId is string && d.operationId.size()>0;}
+    function assetKeys(d,fields){return d.keys().hasOnly(['schemaVersion','createdAt','createdBy','updatedAt','updatedBy','revision','operationId'].concat(fields));}
+    function assetParents(d){return (d.cabinetId=='' && d.circuitId=='') || (d.cabinetId is string && d.circuitId is string
+      && getAfter(/databases/$(db)/documents/circuits/$(d.circuitId)).data.cabinetId==d.cabinetId
+      && !getAfter(/databases/$(db)/documents/circuits/$(d.circuitId)).data.disabled && !getAfter(/databases/$(db)/documents/cabinets/$(d.cabinetId)).data.disabled);}
+    function validAsset(entity,d){return assetMeta(d) && (
+      (entity=='cabinet' && assetKeys(d,['code','label','dong','lat','lng','note','disabled']) && optionalText(d,'code',100) && d.code.size()>0 && optionalText(d,'label',100) && d.label.size()>0 && optionalText(d,'dong',80) && optionalText(d,'note',1000) && d.disabled is bool
+        && ((d.lat==null && d.lng==null) || (d.lat is number && d.lat>=-90 && d.lat<=90 && d.lng is number && d.lng>=-180 && d.lng<=180)))
+      || (entity=='circuit' && assetKeys(d,['cabinetId','code','label','note','disabled']) && d.cabinetId is string && optionalText(d,'code',100) && d.code.size()>0 && optionalText(d,'label',100) && d.label.size()>0 && optionalText(d,'note',1000) && d.disabled is bool && existsAfter(/databases/$(db)/documents/cabinets/$(d.cabinetId)))
+      || (entity=='link' && assetKeys(d,['lightId','cabinetId','circuitId','confirmationNote']) && d.lightId is string && optionalText(d,'confirmationNote',1000) && d.confirmationNote.size()>0 && assetParents(d))
+      || (entity=='incident' && assetKeys(d,['title','cabinetId','circuitId','lightIds','reportIds','workIds','confirmedLightIds','status','note','resolutionNote']) && optionalText(d,'title',120) && d.title.size()>0 && optionalText(d,'note',1500) && optionalText(d,'resolutionNote',1000)
+        && d.lightIds is list && d.lightIds.size()>0 && d.lightIds.size()<=100 && d.reportIds is list && d.reportIds.size()<=20 && d.workIds is list && d.workIds.size()<=20
+        && d.confirmedLightIds is list && d.confirmedLightIds.toSet().difference(d.lightIds.toSet()).size()==0 && d.status in ['open','resolved'] && assetParents(d)
+        && (d.status=='open' ? d.resolutionNote=='' : d.resolutionNote.size()>0 && d.confirmedLightIds.toSet()==d.lightIds.toSet()))
+      || (entity=='replacement' && assetKeys(d,['lightId','component','replacedAt','manufacturer','model','warrantyEnd','workId','note']) && d.lightId is string && d.component in ['lamp','fixture','driver','pole','cabinet','other'] && d.replacedAt is int && d.replacedAt>0 && d.replacedAt<=d.createdAt
+        && d.warrantyEnd is int && (d.warrantyEnd==0 || d.warrantyEnd>=d.replacedAt) && optionalText(d,'manufacturer',100) && optionalText(d,'model',100) && optionalText(d,'note',1000) && (d.component!='other' || d.note.size()>0) && d.workId is string
+        && (d.workId=='' || getAfter(/databases/$(db)/documents/workOrders/$(d.workId)).data.lightId==d.lightId)
+        && d.revision==1 && d.createdAt==d.updatedAt && d.createdBy==d.updatedBy)
+    );}
+    function assetWrite(entity,id,previous){let d=request.resource.data;let op=getAfter(/databases/$(db)/documents/assetOperations/$(d.operationId)).data;return isAdmin() && validAsset(entity,d)
+      && (previous.size()==0 ? d.revision==1 && d.createdBy==request.auth.uid : d.revision==previous.revision+1 && d.createdAt==previous.createdAt && d.createdBy==previous.createdBy && d.updatedAt>=previous.updatedAt)
+      && (entity!='link' || d.lightId==id) && (entity!='circuit' || previous.size()==0 || d.cabinetId==previous.cabinetId)
+      && (entity!='incident' || previous.size()==0 || previous.status!='resolved')
+      && op.entity==entity && op.recordId==id && op.snapshot==d && op.by==request.auth.uid && op.at==d.updatedAt && op.revision==d.revision;}
+    match /cabinets/{id}{allow read:if isStaff();allow create:if assetWrite('cabinet',id,{});allow update:if assetWrite('cabinet',id,resource.data);allow delete:if false;}
+    match /circuits/{id}{allow read:if isStaff();allow create:if assetWrite('circuit',id,{});allow update:if assetWrite('circuit',id,resource.data);allow delete:if false;}
+    match /assetLinks/{id}{allow read:if isStaff();allow create:if assetWrite('link',id,{});allow update:if assetWrite('link',id,resource.data);allow delete:if false;}
+    match /outageIncidents/{id}{allow read:if isStaff();allow create:if assetWrite('incident',id,{});allow update:if assetWrite('incident',id,resource.data);allow delete:if false;}
+    match /assetReplacements/{id}{allow read:if isStaff();allow create:if assetWrite('replacement',id,{});allow update,delete:if false;}
+    match /assetOperations/{id}{
+      allow read:if isStaff();
+      allow create:if isAdmin() && request.resource.data.keys().hasOnly(['schemaVersion','entity','recordId','by','at','revision','requestHash','snapshot'])
+        && request.resource.data.schemaVersion==1 && request.resource.data.entity in ['cabinet','circuit','link','incident','replacement']
+        && request.resource.data.by==request.auth.uid && request.resource.data.requestHash is string && request.resource.data.requestHash.matches('[a-f0-9]{64}')
+        && request.resource.data.snapshot is map && validAsset(request.resource.data.entity,request.resource.data.snapshot)
+        && request.resource.data.snapshot.operationId==id && request.resource.data.snapshot.updatedBy==request.auth.uid && request.resource.data.snapshot.updatedAt==request.resource.data.at && request.resource.data.snapshot.revision==request.resource.data.revision
+        && getAfter(/databases/$(db)/documents/$(assetCollection(request.resource.data.entity))/$(request.resource.data.recordId)).data==request.resource.data.snapshot;
+      allow update,delete:if false;
+    }
+    function validPreventivePlan(d){return d.keys().hasOnly(['schemaVersion','title','description','type','priority','assignedTo','intervalDays','completionDays','startAt','nextAt','lightIds','enabled','createdAt','createdBy','updatedAt','updatedBy','revision'])
+      && d.schemaVersion==1 && optionalText(d,'title',120) && d.title.size()>0 && optionalText(d,'description',2000) && d.type in ['수리','재점검','신설검토','철거','기타'] && d.priority in ['긴급','높음','보통','낮음'] && d.assignedTo is string && d.assignedTo.size()>0
+      && d.intervalDays is int && d.intervalDays>=1 && d.intervalDays<=3650 && d.completionDays is int && d.completionDays>=1 && d.completionDays<=3650
+      && d.startAt is int && d.startAt>0 && d.nextAt is int && d.nextAt>=d.startAt && d.lightIds is list && d.lightIds.size()>0 && d.lightIds.size()<=200 && d.lightIds.toSet().size()==d.lightIds.size() && d.enabled is bool
+      && d.createdAt is int && d.createdBy is string && d.updatedAt is int && d.updatedAt>=d.createdAt && d.updatedBy==request.auth.uid && d.revision is int && d.revision>=1;}
+    match /preventivePlans/{id}{allow read:if isStaff();allow create:if isAdmin() && validPreventivePlan(request.resource.data) && request.resource.data.revision==1 && request.resource.data.createdBy==request.auth.uid;
+      allow update:if isAdmin() && validPreventivePlan(request.resource.data) && request.resource.data.createdAt==resource.data.createdAt && request.resource.data.createdBy==resource.data.createdBy && request.resource.data.revision==resource.data.revision+1 && request.resource.data.updatedAt>=resource.data.updatedAt;allow delete:if false;}
+    function validPreventiveRun(id,d){let p=get(/databases/$(db)/documents/preventivePlans/$(d.planId)).data;let w=getAfter(/databases/$(db)/documents/workOrders/$(d.workId)).data;let op=getAfter(/databases/$(db)/documents/preventiveOperations/$(d.operationId)).data;
+      return d.keys().hasOnly(['schemaVersion','planId','scheduledAt','lightId','workId','carried','createdAt','createdBy','operationId']) && d.schemaVersion==1 && d.scheduledAt is int && d.scheduledAt==p.nextAt && p.enabled && d.lightId in p.lightIds
+      && w.lightId==d.lightId && d.carried is bool && d.createdAt is int && d.createdBy==request.auth.uid && op.planId==d.planId && op.by==d.createdBy && op.at==d.createdAt && op.action=='generate' && id in op.recordIds;}
+    match /preventiveRuns/{id}{allow read:if isStaff();allow create:if isAdmin() && validPreventiveRun(id,request.resource.data);allow update,delete:if false;}
+    match /preventiveOperations/{id}{allow read:if isStaff();allow create:if isAdmin() && request.resource.data.keys().hasOnly(['schemaVersion','planId','by','at','action','recordIds','revision','requestHash'])
+      && request.resource.data.schemaVersion==1 && request.resource.data.by==request.auth.uid && request.resource.data.at is int && request.resource.data.at>0 && request.resource.data.action in ['save','generate','advance']
+      && request.resource.data.recordIds is list && request.resource.data.recordIds.size()<=4 && request.resource.data.revision is int && request.resource.data.revision>=1 && request.resource.data.requestHash is string && request.resource.data.requestHash.matches('[a-f0-9]{64}')
+      && (request.resource.data.action=='save' ? request.resource.data.recordIds==[request.resource.data.planId] : (request.resource.data.action=='generate' ? request.resource.data.recordIds.size()>0 : request.resource.data.recordIds.size()==0))
+      && getAfter(/databases/$(db)/documents/preventivePlans/$(request.resource.data.planId)).data.revision==request.resource.data.revision;allow update,delete:if false;}
     function validInventory(data){
       return data.keys().hasOnly(['name','unit','quantity','unitCost','revision','updatedAt','updatedBy'])
         && optionalText(data,'name',120) && optionalText(data,'unit',40)

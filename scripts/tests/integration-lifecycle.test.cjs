@@ -25,6 +25,7 @@ function harness() {
     document: { querySelector: () => null, addEventListener(type, callback) { if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(callback); } },
     addEventListener() {}, navigator: { onLine: true }, CSS: { escape: String },
     S: { me: 'local', canWrite: true, lights: [], reports: [], asec: null }, FB: null, BASE: [], OV: {}, DRAFTS: {}, draft: null, pt: emptyPatrol(),
+    navGen: () => 1, navAlive: generation => generation === 1,
     PATROL_JOBS: new Map(), ADMIN_SECTIONS: {}, ADONGS: [], CHECKS: [], dl: null,
     $: () => null, esc: String, fmtDT: String, can: () => true, inDong: () => true, dongOptions: () => '', render() {},
     toast: message => toasts.push(message), listAllRecords: async () => [], getPhoto() {},

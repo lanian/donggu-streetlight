@@ -25,6 +25,9 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
     lightId: 'p1', code: '산수동 1', dong: '산수동', label: '전경', note: '',
     data: 'data:image/jpeg;base64,dGVzdA==', w: 100, h: 100, at: 1000, by: 'inspector-a', kind: 'inspection', ...extra
   });
+  function inspectionDetails(id,record){return {schemaVersion:1,inspectionId:id,...Object.fromEntries(['lightId','date','inspector','checks','checkReasons','inspectionComplete','readings','result'].map(k=>[k,record[k]]))};}
+  function inspectionMeasurements(id,record){return {schemaVersion:1,inspectionId:id,...Object.fromEntries(['lightId','date','inspector','readings'].map(k=>[k,record[k]]))};}
+  function typedInspectionWrite(client,id,record,detailPatch={}){const batch=writeBatch(client),detail={...inspectionDetails(id,record),...detailPatch};batch.set(doc(client,'inspections/'+id),record);batch.set(doc(client,'inspectionDetails/'+id),detail);if(detail.readings?.length)batch.set(doc(client,'inspectionMeasurements/'+id),inspectionMeasurements(id,detail));return batch.commit();}
   const fieldLight = (extra = {}) => ({
     code: '산수동 2', dong: '산수동', kind: '보안등', num: '2', road: null, main: null, sub: null,
     poleNo: null, address: '현장 등록', lampType: '', status: '정상', lastInspected: null,
@@ -282,11 +285,11 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       await assertFails(updateDoc(doc(manager,'workEvents/complete'),{note:'rewritten'}));
     });
 
-    test('maximum supported work verification atomically handles 12 evidence photos, 10 inventory items and 20 reports',async()=>{
+    for(const modern of [false,true]) test((modern?'v61: ':'legacy: ')+'maximum supported work verification atomically handles 12 evidence photos, 10 inventory items and 20 reports',async()=>{
       const manager=admin(),db=staff(),workId='large-work';
       const beforePhotos=Array.from({length:6},(_,i)=>'before-'+i),afterPhotos=Array.from({length:6},(_,i)=>'after-'+i);
       const reportIds=Array.from({length:20},(_,i)=>'report-'+i),itemIds=Array.from({length:10},(_,i)=>'item-'+i);
-      const work={schemaVersion:1,lightId:'p1',code:'산수동 1',dong:'산수동',title:'여러 자재 수리',description:'',type:'수리',priority:'보통',status:'assigned',assignedTo:'inspector-a',dueAt:0,createdAt:1000,createdBy:'admin',updatedAt:1000,updatedBy:'admin',revision:1,reportIds,inspectionIds:[],beforePhotos,afterPhotos:[],completionNote:'',verificationNote:'',parts:itemIds.map(inventoryId=>({name:inventoryId,qty:1,unitCost:100,inventoryId})),costTotal:1000,accountedCost:0,measurements:[],stockApplied:{}};
+      const work={...(modern?{workflowVersion:2,acknowledgedAt:0,acknowledgedBy:'',hold:null,diagnosis:'',repairAction:''}:{}),schemaVersion:1,lightId:'p1',code:'산수동 1',dong:'산수동',title:'여러 자재 수리',description:'',type:'수리',priority:'보통',status:'assigned',assignedTo:'inspector-a',dueAt:0,createdAt:1000,createdBy:'admin',updatedAt:1000,updatedBy:'admin',revision:1,reportIds,inspectionIds:[],beforePhotos,afterPhotos:[],completionNote:'',verificationNote:'',parts:itemIds.map(inventoryId=>({name:inventoryId,qty:1,unitCost:100,inventoryId})),costTotal:1000,accountedCost:0,measurements:[],stockApplied:{}};
       await seed(Object.fromEntries([
         ['lights/p1',{status:'고장',lastInspected:1000,updatedAt:1000}],
         ...reportIds.map(id=>['reports/'+id,{lightId:'p1',status:'접수',contact:'private'}]),
@@ -298,7 +301,7 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       await assertSucceeds(updateDoc(doc(db,'workOrders/'+workId),{status:'in_progress',revision:2,updatedAt:2000,updatedBy:'inspector-a'}));
       const complete=writeBatch(db);
       for(const id of afterPhotos)complete.set(doc(db,'photos/'+id),photo({kind:'work',workId}));
-      complete.update(doc(db,'workOrders/'+workId),{status:'completed',revision:3,updatedAt:3000,completedBy:'inspector-a',completedAt:3000,afterPhotos});
+      complete.update(doc(db,'workOrders/'+workId),{...(modern?{diagnosis:'lamp',repairAction:'replace'}:{}),status:'completed',revision:3,updatedAt:3000,completedBy:'inspector-a',completedAt:3000,afterPhotos});
       complete.set(doc(db,'workEvents/large-complete'),{workId,lightId:'p1',fromStatus:'in_progress',toStatus:'completed',type:'transition',note:'',at:3000,by:'inspector-a',revision:3,createdAt:1000,costTotal:1000,costDelta:0});await assertSucceeds(complete.commit());
       await assertSucceeds(runTransaction(manager,async transaction=>{
         const paths=['workOrders/'+workId,'workEvents/large-verify','lights/p1',...beforePhotos.concat(afterPhotos).map(id=>'photos/'+id),...itemIds.map(id=>'inventory/'+id),...reportIds.map(id=>'reports/'+id)];
@@ -706,6 +709,140 @@ if (!process.env.FIRESTORE_EMULATOR_HOST) {
       await W.execute(inventory, context); await W.execute(inventory, context);
       const item = (await getDoc(doc(manager, 'inventory/item'))).data(); assert.equal(item.quantity, 10); assert.equal(item.revision, 2); assert.equal(item.unitCost, 150);
       const event = (await getDoc(doc(manager, 'inventoryMoves/stock-info-edit'))).data(); assert.equal(event.delta, 0); assert.match(event.requestHash, /^[a-f0-9]{64}$/);
+    });
+
+    test('v61 work creation rejects an acknowledgement author without an acknowledgement time', async () => {
+      const C=require('../../app/operations-core'),manager=admin();
+      const order=C.createOrder({title:'배정 확인 생성 검증',workflowVersion:2,assignedTo:'inspector-a',dueAt:5000},{id:'p1',code:'1'},'admin',1000);
+      await assertSucceeds(setDoc(doc(manager,'workOrders/valid-unacknowledged'),order));
+      await assertFails(setDoc(doc(manager,'workOrders/forged-unacknowledged'),{...order,acknowledgedAt:0,acknowledgedBy:'inspector-b'}));
+      const saved=(await getDoc(doc(manager,'workOrders/valid-unacknowledged'))).data();
+      assert.equal(saved.acknowledgedAt,0);assert.equal(saved.acknowledgedBy,'');
+    });
+    test('v61 work status transitions bind a changed hold author to the acting assignee', async () => {
+      const C=require('../../app/operations-core'),manager=admin(),worker=staff();
+      const order=C.createOrder({title:'작업 시작 보류 작성자 검증',workflowVersion:2,assignedTo:'inspector-a',dueAt:5000},{id:'p1',code:'1'},'admin',1000);
+      await assertSucceeds(setDoc(doc(manager,'workOrders/start-and-hold'),order));
+      const hold={reason:'material',note:'',nextAt:6000,nextAction:'자재 입고 확인',since:2000,by:'inspector-b'};
+      const patch={status:'in_progress',hold,revision:2,updatedAt:2000,updatedBy:'inspector-a'};
+      await assertFails(updateDoc(doc(worker,'workOrders/start-and-hold'),patch));
+      const unchanged=(await getDoc(doc(worker,'workOrders/start-and-hold'))).data();
+      assert.equal(unchanged.status,'assigned');assert.equal(unchanged.revision,1);assert.equal(unchanged.hold,null);
+      await assertSucceeds(updateDoc(doc(worker,'workOrders/start-and-hold'),{...patch,hold:{...hold,by:'inspector-a'}}));
+      const saved=(await getDoc(doc(worker,'workOrders/start-and-hold'))).data();
+      assert.equal(saved.status,'in_progress');assert.equal(saved.dueAt,5000);assert.equal(saved.hold.by,'inspector-a');
+    });
+    test('v61 assignee can acknowledge and hold work without changing status or deadlines', async () => {
+      const C=require('../../app/operations-core'),W=require('../../app/work-commands'),manager=admin(),worker=staff();
+      const order=C.createOrder({title:'긴급 확인',workflowVersion:2,assignedTo:'inspector-a',priority:'긴급',dueAt:5000},{id:'p1',code:'1'},'admin',1000);
+      await assertSucceeds(setDoc(doc(manager,'workOrders/process'),order));
+      const context={db:worker,user:'inspector-a',admin:false,fb:{doc:key=>doc(worker,key),runTransaction:fn=>runTransaction(worker,fn)}};
+      await W.execute({id:'ack-process',kind:'acknowledge',workId:'process',actor:'inspector-a',at:2000,input:{expectedRevision:1}},context);
+      await W.execute({id:'hold-process',kind:'hold',workId:'process',actor:'inspector-a',at:3000,input:{expectedRevision:2,reason:'material',note:'',nextAt:6000,nextAction:'입고 확인'}},context);
+      const saved=(await getDoc(doc(worker,'workOrders/process'))).data(); assert.equal(saved.status,'assigned');assert.equal(saved.dueAt,5000);assert.equal(saved.hold.reason,'material');assert.equal(saved.acknowledgedBy,'inspector-a');
+      await assertFails(updateDoc(doc(otherStaff(),'workOrders/process'),{acknowledgedBy:'inspector-b',acknowledgedAt:4000,updatedBy:'inspector-b',updatedAt:4000,revision:4}));
+      for(const hold of [{...saved.hold,nextAt:3000},{...saved.hold,reason:'other',note:''}])await assertFails(updateDoc(doc(worker,'workOrders/process'),{hold,revision:4,updatedAt:4000,updatedBy:'inspector-a'}));
+      await assertFails(updateDoc(doc(manager,'workOrders/process'),{priority:'invalid',revision:4,updatedAt:4000,updatedBy:'admin'}));
+    });
+    test('v61 physical cabinet and circuit transactions require admin and immutable matching receipts', async () => {
+      const A=require('../../app/asset-maintenance-commands'),manager=admin(),context={db:manager,user:'admin',admin:true,byId:id=>({id}),fb:{doc:key=>doc(manager,key),runTransaction:fn=>runTransaction(manager,fn)}};
+      const cabinet={id:'new-cab',entity:'cabinet',recordId:'cab',expectedRevision:0,actor:'admin',at:1000,data:{code:'C1',label:'분전함',dong:'동명동',lat:null,lng:null,note:'',disabled:false}};
+      await A.execute(cabinet,context);await A.execute(cabinet,context);
+      await A.execute({id:'new-circuit',entity:'circuit',recordId:'circuit',expectedRevision:0,actor:'admin',at:2000,data:{cabinetId:'cab',code:'R1',label:'회로',note:'',disabled:false}},context);
+      await A.execute({id:'new-link',entity:'link',recordId:'p1',expectedRevision:0,actor:'admin',at:3000,data:{lightId:'p1',cabinetId:'cab',circuitId:'circuit',confirmationNote:'도면 확인'}},context);
+      assert.equal((await getDoc(doc(manager,'assetLinks/p1'))).data().circuitId,'circuit');
+      await assertFails(updateDoc(doc(staff(),'circuits/circuit'),{label:'임의 수정',revision:2,updatedBy:'inspector-a',updatedAt:4000}));
+      await assertFails(updateDoc(doc(manager,'assetOperations/new-link'),{at:999}));
+      const replacement={schemaVersion:1,createdAt:4000,createdBy:'admin',updatedAt:4000,updatedBy:'admin',revision:1,operationId:'other-replacement',lightId:'p1',component:'other',replacedAt:3000,manufacturer:'',model:'',warrantyEnd:0,workId:'',note:''};
+      const malformed=writeBatch(manager);malformed.set(doc(manager,'assetReplacements/other-replacement'),replacement);malformed.set(doc(manager,'assetOperations/other-replacement'),{schemaVersion:1,entity:'replacement',recordId:'other-replacement',by:'admin',at:4000,revision:1,requestHash:'a'.repeat(64),snapshot:replacement});await assertFails(malformed.commit());
+    });
+    test('v61 inspection evidence accepts incomplete and not-applicable responses plus typed measurements', async () => {
+      const record=inspection({checks:{lamp:'uninspected',flicker:'na',fixture:'ok',pole:'ok',base:'ok',cabinet:'ok',leak:'bad',tree:'na'},result:'고장',inspectionComplete:false,checkReasons:{lamp:'주간이라 점등 미확인',flicker:'점등 미실시',tree:'해당 수목 없음'},readings:[{kind:'leakageCurrent',value:1,unit:'mA',at:1000,by:'inspector-a'}]});
+      await assertSucceeds(typedInspectionWrite(staff(),'incomplete-v61',record));
+      await assertFails(typedInspectionWrite(staff(),'false-complete-v61',{...record,result:'정상',inspectionComplete:true}));
+      await assertFails(typedInspectionWrite(staff(),'forged-reading-v61',{...record,readings:[{kind:'leakageCurrent',value:1,unit:'MΩ',at:1000,by:'inspector-a'}]}));
+    });
+    for(let reasonCount=0;reasonCount<=8;reasonCount++) for(const photoCount of (reasonCount===0||reasonCount===8?[0,6]:[6])) test('v61 full inspection commits '+photoCount+' original photos and ten typed readings atomically with '+reasonCount+' separate reasons', async () => {
+      const mixed=reasonCount>0;
+      const db=staff(),batch=writeBatch(db),id='full-v61',thumbs=[];
+      for(let i=0;i<photoCount;i++){const key='full-v61-photo-'+i;thumbs.push({id:key,label:'점검 증빙',t:'data:image/jpeg;base64,dGVzdA=='});batch.set(doc(db,'photos/'+key),photo({inspId:id}));}
+      const codes=['lamp','flicker','fixture','pole','base','cabinet','leak','tree'];
+      const checks=Object.fromEntries(codes.map((k,i)=>[k,i<reasonCount?(i%2?'na':'uninspected'):'ok']));
+      const typed={checks,inspectionComplete:!mixed,checkReasons:Object.fromEntries(codes.slice(0,reasonCount).map(k=>[k,k+' 항목의 개별 확인 사유'])),result:mixed?'점검필요':'정상'};
+      const readings=Array.from({length:10},(_,i)=>({kind:i%2?'leakageCurrent':'insulationResistance',value:i+1,unit:i%2?'mA':'MΩ',at:1000,by:'inspector-a'}));
+      for(const invalid of (reasonCount===0||reasonCount===8?[{extra:true},{unit:'V'},{by:'inspector-b'},{at:301001},{value:'10'},{value:true},{value:null},{value:NaN},{kind:'unknown'}]:[])){
+        const forged=readings.map(r=>({...r}));Object.assign(forged[9],invalid);
+        await assertFails(typedInspectionWrite(db,'forged-v61-'+Object.keys(invalid)[0],inspection({...typed,readings:forged})));
+      }
+      const record=inspection({...typed,readings,thumbs,photoN:photoCount});
+      batch.set(doc(db,'inspections/'+id),record);batch.set(doc(db,'inspectionDetails/'+id),inspectionDetails(id,record));batch.set(doc(db,'inspectionMeasurements/'+id),inspectionMeasurements(id,record));
+      batch.set(doc(db,'lights/p1'),mixed?{status:'점검필요',statusAt:1000,updatedAt:1000}:{status:'정상',lastInspected:1000,lastResult:'정상',redoNote:null,updatedAt:1000});
+      await assertSucceeds(batch.commit());
+      const light=(await getDoc(doc(db,'lights/p1'))).data();assert.equal(light.lastInspected,mixed?undefined:1000);
+      await assertSucceeds(updateDoc(doc(admin(),'inspections/'+id),{reviewedBy:'admin',reviewedAt:2000}));
+      const retry=writeBatch(db);for(let i=0;i<photoCount;i++)retry.set(doc(db,'photos/full-v61-photo-'+i),photo({inspId:id}),{merge:true});
+      retry.set(doc(db,'inspections/'+id),record,{merge:true});retry.set(doc(db,'inspectionDetails/'+id),inspectionDetails(id,record),{merge:true});retry.set(doc(db,'inspectionMeasurements/'+id),inspectionMeasurements(id,record),{merge:true});await assertSucceeds(retry.commit());
+    });
+    test('v61 typed inspection and immutable validation details require matching atomic writes and retain safe retries', async () => {
+      const client=staff(),record=inspection({checks:Object.fromEntries(['lamp','flicker','fixture','pole','base','cabinet','leak','tree'].map(k=>[k,'ok'])),checkReasons:{},inspectionComplete:true,readings:[]});
+      await assertFails(setDoc(doc(client,'inspections/no-details'),record));
+      await assertFails(setDoc(doc(client,'inspectionDetails/no-main'),inspectionDetails('no-main',record)));
+      for(const patch of [{extra:true},{inspectionId:'wrong'},{inspector:'inspector-b'},{lightId:'p2'},{date:2000},{result:'고장'},{checkReasons:{lamp:'forged'}}])await assertFails(typedInspectionWrite(client,'mismatch',record,patch));
+      await assertFails(typedInspectionWrite(otherStaff(),'other-author',record));
+      await assertSucceeds(typedInspectionWrite(client,'typed-retry',record));await assertSucceeds(typedInspectionWrite(client,'typed-retry',record));
+      await assertFails(updateDoc(doc(client,'inspectionDetails/typed-retry'),{result:'고장'}));
+      await assertFails(deleteDoc(doc(admin(),'inspectionDetails/typed-retry')));
+      await assertSucceeds(updateDoc(doc(admin(),'inspections/typed-retry'),{reviewedBy:'admin',reviewedAt:2000}));
+      await assertFails(updateDoc(doc(admin(),'inspections/typed-retry'),{checks:{...record.checks,lamp:'bad'}}));
+      await assertFails(updateDoc(doc(admin(),'inspections/typed-retry'),{checkReasons:deleteField(),inspectionComplete:deleteField(),readings:deleteField()}));
+      await assertFails(deleteDoc(doc(admin(),'inspections/typed-retry')));
+      const measured={...record,readings:[{kind:'leakageCurrent',value:1,unit:'mA',at:1000,by:'inspector-a'}]};
+      const missing=writeBatch(client);missing.set(doc(client,'inspections/missing-measurement'),measured);missing.set(doc(client,'inspectionDetails/missing-measurement'),inspectionDetails('missing-measurement',measured));await assertFails(missing.commit());
+      await assertFails(setDoc(doc(client,'inspectionMeasurements/no-parent'),inspectionMeasurements('no-parent',measured)));
+      await assertSucceeds(typedInspectionWrite(client,'measurement-retry',measured));await assertSucceeds(typedInspectionWrite(client,'measurement-retry',measured));
+      await assertFails(updateDoc(doc(client,'inspectionMeasurements/measurement-retry'),{readings:[]}));
+      await assertFails(deleteDoc(doc(admin(),'inspectionMeasurements/measurement-retry')));
+      await seed({'inspections/legacy-typed-upgrade':inspection()});
+      await assertFails(updateDoc(doc(admin(),'inspections/legacy-typed-upgrade'),{...record,inspectionComplete:true}));
+      await seed({'inspections/server-restored-typed':record});
+      await assertSucceeds(updateDoc(doc(admin(),'inspections/server-restored-typed'),{reviewedBy:'admin',reviewedAt:2000}));
+      await assertFails(updateDoc(doc(admin(),'inspections/server-restored-typed'),{checks:{...record.checks,lamp:'bad'}}));
+      const malformed={...record,checks:{...record.checks,lamp:'bad'}};await assertFails(typedInspectionWrite(client,'bad-as-normal',malformed));
+    });
+    test('v61 actual Firebase inspection command atomically stores the maximum incomplete evidence and retries after review', async () => {
+      const vm=require('node:vm'),C=require('../../app/inspection-core'),client=staff(),id='actual-inspection-v61';
+      const codes=['lamp','flicker','fixture','pole','base','cabinet','leak','tree'];
+      const prepared=C.prepare({checks:Object.fromEntries(codes.map(k=>[k,'uninspected'])),checkReasons:Object.fromEntries(codes.map(k=>[k,k+' 개별 미실시 사유'])),result:'정상',readings:Array.from({length:10},(_,i)=>({kind:i%2?'leakageCurrent':'insulationResistance',unit:i%2?'mA':'MΩ',value:i,at:1000}))},codes,'inspector-a',1000);
+      const photos=Array.from({length:6},(_,i)=>({id:id+'-p'+i,data:photo({inspId:id})}));
+      const record=inspection({...prepared,thumbs:photos.map(p=>({id:p.id,label:'전경',t:p.data.data})),photoN:6});
+      const context=vm.createContext({console,Date,Promise,DGInspectionCore:C,S:{me:'inspector-a'},db:client,FB:{fs:{doc:key=>doc(client,key),runTransaction:fn=>runTransaction(client,fn)}},GAL:{},repSlots:()=>({})});
+      const source=fs.readFileSync(path.resolve(__dirname,'../../app/staff-app.js'),'utf8'),start=source.indexOf('async function inspectionOperations('),end=source.indexOf('/* Replaced at startup',start);
+      vm.runInContext(source.slice(start,end),context);
+      const job={id,rec:record,photos,fill:[],reps:{}};await assertSucceeds(context.commitInspectionJob(job));
+      assert.equal((await getDoc(doc(client,'lights/p1'))).data().lastInspected,undefined);
+      assert.equal((await getDoc(doc(client,'inspectionDetails/'+id))).data().inspectionComplete,false);
+      assert.equal((await getDoc(doc(client,'inspectionMeasurements/'+id))).data().readings.length,10);
+      await assertSucceeds(updateDoc(doc(admin(),'inspections/'+id),{reviewedBy:'admin',reviewedAt:2000}));
+      await assertSucceeds(context.commitInspectionJob(job));
+      assert.equal((await getDoc(doc(client,'inspections/'+id))).data().reviewedBy,'admin');
+    });
+
+    test('v61 preventive plans generate a four-facility cycle atomically and retry without duplicate work', async () => {
+      const P=require('../../app/preventive-commands'),manager=admin(),context={db:manager,user:'admin',admin:true,fb:{doc:key=>doc(manager,key),runTransaction:fn=>runTransaction(manager,fn)}};
+      const lightIds=['p1','p2','p3','p4'];
+      await P.execute({id:'plan-save',kind:'save',planId:'monthly',expectedRevision:0,actor:'admin',at:1000,data:{title:'정기 확인',description:'',type:'재점검',priority:'보통',assignedTo:'inspector-a',intervalDays:30,completionDays:2,startAt:1000,lightIds,enabled:true}},context);
+      const generate={id:'cycle-generate',kind:'generate',planId:'monthly',expectedRevision:1,scheduledAt:1000,actor:'admin',at:2000,targets:lightIds.map(id=>({light:{id,code:id,dong:'동명동'}}))};
+      await P.execute(generate,context);await P.execute(generate,context);
+      assert.equal((await getDocs(collection(manager,'workOrders'))).size,4);assert.equal((await getDocs(collection(manager,'preventiveRuns'))).size,4);
+      await P.execute({id:'cycle-advance',kind:'advance',planId:'monthly',expectedRevision:1,scheduledAt:1000,actor:'admin',at:3000},context);
+      assert.equal((await getDoc(doc(manager,'preventivePlans/monthly'))).data().nextAt,1000+30*86400000);
+      const works=(await getDocs(collection(manager,'workOrders'))).docs.map(d=>({id:d.id,...d.data()})),scheduledAt=1000+30*86400000;
+      const carry={id:'cycle-carry',kind:'generate',planId:'monthly',expectedRevision:2,scheduledAt,actor:'admin',at:scheduledAt+1000,targets:lightIds.map(id=>({light:{id,code:id,dong:'동명동'},candidateWorkId:works.find(w=>w.lightId===id).id}))};
+      await P.execute(carry,context);await P.execute(carry,context);
+      assert.equal((await getDocs(collection(manager,'workOrders'))).size,4);
+      const runs=(await getDocs(collection(manager,'preventiveRuns'))).docs.map(d=>d.data());assert.equal(runs.length,8);assert.equal(runs.filter(r=>r.carried).length,4);
+      await P.execute({id:'carry-advance',kind:'advance',planId:'monthly',expectedRevision:2,scheduledAt,actor:'admin',at:scheduledAt+2000},context);
+      for(const [action,recordIds] of [['save',[]],['generate',[]],['advance',['unexpected']]])await assertFails(setDoc(doc(manager,'preventiveOperations/malformed-'+action),{schemaVersion:1,planId:'monthly',by:'admin',at:scheduledAt+3000,action,recordIds,revision:3,requestHash:'a'.repeat(64)}));
     });
 
     test('admin can attach a report to a completed work without replacing its original completer',async()=>{

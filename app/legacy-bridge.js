@@ -2,7 +2,7 @@
 function initializeOperations() {
   const api = {
     esc, fmtDT, can, state: () => S, firebase: () => FB && FB.fs, database: () => db,
-    byId, inDong, dongValues: () => ADONGS.map(d => 'a:' + d), dongOptions,
+    byId: id => (navigator.onLine === false && globalThis.DGFieldKit?.currentLight?.(id)) || byId(id), inDong, dongValues: () => ADONGS.map(d => 'a:' + d), dongOptions,
     render: () => render(), toast, readAll: (...args) => listAllRecords(...args), readPage: (collection, options) => DGData.readPage(db, collection, { requireServer: !!FB, ...options }), getPhoto,
     openSection: key => openAdminSection(key),
     route: id => mapRoute(id),
@@ -61,8 +61,11 @@ function initializeOperations() {
   DGWorkflows.attach(api);
   DGRoadlightingBridge.attach(api);
   DGOfficialReportImport.attach(api);
+  globalThis.DGAssetMaintenance?.attach(api);
+  globalThis.DGPreventive?.attach(api);
+  globalThis.DGFieldKit?.attach(api);
   const originalClose = closeSheet;
-  closeSheet = function (fromHistory) { DGOperations.persistActive().catch(e => toast(e.message)); globalThis.DGLightingAreas?.persistActive().catch(e => toast(e.message)); DGIntegration.persistDraft().catch(e => toast(e.message)); DGIntegration.persistPatrol().catch(e => toast(e.message)); return originalClose(fromHistory); };
+  closeSheet = function (fromHistory) { DGOperations.persistActive().catch(e => toast(e.message)); globalThis.DGAssetMaintenance?.persistActive().catch(e => toast(e.message)); globalThis.DGPreventive?.persistActive().catch(e => toast(e.message)); globalThis.DGLightingAreas?.persistActive().catch(e => toast(e.message)); DGIntegration.persistDraft().catch(e => toast(e.message)); DGIntegration.persistPatrol().catch(e => toast(e.message)); return originalClose(fromHistory); };
   const originalLight = openLight;
   openLight = async function (id) {
     if (!DGIntegration.initialized && !(await DGIntegration.whenReady())) return toast('초안 복구와 저장소 연결을 마친 뒤 다시 열어 주세요.');
@@ -70,6 +73,7 @@ function initializeOperations() {
     const result = originalLight(id), memo = $('#iMemo'), head = $('#lightNav');
     if (memo) memo.insertAdjacentHTML('afterend', '<div id="dgDraftState" class="dg-save-state" role="status">' + (DGOffline.durable ? '입력한 점검 내용은 이 기기에 자동 보관돼요.' : '현재 창에서만 초안을 보관해요.') + '</div>');
     if (head) {
+      if (globalThis.DGAssetMaintenance && !(navigator.onLine === false && globalThis.DGFieldKit?.facility(id))) head.insertAdjacentHTML('afterend', DGAssetMaintenance.lightHTML(id));
       head.insertAdjacentHTML('beforeend', '<button type="button" data-fw="facility" data-id="' + esc(id) + '">통합 업무 이력</button>' + (can('admin') ? '<button type="button" data-dg="new-work" data-light-id="' + esc(id) + '">보수 작업 지시</button>' : ''));
       head.insertAdjacentHTML('afterend', '<div id="dgFacilityWorkSummary" class="panel" aria-live="polite">진행 중인 작업을 확인해요…</div>');
       DGWorkflows.renderSummary(id, document.getElementById('dgFacilityWorkSummary')).catch(e => toast(e.message));

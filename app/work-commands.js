@@ -24,7 +24,7 @@
     if (job.actor !== context.user) fail('저장 작업의 계정이 현재 계정과 달라요.', 'permission-denied');
     if (job.kind === 'report-link') return prepareReportLink(job, read, context);
     const inventoryOnly = ['inventory-create', 'inventory-move', 'inventory-update'].includes(job.kind);
-    if (!inventoryOnly && !['create', 'transition', 'link-reports', 'update', 'assign'].includes(job.kind)) fail('지원하지 않는 업무 명령이에요.');
+    if (!inventoryOnly && !['create', 'transition', 'link-reports', 'update', 'assign', 'acknowledge', 'hold', 'resume'].includes(job.kind)) fail('지원하지 않는 업무 명령이에요.');
     if (inventoryOnly) identifier(job.itemId); else identifier(job.workId);
     const requestHash = !inventoryOnly || job.kind === 'inventory-update' ? await fingerprint(job) : null;
     const eventPath = (inventoryOnly ? 'inventoryMoves/' : 'workEvents/') + job.id;
@@ -67,6 +67,8 @@
       if (old) fail('같은 작업 ID가 이미 있어요.', 'conflict');
       if (job.input.reportIds && (!Array.isArray(job.input.reportIds) || job.input.reportIds.length > 20)) fail('한 작업에는 신고를 최대 20건 연결할 수 있어요.');
       next = core.createOrder(job.input, job.light, job.actor, job.at); expected[path] = null;
+    } else if (['acknowledge', 'hold', 'resume'].includes(job.kind)) {
+      next = core.workProcess(old, job.kind, job.input, job.actor, context.admin, job.at); expected[path] = old.revision;
     } else if (job.kind === 'assign') {
       if (!old || old.status !== 'draft') fail('배정 대기 작업만 배정할 수 있어요.', 'failed-precondition');
       if (!job.input || Object.keys(job.input).some(key => !['expectedRevision', 'assignedTo', 'dueAt', 'priority'].includes(key))) fail('배정할 담당자·기한·우선순위를 확인해 주세요.');
@@ -153,7 +155,7 @@
       }
     }
     ops.push({ path, data: next });
-    ops.push({ path: eventPath, data: { workId: job.workId, lightId: next.lightId, fromStatus: old ? old.status : '', toStatus: next.status, type: job.kind === 'create' ? 'created' : job.kind === 'link-reports' ? 'reports-linked' : job.kind === 'update' ? 'updated' : 'transition', note: core.text(job.input.verificationNote || job.input.completionNote || job.note || (job.kind === 'update' ? '작업 정보 수정' : ''), 2000), at: job.at, by: job.actor, revision: next.revision, createdAt: next.createdAt, costTotal: next.costTotal, costDelta: verifying ? next.costTotal - (Number(old.accountedCost) || 0) : 0, requestHash } });
+    ops.push({ path: eventPath, data: { workId: job.workId, lightId: next.lightId, fromStatus: old ? old.status : '', toStatus: next.status, type: job.kind === 'create' ? 'created' : job.kind === 'link-reports' ? 'reports-linked' : job.kind === 'update' ? 'updated' : ['acknowledge', 'hold', 'resume'].includes(job.kind) ? job.kind : 'transition', note: core.text(job.input.verificationNote || job.input.completionNote || job.note || (job.kind === 'update' ? '작업 정보 수정' : ''), 2000), at: job.at, by: job.actor, revision: next.revision, createdAt: next.createdAt, costTotal: next.costTotal, costDelta: verifying ? next.costTotal - (Number(old.accountedCost) || 0) : 0, requestHash } });
     return { ops, expected, order: next };
   }
   async function prepareReportLink(job, read, context) {

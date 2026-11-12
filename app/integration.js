@@ -7,20 +7,26 @@
   const readyPromise = new Promise(resolve => { resolveReady = resolve; });
   const finishing = new Map(), busy = new Set();
   const Q = s => document.querySelector(s), copy = v => JSON.parse(JSON.stringify(v));
+  const captureOwner = () => ({ context: api, actor: api.state().me, database: api.database(), firebase: api.firebase(), offline: root.DGOffline, namespace: root.DGOffline.namespace });
+  const ownsOwner = owner => owner && owner.context === api && owner.actor === api.state().me && owner.database === api.database() && owner.firebase === api.firebase() && owner.offline === root.DGOffline && owner.offline.ready && owner.namespace === owner.offline.namespace;
   function warn(error) { const message = error && error.message || '초안을 보관하지 못했어요. 저장 공간을 확인해 주세요.'; if (message !== autosaveError) api.toast(message); autosaveError = message; }
-  function syncMemo(d) { const m = Q('#iMemo'); if (d && api.activeDraft() === d && m) d.memo = m.value; return d; }
+  function syncMemo(d) { const m = Q('#iMemo'); if (d && api.activeDraft() === d && m) d.memo = m.value; if (typeof root.syncInspectionEvidence === 'function') root.syncInspectionEvidence(d); return d; }
   function persistDraft() {
     if (!root.DGOffline.ready) return Promise.resolve();
+    const owner = captureOwner();
     const d = syncMemo(api.activeDraft());
     if (!d || !d.lightId) return Promise.resolve();
     const id = d.lightId, dirty = api.draftDirty(d), value = dirty ? copy(d) : null;
     if (dirty) api.drafts()[id] = d; else delete api.drafts()[id];
     memoryPending = memoryPending || dirty;
     draftWrite = draftWrite.catch(() => {}).then(async () => {
-      if (value) await root.DGOffline.put('draft', id, value); else await root.DGOffline.remove('draft', id);
+      if (!ownsOwner(owner)) return false;
+      if (value) await owner.offline.put('draft', id, value); else await owner.offline.remove('draft', id);
+      if (!ownsOwner(owner)) return false;
       autosaveError = '';
       const status = Q('#dgDraftState');
-      if (status) status.textContent = value ? root.DGOffline.durable ? '이 기기에 초안을 보관했어요.' : '현재 창에 초안을 보관했어요. 창을 닫으면 지워져요.' : '';
+      if (status && api.activeDraft() === d) status.textContent = value ? owner.offline.durable ? '이 기기에 초안을 보관했어요.' : '현재 창에 초안을 보관했어요. 창을 닫으면 지워져요.' : '';
+      return true;
     });
     return draftWrite;
   }
@@ -41,7 +47,9 @@
     if (current.on && patrolSnapshot() && !await ask('현재 순찰을 기기에 보관한 초안으로 바꿀까요?', { ok: '초안으로 바꾸기', cancel: '현재 순찰 유지' })) return;
     api.resumePatrol(saved); api.toast('이전 순찰을 불러왔어요. 이동 기록은 정지 상태로 시작해요.');
   }
-  async function finishInspection(job) {
+  async function finishInspection(job, owner = captureOwner()) {
+    const current = () => ownsOwner(owner) && (!Object.hasOwn(job.rec, 'inspector') || job.rec.inspector === owner.actor);
+    if (!current()) return;
     if (finishing.has(job.id)) return finishing.get(job.id);
     const pending = (async () => {
       const id = job.rec.lightId, active = syncMemo(api.activeDraft()), d = api.drafts()[id] || (active && active.lightId === id ? active : null);
@@ -49,39 +57,54 @@
       if (d && api.inspectionDraftKey(d) === job.key) {
         if (api.drafts()[id] === d) delete api.drafts()[id];
         if (active === d) { api.setDraft(null); api.closeSheet(); }
-      } else if (d) await root.DGOffline.put('draft', id, d);
-      const stored = await root.DGOffline.get('draft', id);
-      if (stored && api.inspectionDraftKey(stored) === job.key) await root.DGOffline.remove('draft', id);
-      else if (stored && stored.__saveJob && stored.__saveJob.id === job.id) { delete stored.__saveJob; await root.DGOffline.put('draft', id, stored); }
+      } else if (d) await owner.offline.put('draft', id, d);
+      if (!current()) return;
+      const stored = await owner.offline.get('draft', id);
+      if (!current()) return;
+      if (stored && api.inspectionDraftKey(stored) === job.key) await owner.offline.remove('draft', id);
+      else if (stored && stored.__saveJob && stored.__saveJob.id === job.id) { delete stored.__saveJob; await owner.offline.put('draft', id, stored); }
+      if (!current()) return;
       api.render(); await root.DGOperations.refreshQueue();
     })();
     finishing.set(job.id, pending); try { await pending; } finally { finishing.delete(job.id); }
   }
   async function saveInspection() {
+    const owner = captureOwner();
     const source = syncMemo(api.activeDraft()); if (!source) return;
     const light = api.byId(source.lightId); if (!light) return;
+    const generation = api.navGen?.(), lightKey = JSON.stringify([light.id, light.code, light.dong, !!light.removed]);
+    const permitted = () => ownsOwner(owner) && api.can('inspect') && api.state().canWrite;
+    const formCurrent = () => {
+      if (!permitted() || api.activeDraft() !== source || source.lightId !== light.id || generation != null && !(api.navAlive ? api.navAlive(generation) : api.navGen?.() === generation)) return false;
+      const latest = api.byId(light.id);
+      return !!latest && !latest.removed && JSON.stringify([latest.id, latest.code, latest.dong, !!latest.removed]) === lightKey;
+    };
     if (!api.can('inspect') || !api.state().canWrite) return api.toast('점검 저장 권한을 확인해 주세요.');
     if (!root.DGOffline.ready) return api.toast('저장 대기함을 준비하는 중이에요. 잠시 뒤 다시 저장해 주세요.');
     if (busy.has(light.id)) return api.toast('이 시설의 저장 요청을 처리하는 중이에요.');
     let job = source.__saveJob;
     if (!job) {
       const missing = api.checks().filter(([key]) => !source.checks[key]);
-      if (missing.length && !await ask('점검표 ' + missing.length + '개 항목이 비어 있어요. 나머지를 양호로 기록하고 저장할까요?', { ok: '양호로 기록하고 저장', cancel: '돌아가기' })) return;
-      for (const [key] of missing) source.checks[key] = 'ok';
+      if (missing.length && !await ask('점검표 ' + missing.length + '개 항목이 비어 있어요. 미실시로 남기며 정식 점검일은 갱신하지 않아요. 메모에 미실시 사유를 적어 주세요.', { ok: '미실시로 기록하고 저장', cancel: '돌아가기' })) return;
+      if (!formCurrent()) return;
+      for (const [key] of missing) source.checks[key] = 'uninspected';
       if (!source.result) api.suggestResult();
       if (!source.result) return api.toast('점검 결과를 선택해 주세요.');
-      job = api.newInspectionJob(light, source); source.__saveJob = job;
+      try { job = api.newInspectionJob(light, source); source.__saveJob = job; } catch (error) { warn(error); return; }
     }
+    if (!formCurrent() || Object.hasOwn(job.rec, 'inspector') && job.rec.inspector !== owner.actor) return;
     const button = Q('#saveInsp'); if (button) { button.disabled = true; button.textContent = '저장 확인 중…'; }
     busy.add(light.id); api.drafts()[light.id] = source;
     try {
       await persistDraft();
-      const result = await root.DGOffline.submit('inspection', job, { id: job.id, summary: '점검 · ' + light.code, retry: true });
-      if (result.state === 'synced') { await finishInspection(job); api.toast('점검 결과를 저장했어요.' + (api.drafts()[light.id] ? ' 이후 수정한 내용은 초안으로 유지돼요.' : '')); }
+      if (!permitted()) return;
+      const result = await owner.offline.submit('inspection', job, { id: job.id, summary: '점검 · ' + light.code, retry: true });
+      if (!ownsOwner(owner)) return;
+      if (result.state === 'synced') { await finishInspection(job, owner); if (ownsOwner(owner)) api.toast('점검 결과를 저장했어요.' + (api.drafts()[light.id] ? ' 이후 수정한 내용은 초안으로 유지돼요.' : '')); }
       else if (['failed', 'conflict'].includes(result.state)) api.toast(result.error + ' 저장 대기함에서 확인해 주세요.');
       else api.toast(root.DGOffline.durable ? '점검을 기기에 보관했어요. 저장 대기함에서 전송 상태를 확인할 수 있어요.' : '전송을 기다리고 있어요. 완료 전에는 이 창을 닫지 마세요.');
-    } catch (error) { warn(error); }
-    finally { busy.delete(light.id); const current = Q('#saveInsp'); if (api.activeDraft() === source && current) { current.disabled = false; current.textContent = '점검 결과 저장'; } }
+    } catch (error) { if (ownsOwner(owner)) warn(error); }
+    finally { busy.delete(light.id); const current = Q('#saveInsp'); if (ownsOwner(owner) && api.activeDraft() === source && current) { current.disabled = false; current.textContent = '점검 결과 저장'; } }
   }
   async function savePatrol() {
     if (!root.DGOffline.ready) return api.toast('저장 대기함을 준비하는 중이에요.');
@@ -103,11 +126,11 @@
   }
   async function hasUnsaved() {
     if (!root.DGOffline.ready) return hasUnsavedSync();
-    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'patrolTargets', 'inventoryDraft', 'workEdit', 'workDraft', 'workCompletion', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(k => root.DGOffline.list(k))]);
+    const [jobs, ...drafts] = await Promise.all([root.DGOffline.jobs(), ...['draft', 'patrol', 'patrolTargets', 'inventoryDraft', 'workEdit', 'workDraft', 'workCompletion', 'assetDraft', 'preventiveDraft', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(k => root.DGOffline.list(k))]);
     memoryPending = jobs.some(j => j.state !== 'synced') || drafts.some(values => values.length);
     return memoryPending || hasActiveDraft();
   }
-  function hasActiveDraft() { return !!api.draftDirty(syncMemo(api.activeDraft())) || !!patrolSnapshot() || !!root.DGOperations?.hasActiveDraft?.() || !!root.DGLightingWorkflows?.hasActiveDraft?.() || !!root.DGLightingAreas?.hasActiveDraft?.(); }
+  function hasActiveDraft() { return !!api.draftDirty(syncMemo(api.activeDraft())) || !!patrolSnapshot() || !!root.DGOperations?.hasActiveDraft?.() || !!root.DGAssetMaintenance?.hasActiveDraft?.() || !!root.DGPreventive?.hasActiveDraft?.() || !!root.DGLightingWorkflows?.hasActiveDraft?.() || !!root.DGLightingAreas?.hasActiveDraft?.(); }
   function hasUnsavedSync() { return memoryPending || hasActiveDraft(); }
   async function ready() {
     try {
@@ -119,7 +142,7 @@
     const saved = await root.DGOffline.list('draft');
     for (const entry of saved) if (entry.value && api.byId(entry.id) && !api.drafts()[entry.id]) api.drafts()[entry.id] = entry.value;
     for (const job of await root.DGOffline.jobs()) if (job.kind === 'patrol' && job.payload && job.state !== 'synced') api.rememberPatrolJob(job.payload);
-    await root.DGOperations.ready(); if (root.DGLighting) await root.DGLighting.ready(); await hasUnsaved(); initialized = true; resolveReady(true); api.render();
+    await root.DGOperations.ready(); if (root.DGLighting) await root.DGLighting.ready(); await root.DGAssetMaintenance?.ready?.(); await root.DGPreventive?.ready?.(); await root.DGFieldKit?.ready?.(); await hasUnsaved(); initialized = true; resolveReady(true); api.render();
     if (saved.length || (await root.DGOffline.list('patrol')).length) api.toast('작성하던 내용이 있어요. 저장 대기함에서 이어 쓸 수 있어요.');
     root.DGOffline.flush().catch(warn);
     clearInterval(patrolTimer); patrolTimer = setInterval(() => persistPatrol().catch(warn), 2500);

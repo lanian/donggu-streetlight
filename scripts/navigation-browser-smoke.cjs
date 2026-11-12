@@ -28,6 +28,20 @@ const PIXEL_NODE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAA
   const depth = page => page.evaluate(() => NAV.stack.map(e => e.key));
   const back = async (page, expect) => { await page.goBack(); await page.waitForFunction(expect); await page.waitForTimeout(80); };
   const poll = async (page, fn, label, arg) => { for (let i = 0; i < 100; i++) { if (await page.evaluate(fn, arg)) return; await page.waitForTimeout(100); } throw new Error('timed out waiting for ' + label); };
+  async function clickVisibleRow(page, row) {
+    const point = await row.evaluate(element => {
+      const r = element.getBoundingClientRect(), s = document.querySelector('#sheet').getBoundingClientRect();
+      const left = Math.max(0, r.left, s.left), right = Math.min(innerWidth, r.right, s.right);
+      const top = Math.max(0, r.top, s.top), bottom = Math.min(innerHeight, r.bottom, s.bottom);
+      if (right <= left || bottom <= top) return null;
+      element.addEventListener('pointerdown', () => { window.__workDepartureScroll = document.querySelector('#sheet').scrollTop; }, { once: true });
+      return { x: (left + right) / 2, y: (top + bottom) / 2 };
+    });
+    assert.ok(point, 'the work row has a visible area a user can activate');
+    // locator.click() scrolls a partly visible row fully into view before clicking. A real pointer can activate its
+    // already visible part, so use viewport coordinates to test restoration of the exact requested scroll position.
+    await page.mouse.click(point.x, point.y);
+  }
   async function scenario(name, run) {
     const page = await context.newPage();
     page.on('pageerror', e => errors.push(name + ': ' + e.message)); page.on('dialog', dialog => dialog.accept()); await page.addInitScript(() => { /* in-app dialogs (app/dialog.js) replaced window.confirm: accept them like the native handler */ new MutationObserver(() => { const ok = document.querySelector('#dgDialog:not([hidden]) [data-dgdlg="ok"]'); if (ok) ok.click(); }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] }); });
@@ -54,7 +68,9 @@ const PIXEL_NODE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAA
       const { lightId, workId } = await createWork(page);
       await page.evaluate(() => openAdminSection('works')); await page.locator('[data-dg="open-work"]').first().waitFor();
       const listScroll = await page.evaluate(() => { document.querySelector('#sheet').scrollTop = 40; return document.querySelector('#sheet').scrollTop; });
-      await page.locator('[data-dg="open-work"][data-id="' + workId + '"]').click(); await page.locator('#woDetail').waitFor();
+      assert.equal(listScroll, 40, 'the list starts at the exact requested scroll position');
+      await clickVisibleRow(page, page.locator('[data-dg="open-work"][data-id="' + workId + '"]')); await page.locator('#woDetail').waitFor();
+      assert.equal(await page.evaluate(() => window.__workDepartureScroll), 40, 'activating the visible row does not scroll the list');
       await page.locator('#woDetail [data-light="' + lightId + '"]').click(); await page.locator('#iMemo').waitFor();
       await page.evaluate(id => { GAL['nav-photo'] = { id: 'nav-photo', lightId: id, code: byId(id).code, label: '전경', data: PIXEL, at: Date.now(), by: 'local' }; openPhotoViewer('nav-photo'); }, lightId);
       await page.locator('#ovl .full').waitFor();
@@ -69,6 +85,18 @@ const PIXEL_NODE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAA
       assert.equal(await page.locator('#sheet .sheet-head .x[data-close]').getAttribute('aria-label'), '닫기');
       await back(page, () => !document.querySelector('#sheet').classList.contains('open'));
       assert.equal(await page.evaluate(() => !history.state || history.state.nav === 0), true, 'the root entry carries no open screen');
+    });
+    await scenario('a work row scrolled into view by the click restores its actual departure position', async page => {
+      const { workId } = await createWork(page);
+      await page.evaluate(() => openAdminSection('works')); const row = page.locator('[data-dg="open-work"][data-id="' + workId + '"]'); await row.waitFor();
+      await row.evaluate(element => { document.querySelector('#sheet').scrollTop = 40; element.addEventListener('pointerdown', () => { window.__workDepartureScroll = document.querySelector('#sheet').scrollTop; }, { once: true }); });
+      // The extra work controls can put this row partly below the viewport. Playwright may scroll before the pointer
+      // lands; navigation must capture and restore that actual departure position, rather than a pre-click assumption.
+      await row.click(); await page.locator('#woDetail').waitFor();
+      const departure = await page.evaluate(() => window.__workDepartureScroll);
+      assert.equal(await page.evaluate(() => NAV.stack[0].scroll), departure, 'navigation captures the position at the actual click');
+      await back(page, () => document.querySelector('[data-dg="open-work"]') && S.asec === 'works');
+      assert.equal(await page.evaluate(() => document.querySelector('#sheet').scrollTop), departure, 'Back restores the actual departure position');
     });
     await scenario('Escape and the back chevron leave one level; a sibling screen of the same kind replaces instead of stacking', async page => {
       const [a, b] = await page.evaluate(() => S.lights.filter(l => Number.isFinite(l.lat)).slice(0, 2).map(l => l.id));

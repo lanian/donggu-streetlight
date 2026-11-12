@@ -7,6 +7,9 @@
   const STATES = { draft: '배정 대기', assigned: '배정됨', in_progress: '작업 중', completed: '검수 대기', verified: '완료', cancelled: '취소' };
   const PRIORITIES = ['긴급', '높음', '보통', '낮음'];
   const TYPES = ['수리', '재점검', '신설검토', '철거', '기타'];
+  const DIAGNOSES = { lamp: '램프', power: '전원', controller: '점멸기', fixture: '등기구', pole: '등주·기초', wiring: '배선', external: '외부 요인', unknown: '원인 미확정' };
+  const REPAIR_ACTIONS = { replace: '부품 교체', repair: '수리', adjust: '조정', restore_power: '전원 복구', inspect: '점검·확인', refer: '관련 기관 이관', none: '현장 조치 없음' };
+  const HOLD_REASONS = { material: '자재 입고 대기', external: '외부 협의', equipment: '장비·인력 필요', weather: '기상·현장 조건', other: '기타' };
   // the registry's columns (data/lights.json); addr/jibun/mgmt/posApprox came with the 2026-09-10 public-data merge
   const FIELDS = ['lampId', 'label', 'code', 'kind', 'dong', 'num', 'road', 'main', 'sub', 'lat', 'lng', 'lampType', 'pole', 'sw', 'removed', 'noPlate', 'dongGuess', 'addr', 'jibun', 'mgmt', 'posApprox'];
   const FLAGS = ['removed', 'noPlate', 'dongGuess', 'posApprox'];
@@ -37,7 +40,8 @@
       assignedTo, dueAt, createdAt: now, createdBy: actor, updatedAt: now, updatedBy: actor, revision: 1,
       reportIds: list(input.reportIds, 20), inspectionIds: list(input.inspectionIds, 20),
       beforePhotos: list(input.beforePhotos, 6), afterPhotos: [], completionNote: '', verificationNote: '',
-      parts: values, costTotal: costTotal(values), accountedCost: 0, measurements: measurements(input.measurements || []), stockApplied: {}
+      parts: values, costTotal: costTotal(values), accountedCost: 0, measurements: measurements(input.measurements || []), stockApplied: {},
+      ...(input.workflowVersion === 2 ? { workflowVersion: 2, acknowledgedAt: 0, acknowledgedBy: '', hold: null, diagnosis: '', repairAction: '' } : {})
     };
   }
   function actions(order, actor, admin) {
@@ -58,6 +62,7 @@
     if (input.type !== undefined) { if (!TYPES.includes(input.type)) fail('작업 종류를 확인해 주세요.'); next.type = input.type; }
     if (input.priority !== undefined) { if (!PRIORITIES.includes(input.priority)) fail('우선순위를 확인해 주세요.'); next.priority = input.priority; }
     if (input.assignedTo !== undefined) next.assignedTo = text(input.assignedTo, 180);
+    if (next.assignedTo !== order.assignedTo) { next.acknowledgedAt = 0; next.acknowledgedBy = ''; next.hold = null; }
     if (next.status !== 'draft' && !next.assignedTo) fail('담당자를 선택해 주세요.');
     if (input.dueAt !== undefined) { next.dueAt = finite(input.dueAt, 0, Number.MAX_SAFE_INTEGER, '완료 기한'); if (!Number.isSafeInteger(next.dueAt)) fail('완료 기한을 확인해 주세요.'); }
     if (input.parts !== undefined) {
@@ -71,8 +76,10 @@
     if (!order || !actions(order, actor, admin).includes(target)) fail('현재 상태 또는 담당자 권한으로 처리할 수 없어요.', 'permission-denied');
     if (Number(input.expectedRevision) !== Number(order.revision)) fail('다른 직원이 작업을 변경했어요. 최신 내용을 확인해 주세요.', 'conflict');
     const next = clone(order); delete next.id;
+    if (order.hold && ['in_progress', 'completed'].includes(target) && order.status !== 'completed') fail('보류를 해제한 뒤 작업을 진행해 주세요.', 'failed-precondition');
     next.status = target; next.revision = order.revision + 1; next.updatedAt = now; next.updatedBy = actor;
     if (admin && input.assignedTo !== undefined) next.assignedTo = text(input.assignedTo, 180);
+    if (next.assignedTo !== order.assignedTo || order.status === 'verified' && target === 'assigned') { next.acknowledgedAt = 0; next.acknowledgedBy = ''; next.hold = null; }
     if (admin && input.dueAt !== undefined) next.dueAt = finite(input.dueAt, 0, Number.MAX_SAFE_INTEGER, '완료 기한');
     if (target === 'assigned' && !next.assignedTo) fail('담당자를 선택해 주세요.');
     if (target === 'completed') {
@@ -80,10 +87,15 @@
       if (!next.afterPhotos.length) fail('조치 후 사진을 한 장 이상 첨부해 주세요.');
       next.completionNote = text(input.completionNote, 2000);
       if (!next.completionNote) fail('조치 내용을 기록해 주세요.');
+      if (order.workflowVersion === 2 || input.diagnosis !== undefined || input.repairAction !== undefined) {
+        if (!Object.hasOwn(DIAGNOSES, input.diagnosis) || !Object.hasOwn(REPAIR_ACTIONS, input.repairAction)) fail('고장 원인과 조치 유형을 선택해 주세요.');
+        next.diagnosis = input.diagnosis; next.repairAction = input.repairAction;
+      }
       next.parts = parts(input.parts || next.parts || []); next.costTotal = costTotal(next.parts);
       next.measurements = measurements(input.measurements || next.measurements || []);
       next.completedAt = now; next.completedBy = actor;
     }
+    if (['verified', 'cancelled'].includes(target)) next.hold = null;
     if (target === 'verified') { next.verificationNote = text(input.verificationNote, 2000); next.verifiedAt = now; next.verifiedBy = actor; }
     if (target === 'in_progress' && order.status === 'completed') {
       next.verificationNote = text(input.verificationNote, 2000);
@@ -94,6 +106,33 @@
       delete next.verifiedAt; delete next.verifiedBy; delete next.completedAt; delete next.completedBy;
     }
     return next;
+  }
+  function workProcess(order, action, input, actor, admin, now) {
+    if (!order || !['assigned', 'in_progress'].includes(order.status) || !actor || (!admin && order.assignedTo !== actor)) fail('현재 작업의 담당자 또는 관리자만 처리할 수 있어요.', 'permission-denied');
+    if (Number(input?.expectedRevision) !== Number(order.revision)) fail('작업이 변경됐어요. 최신 내용을 확인해 주세요.', 'conflict');
+    const next = clone(order); delete next.id;
+    if (action === 'acknowledge') {
+      if (order.assignedTo !== actor) fail('배정받은 담당자만 수신 확인할 수 있어요.', 'permission-denied');
+      next.acknowledgedAt = now; next.acknowledgedBy = actor;
+    } else if (action === 'hold') {
+      const nextAt = Number(input.nextAt), note = text(input.note, 500), nextAction = text(input.nextAction, 500);
+      if (!Object.hasOwn(HOLD_REASONS, input.reason) || !Number.isSafeInteger(nextAt) || nextAt <= now || !nextAction || input.reason === 'other' && !note) fail('보류 사유·다음 확인일·다음 할 일을 입력해 주세요.');
+      next.hold = { reason: input.reason, note, nextAt, nextAction, since: order.hold?.since || now, by: actor };
+    } else if (action === 'resume') {
+      if (!order.hold) fail('현재 보류 중인 작업이 아니에요.'); next.hold = null;
+    } else fail('지원하지 않는 작업 처리예요.');
+    next.revision = order.revision + 1; next.updatedAt = now; next.updatedBy = actor;
+    return next;
+  }
+  function attentionItems(orders, actor, admin, now = Date.now()) {
+    return (orders || []).filter(order => !['verified', 'cancelled'].includes(order.status) && (admin || order.assignedTo === actor)).map(order => {
+      const reasons = [];
+      if (order.assignedTo && ['assigned', 'in_progress'].includes(order.status) && (!order.acknowledgedAt || order.acknowledgedBy !== order.assignedTo)) reasons.push('배정 미확인');
+      if (order.priority === '긴급') reasons.push('긴급');
+      if (order.dueAt && order.dueAt < now) reasons.push('기한 초과'); else if (order.dueAt && order.dueAt <= now + 86400000) reasons.push('기한 임박');
+      if (order.hold?.nextAt <= now) reasons.push('보류 확인일 도래');
+      return { ...order, reasons, urgency: reasons.includes('기한 초과') || reasons.includes('긴급') ? 0 : 1 };
+    }).filter(order => order.reasons.length).sort((a, b) => a.urgency - b.urgency || (a.dueAt || Infinity) - (b.dueAt || Infinity) || a.id.localeCompare(b.id));
   }
   function inspectionState(light, days, now) {
     if (light.removed) return { key: 'removed', label: '철거', priority: 99 };
@@ -283,18 +322,24 @@
     for (const row of base) if (!seen.has(row.id)) missing.push({ ...row, overrideBefore: clone(overrides && overrides[row.id] || {}) });
     return { added, changed, missing, unchanged: incoming.length - added.length - changed.length, incomingCount: incoming.length };
   }
-  function analytics(inspections, orders, reports, lights, from, to, events) {
+  function analytics(inspections, orders, reports, lights, from, to, events, topology = {}) {
     const inRange = t => typeof t === 'number' && t >= from && t <= to;
     const visits = inspections.filter(i => inRange(i.date)), opened = orders.filter(w => inRange(w.createdAt));
     const verified = Array.isArray(events) ? events.filter(e => e.toStatus === 'verified' && inRange(e.at)).map(e => ({ verifiedAt: e.at, createdAt: e.createdAt, cost: Number(e.costDelta == null ? e.costTotal : e.costDelta) || 0 })) : orders.filter(w => w.status === 'verified' && inRange(w.verifiedAt)).map(w => ({ verifiedAt: w.verifiedAt, createdAt: w.createdAt, cost: Number(w.costTotal) || 0 }));
     const unresolved = orders.filter(w => !['verified', 'cancelled'].includes(w.status));
-    const faults = new Map(), circuits = new Map();
+    const faults = new Map(), circuits = new Map(), switchTypes = new Map();
+    const links = new Map((topology.links || []).map(link => [link.lightId || link.id, link.circuitId]));
+    const circuitNames = new Map((topology.circuits || []).map(circuit => [circuit.id, circuit.name || circuit.label || circuit.id]));
+    const nameCounts = new Map(), circuitCodes = new Map((topology.circuits || []).map(circuit => [circuit.id, circuit.code]));
+    for (const name of circuitNames.values()) nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
+    const circuitLabel = id => { const name = circuitNames.get(id); return !name ? '회로 미등록' : nameCounts.get(name) > 1 ? name + ' (' + (circuitCodes.get(id) ? circuitCodes.get(id) + ' · ' : '') + id + ')' : name; };
     const byId = new Map(lights.map(l => [l.id, l]));
     for (const i of visits) {
       if (i.result !== '고장') continue;
       faults.set(i.lightId, (faults.get(i.lightId) || 0) + 1);
-      const l = byId.get(i.lightId), circuit = l && l.sw || '점멸기 미지정';
+      const l = byId.get(i.lightId), linked = links.get(i.lightId), circuit = linked && circuitNames.has(linked) ? linked : null;
       circuits.set(circuit, (circuits.get(circuit) || 0) + 1);
+      const switchType = l && l.sw || '점멸기 종류 미지정'; switchTypes.set(switchType, (switchTypes.get(switchType) || 0) + 1);
     }
     const now = Date.now(), durations = verified.filter(w => w.verifiedAt >= w.createdAt).map(w => (w.verifiedAt - w.createdAt) / 86400000);
     return { inspectionCount: visits.length, uniqueInspected: new Set(visits.map(i => i.lightId)).size,
@@ -304,7 +349,7 @@
       averageDays: durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null,
       pendingReports: reports.filter(r => r.status !== '완료').length,
       repeated: [...faults].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]),
-      circuits: [...circuits].sort((a, b) => b[1] - a[1]) };
+      circuits: [...circuits].sort((a, b) => b[1] - a[1]).map(([id, count]) => [circuitLabel(id), count]), switchTypes: [...switchTypes].sort((a, b) => b[1] - a[1]) };
   }
   function inventoryChange(item, delta, expectedRevision) {
     if (item.revision !== expectedRevision) fail('재고가 변경됐어요. 최신 수량을 확인해 주세요.', 'conflict');
@@ -333,5 +378,5 @@
     for (const row of rows) { row.available = Math.round((row.quantity - row.planned) * 1000) / 1000; row.shortage = Math.max(0, -row.available); row.workIds = [...new Set(row.workIds)]; }
     return { rows, unlinked };
   }
-  return { STATES, PRIORITIES, TYPES, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, updateOrder, transition, inspectionState, kstDateKey, workQuery, filterOrders, distance, planLegs, PLAN_MAX, registryQuality, planVisits, reconcilePlan, normalizeRegistry, registryDiff, analytics, inventoryChange, inventoryForecast };
+  return { STATES, PRIORITIES, TYPES, DIAGNOSES, REPAIR_ACTIONS, HOLD_REASONS, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, updateOrder, transition, workProcess, attentionItems, inspectionState, kstDateKey, workQuery, filterOrders, distance, planLegs, PLAN_MAX, registryQuality, planVisits, reconcilePlan, normalizeRegistry, registryDiff, analytics, inventoryChange, inventoryForecast };
 });

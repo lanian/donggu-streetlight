@@ -19,24 +19,28 @@
   function requireDashboard() { if (!dashboardReady()) throw new Error('선택한 기간을 다시 조회한 뒤 내보내 주세요.'); }
   async function loadDashboard() {
     if (loading) return loading;
+    const owner = { context:api, actor:api.state().me, database:api.database?.(), firebase:api.firebase(), namespace:root.DGOffline?.namespace };
+    const current = () => owner.context===api && owner.actor===api.state().me && owner.database===api.database?.() && owner.firebase===api.firebase() && owner.namespace===root.DGOffline?.namespace;
     const range = state.from + '/' + state.to, b = bounds();
     if (!Number.isFinite(b.from) || !Number.isFinite(b.to) || b.from > b.to) { state.error = '시작일과 종료일을 확인해 주세요.'; notify(); return; }
     state.error = '';
     loading = (async () => {
       try {
         const metadata = [], request = { requireServer: !!api.firebase() && navigator.onLine !== false, onMetadata: value => metadata.push(value) };
-        const [inspections, orders, reports, events] = await Promise.all([
+        const [inspections, orders, reports, events, links, circuits] = await Promise.all([
           api.readAll('inspections', { ...request, where: [['date', '>=', b.from], ['date', '<=', b.to]], orderBy: [['date', 'desc']] }),
           api.readAll('workOrders', request), api.readAll('reports', request),
-          api.readAll('workEvents', { ...request, where: [['at', '>=', b.from], ['at', '<=', b.to]], orderBy: [['at', 'desc']] })
+          api.readAll('workEvents', { ...request, where: [['at', '>=', b.from], ['at', '<=', b.to]], orderBy: [['at', 'desc']] }),
+          api.readAll('assetLinks',request), api.readAll('circuits',request)
         ]);
-        state.analytics = C.analytics(inspections, orders, reports, api.state().lights, b.from, b.to, events);
+        if (!current()) return;
+        state.analytics = C.analytics(inspections, orders, reports, api.state().lights, b.from, b.to, events, { links,circuits });
         const sources = [...new Set(metadata.map(value => value.source))];
         state.dashboardSource = sources.length === 1 ? sources[0] : sources.length > 1 ? 'mixed' : api.state().me === 'local' ? 'local' : request.requireServer ? 'server' : api.firebase() ? 'cache' : 'unknown';
         state.dashboardComplete = metadata.length ? metadata.every(value => value.complete) : ['local', 'server'].includes(state.dashboardSource);
         state.loadedRange = range; state.at = Date.now();
-      } catch (error) { state.error = error.message || '기간 자료를 불러오지 못했어요.'; }
-      finally { loading = null; notify(); }
+      } catch (error) { if(current()) state.error = error.message || '기간 자료를 불러오지 못했어요.'; }
+      finally { loading = null; if(current()) notify(); }
     })();
     return loading;
   }
@@ -46,7 +50,7 @@
     const metrics = a ? [['기간 점검', a.inspectionCount + '건'], ['점검한 시설', a.uniqueInspected + '개'], ['기간 작업 접수', a.opened + '건'], ['기간 검수 완료 횟수', a.verified + '건'], ['현재 미완료 작업', a.unresolved + '건'], ['현재 기한 초과', a.overdue + '건'], ['현재 미처리 신고', a.pendingReports + '건'], ['검수까지 평균 소요일', a.averageDays == null ? '자료 없음' : a.averageDays.toFixed(1) + '일'], ['기간 자재비 증감', a.cost.toLocaleString() + '원']] : [];
     return '<div class="panel"><div class="grid2"><div><label class="f" for="dgDashFrom">시작일</label><input class="f-in" id="dgDashFrom" type="date" value="' + state.from + '"></div><div><label class="f" for="dgDashTo">종료일</label><input class="f-in" id="dgDashTo" type="date" value="' + state.to + '"></div></div><div class="split"><button class="btn sodium" data-mgmt="dashboard-load"' + (loading ? ' disabled' : '') + '>기간 조회</button><button class="btn ghost" data-mgmt="dashboard-csv"' + (!dashboardReady() ? ' disabled' : '') + '>CSV</button><button class="btn ghost" data-mgmt="dashboard-print"' + (!dashboardReady() ? ' disabled' : '') + '>인쇄 / PDF</button></div><p class="muted">기간 자료를 끝까지 조회해 집계해요. 미완료·기한 초과·미처리 신고는 조회 시점 기준이에요. 검수 실적은 변경 불가 이력으로 집계하며, 재검수 자재비는 이전 검수와의 차이(반납은 음수)만 반영해요.</p></div>' +
       (state.error ? '<div class="notice" role="alert">' + E(state.error) + '</div>' : '') + (loading ? '<p role="status">기간 전체 자료를 불러오는 중…</p>' : '') +
-      (a ? '<div id="dgDashboardReport"><h3>' + E(state.loadedRange.replace('/', ' ~ ')) + ' 업무 현황</h3><p class="muted">조회 ' + api.fmtDT(state.at) + ' · ' + E(sourceLabel(state.dashboardSource)) + (state.dashboardComplete ? '' : ' · 참고용 집계') + (stale ? ' · 날짜가 바뀌었어요. 다시 조회해 주세요.' : '') + '</p><div class="dg-metrics">' + metrics.map(([name, value]) => '<div class="panel"><span>' + E(name) + '</span><strong>' + E(value) + '</strong></div>').join('') + '</div><h3>반복 고장 시설</h3><p class="muted">선택 기간에 고장 점검이 두 번 이상 기록된 시설이에요. 원인 확인과 교체 검토 후보로 사용해요.</p>' + (a.repeated.length ? '<div class="list">' + a.repeated.map(([id, n]) => '<button class="light-row" data-light="' + E(id) + '"><b>' + E((api.byId(id) || {}).code || id) + '</b><span>' + n + '회</span></button>').join('') + '</div>' : '<p class="empty">반복 고장 기록이 없어요.</p>') + '<h3>점멸기·회로별 고장 기록</h3><div class="dg-table"><table><thead><tr><th>대장 점멸기</th><th>고장 점검</th></tr></thead><tbody>' + a.circuits.map(([id, n]) => '<tr><td>' + E(id) + '</td><td>' + n + '회</td></tr>').join('') + '</tbody></table></div><p class="muted">대장의 점멸기 값으로 묶은 통계예요. 실제 전기 회로 연결은 현장에서 확인해 주세요.</p></div>' : '');
+      (a ? '<div id="dgDashboardReport"><h3>' + E(state.loadedRange.replace('/', ' ~ ')) + ' 업무 현황</h3><p class="muted">조회 ' + api.fmtDT(state.at) + ' · ' + E(sourceLabel(state.dashboardSource)) + (state.dashboardComplete ? '' : ' · 참고용 집계') + (stale ? ' · 날짜가 바뀌었어요. 다시 조회해 주세요.' : '') + '</p><div class="dg-metrics">' + metrics.map(([name, value]) => '<div class="panel"><span>' + E(name) + '</span><strong>' + E(value) + '</strong></div>').join('') + '</div><h3>반복 고장 시설</h3><p class="muted">선택 기간에 고장 점검이 두 번 이상 기록된 시설이에요. 원인 확인과 교체 검토 후보로 사용해요.</p>' + (a.repeated.length ? '<div class="list">' + a.repeated.map(([id, n]) => '<button class="light-row" data-light="' + E(id) + '"><b>' + E((api.byId(id) || {}).code || id) + '</b><span>' + n + '회</span></button>').join('') + '</div>' : '<p class="empty">반복 고장 기록이 없어요.</p>') + '<h3>확인된 회로별 고장 기록</h3><div class="dg-table"><table><thead><tr><th>확인된 회로</th><th>고장 점검</th></tr></thead><tbody>' + a.circuits.map(([id, n]) => '<tr><td>' + E(id) + '</td><td>' + n + '회</td></tr>').join('') + '</tbody></table></div><p class="muted">확인된 시설·회로 연결로 집계해요. 미등록 시설은 회로 미등록으로 구분하며, 전자식·GPS 같은 점멸기 종류를 실제 회로로 취급하지 않아요.</p></div>' : '');
   }
   function dashboardRows() {
     requireDashboard(); const a = state.analytics;

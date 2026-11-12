@@ -279,10 +279,10 @@ test('analytics uses the entire selected date range and separates period totals 
   for (let i = 0; i < 1300; i++) inspections['later' + i] = { lightId: 'later', result: '정상', date: end + 1 + i };
   const l = local({ inspections }), rows = await l.data.readAll(l.db, 'inspections', { where: [['date', '>=', start], ['date', '<=', end]], orderBy: [['date', 'desc']] });
   const orders = [{ status: 'verified', createdAt: start - 86400000, verifiedAt: start, costTotal: 100 }, { status: 'verified', createdAt: start, verifiedAt: end + 1, costTotal: 999 }, { status: 'assigned', createdAt: start, dueAt: start - 1 }, { status: 'cancelled', createdAt: start - 1 }];
-  const result = C.analytics(rows, orders, [{ status: '접수' }, { status: '완료' }], [{ id: 'p', sw: 'A' }, { id: 'q', sw: 'A' }], start, end);
+  const result = C.analytics(rows, orders, [{ status: '접수' }, { status: '완료' }], [{ id: 'p', sw: 'GPS' }, { id: 'q', sw: 'GPS' }], start, end, undefined, { links: [{ lightId: 'p', circuitId: 'cA' }, { lightId: 'q', circuitId: 'cA' }], circuits: [{ id: 'cA', label: 'A회로' }] });
   assert.equal(result.inspectionCount, 1202); assert.equal(result.uniqueInspected, 3); assert.equal(result.opened, 2); assert.equal(result.verified, 1);
   assert.equal(result.cost, 100); assert.equal(result.averageDays, 1); assert.equal(result.unresolved, 1); assert.equal(result.pendingReports, 1);
-  assert.equal(result.circuits[0][1], 1201); assert.deepEqual(result.repeated.map(x => x[1]).sort((a, b) => a - b), [600, 601]);
+  assert.deepEqual(result.circuits[0], ['A회로', 1201]); assert.deepEqual(result.switchTypes[0], ['GPS', 1201]); assert.deepEqual(result.repeated.map(x => x[1]).sort((a, b) => a - b), [600, 601]);
 });
 
 test('offline timeout retains one running immutable command and eventually removes its sensitive payload', async () => {
