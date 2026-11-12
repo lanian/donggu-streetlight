@@ -449,9 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v73-maintenance-prep";
+const APP_VER="v73-maintenance";
 const RELEASE_NOTES=[
-  {v:"v73-maintenance-prep",d:"2026-11-12",t:"미배포 후보: 배정·보류, 분전함·공동 장애, 점검 증빙·정기점검·부품 이력·출동 자료 통합"},
+  {v:"v73-maintenance",d:"2026-11-12",t:"배정 확인·보류, 분전함·공동 장애, 점검 증빙·정기점검·부품 이력·오프라인 출동 자료 추가"},
   {v:"v72-vehicle-routes",d:"2026-11-09",t:"방문계획 차량 노선 공개 · 남은 시설을 구간별로 나누고 카카오·네이버 길찾기로 연결"},
   {v:"v71-ledger-connector",d:"2026-11-09",t:"접수대장 연결 준비 화면 공개 · 기간·전체 수신 검토, 실제 조회는 미연결"},
   {v:"v70-report-import",d:"2026-11-08",t:"운영 신고 파일 검토 준비 화면 공개 · 실서비스 연결과 운영 반입은 차단 유지"},
