@@ -38,12 +38,46 @@ const poll = async (page, fn, arg) => { for (let i = 0; i < 150; i++) { if (awai
     const cabinetId = await page.evaluate(async () => (await db.readAll('cabinets'))[0].id);
     await page.evaluate(() => DGAssetMaintenance.open()); await page.locator('[data-am="new-circuit"]').click();
     await page.locator('#amCabinet').selectOption(cabinetId); await page.locator('#amCode').fill('C-UI'); await page.locator('#amLabel').fill('북측 실제 회로');
+    // Hold the confirmed save before its draft cleanup/cache reload. A user may open
+    // the next editor as soon as the circuit is committed, before this follow-up finishes.
+    await page.evaluate(() => {
+      const get = DGOffline.get, remove = DGOffline.removeIfCurrent;
+      window.circuitRace = { draftId: DGAssetMaintenance.state.draft.storageId, held: false, cleaned: false, release: null, get, remove };
+      DGOffline.get = async (...args) => {
+        const value = await get(...args);
+        if (args[0] === 'assetDraft' && args[1] === circuitRace.draftId && value?.pending && !circuitRace.held) {
+          circuitRace.held = true; return new Promise(resolve => { circuitRace.release = () => resolve(value); });
+        }
+        return value;
+      };
+      DGOffline.removeIfCurrent = async (...args) => {
+        const value = await remove(...args);
+        if (args[0] === 'assetDraft' && args[1] === circuitRace.draftId) circuitRace.cleaned = true;
+        return value;
+      };
+    });
     await page.locator('[data-am="save"]').click(); await poll(page, async () => (await db.readAll('circuits')).length === 1);
+    await poll(page, () => circuitRace.held);
     const circuitId = await page.evaluate(async () => (await db.readAll('circuits'))[0].id);
     for (const lightId of await page.evaluate(() => assetLights)) {
       await page.evaluate(id => DGAssetMaintenance.edit('link', id, { lightId: id }), lightId);
-      await page.locator('#amCabinet').selectOption(cabinetId); await page.locator('#amCircuit').selectOption(circuitId);
-      await page.locator('#amConfirmation').fill('현장 연결 대장으로 확인'); await page.locator('[data-am="save"]').click();
+      await page.locator('#amCabinet').selectOption(cabinetId);
+      assert.equal(await page.locator('#amCircuit option').evaluateAll((options, id) => options.some(option => option.value === id), circuitId), true, 'A committed circuit must be selectable before the earlier save finishes draft cleanup');
+      await page.locator('#amCircuit').selectOption(circuitId);
+      await page.locator('#amConfirmation').fill('현장 연결 대장으로 확인');
+      if (await page.evaluate(() => !!circuitRace.release)) {
+        const token = await page.locator('#amForm').getAttribute('data-token');
+        await page.evaluate(async () => { await DGAssetMaintenance.persistActive(); const release = circuitRace.release; circuitRace.release = null; release(); });
+        await poll(page, () => circuitRace.cleaned && !DGAssetMaintenance.state.loading);
+        assert.equal(await page.locator('#amForm').getAttribute('data-token'), token, 'Late save refresh cannot replace the new link editor');
+        assert.equal(await page.locator('#amCabinet').inputValue(), cabinetId);
+        assert.equal(await page.locator('#amCircuit').inputValue(), circuitId);
+        assert.equal(await page.locator('#amConfirmation').inputValue(), '현장 연결 대장으로 확인');
+        assert.equal(await page.locator('#amConfirmation').evaluate(el => el === document.activeElement), true);
+        await page.evaluate(() => { DGOffline.get = circuitRace.get; DGOffline.removeIfCurrent = circuitRace.remove; });
+        checks.push('a committed circuit is available during delayed save cleanup and late refresh preserves the active link draft and focus');
+      }
+      await page.locator('[data-am="save"]').click();
       await poll(page, async id => (await db.doc('assetLinks/' + id).get()).exists, lightId);
     }
     assert.equal(await page.evaluate(() => DGAssetMaintenance.circuitOf(assetLights[0])), circuitId);

@@ -149,7 +149,9 @@
   }
   async function edit(entity, recordId, prefill = {}, resumed) {
     const owner = ownerScope(), request = ++sequence, gen = api.navGen?.(), current = () => request === sequence && owns(owner) && (gen == null || api.navAlive(gen));
-    await persistActive(); if (!current()) return; await load(); if (!current()) return;
+    // A confirmed save may still be cleaning its draft while the next editor opens.
+    // Join an in-flight read with a fresh pass so old circuit options cannot win.
+    await persistActive(); if (!current()) return; await load(true); if (!current()) return;
     const old = recordId && record(entity, recordId); if (recordId && !old && !prefill.lightId && !resumed) throw new Error('자료를 찾을 수 없어요. 새로고침 후 다시 확인해 주세요.');
     const id = recordId || uid('asset-' + entity), stored = resumed || await root.DGOffline.get(KIND, entity + '-' + id); if (!current()) return;
     const data = old ? payload(entity, old) : defaults(entity, prefill);
