@@ -1,7 +1,7 @@
 /* Administrator restore planning. No backend starts until prepareBackup is called. */
 (function(root,factory){const api=factory(root);if(typeof module==='object'&&module.exports)module.exports=api;root.DGRestore=api;})(typeof globalThis==='object'?globalThis:this,function(root){
   'use strict';
-  const PRIMARY=['workOrders','workEvents','inventory','inventoryMoves','reportEvents','lightingTasks','lightingRuns'];
+  const PRIMARY=['workOrders','workEvents','inventory','inventoryMoves','reportEvents','lightingTasks','lightingRuns','cabinets','circuits','assetLinks','outageIncidents','assetReplacements','assetOperations','preventivePlans','preventiveRuns','preventiveOperations','inspectionDetails','inspectionMeasurements'];
   const EXCLUDED=['restoreOperations','systemHealth','lightingOperations','lightingWorkflowOperations','lightingAreaOperations','auditEvents'];
   const MAX_DOCUMENTS=200,MAX_BYTES=4*1024*1024;
   const uuid=()=> 'restore-'+(root.crypto?.randomUUID?root.crypto.randomUUID():Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));
@@ -11,8 +11,11 @@
     for(const c of PRIMARY)if(Array.isArray(original[c])&&original[c].length)collections[c]=original[c];
     if(!Object.keys(collections).length)return null;
     const wanted={photos:new Set(),reports:new Set(),lightingContext:new Set(),inspections:new Set()};
+    for(const proof of collections.inspectionDetails||[])wanted.inspections.add(proof.inspectionId);
+    for(const measurement of collections.inspectionMeasurements||[])wanted.inspections.add(measurement.inspectionId);
     for(const w of collections.workOrders||[]){for(const p of [...(w.beforePhotos||[]),...(w.afterPhotos||[])])wanted.photos.add(p);for(const r of w.reportIds||[])wanted.reports.add(r);for(const i of w.inspectionIds||[])wanted.inspections.add(i);}
     for(const e of collections.reportEvents||[])wanted.reports.add(e.reportId);
+    for(const incident of collections.outageIncidents||[])for(const id of incident.reportIds||[])wanted.reports.add(id);
     for(const t of collections.lightingTasks||[])if(t.status==='completed'&&t.observationId)wanted.lightingContext.add(t.observationId);
     for(const i of original.inspections||[])if(wanted.inspections.has(i.id))for(const t of i.thumbs||[])if(t.id)wanted.photos.add(t.id);
     for(const[c,ids]of Object.entries(wanted)){const values=(original[c]||[]).filter(r=>ids.has(r.id));if(values.length)collections[c]=values;}

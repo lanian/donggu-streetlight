@@ -78,6 +78,8 @@ const photo = { name: 'proof.png', mimeType: 'image/png', buffer: Buffer.from('i
     await page.locator('[data-dg="transition-work"][data-status="in_progress"]').click();
     await page.locator('#woCompletionNote').waitFor();
     await page.locator('#woCompletionNote').fill('LED 모듈 교체 후 점등 정상 확인');
+    await page.locator('#woDiagnosis').selectOption('lamp');
+    await page.locator('#woRepairAction').selectOption('replace');
     await page.locator('#woAfter').setInputFiles(photo); await page.waitForFunction(() => DGOperations.state.completion.photos.length === 1);
     await page.locator('#woStockPart').selectOption(itemId); await page.locator('#woPartQty').fill('2');
     await page.locator('[data-dg="add-part"]').click();

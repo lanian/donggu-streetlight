@@ -39,12 +39,12 @@ test('the real photo appendix renders 100 selected photos for print at every siz
 });
 
 function management() {
-  const scheduled = [], listeners = {}, downloads = [], messages = [], reads = [];
+  const scheduled = [], listeners = {}, downloads = [], messages = [], reads = [], backend = {};
   let fail = false, section = 'dashboard';
   const fields = { '#dgDashFrom': { value: '2026-10-01' }, '#dgDashTo': { value: '2026-10-25' } };
   const context = vm.createContext({ console, Date, Promise, setTimeout: fn => scheduled.push(fn), navigator: { onLine: false }, document: { querySelector: key => fields[key], addEventListener: (event, handler) => listeners[event] = handler }, DGOperationsCore: require('../../app/operations-core.js'), DGOffline: { register() {} }, DGOperations: { download: async (...values) => downloads.push(values) } });
   vm.runInContext(source('app/management.js'), context);
-  const api = { esc: String, state: () => ({ me: 'staff', lights: [], names: {} }), firebase: () => ({}), can: () => true, fmtDT: String, toast: message => messages.push(message), render: () => { if (section === 'audit') context.DGManagement.auditView(); }, readAll: async (collection, options) => { reads.push(collection); if (fail) throw new Error('permission-denied'); options.onMetadata?.({ source: context.navigator.onLine ? 'server' : 'cache', complete: !!context.navigator.onLine }); return []; } };
+  const api = { esc: String, state: () => ({ me: 'staff', lights: [], names: {} }), firebase: () => backend, can: () => true, fmtDT: String, toast: message => messages.push(message), render: () => { if (section === 'audit') context.DGManagement.auditView(); }, readAll: async (collection, options) => { reads.push(collection); if (fail) throw new Error('permission-denied'); options.onMetadata?.({ source: context.navigator.onLine ? 'server' : 'cache', complete: !!context.navigator.onLine }); return []; } };
   context.DGManagement.attach(api);
   const click = action => { listeners.click({ target: { closest: () => ({ dataset: { mgmt: action } }) } }); return settle(); };
   return { context, manager: context.DGManagement, scheduled, reads, downloads, messages, click, setFail: value => { fail = value; }, section: value => { section = value; } };

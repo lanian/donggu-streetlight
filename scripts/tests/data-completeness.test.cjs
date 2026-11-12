@@ -6,7 +6,7 @@ const {webcrypto}=require('node:crypto');
 const html=readSource(path.resolve(__dirname,'../../index.html'),'utf8');
 const dataJS=readSource(path.resolve(__dirname,'../../app/data.js'),'utf8');
 const clone=x=>JSON.parse(JSON.stringify(x));
-function context(extra={}){const security=require('../../security.js'),c=vm.createContext({console,Date,Math,Blob,crypto:webcrypto,window:{},FB:null,S:{me:'staff'},render(){},toast(){},confirm:()=>true,dgConfirm:async()=>true,resolveNames(){},...security,DGSecurity:security,...extra});vm.runInContext(dataJS,c);c.listAllRecords=(name,opts)=>c.DGData.readAll(c.db,name,opts);return c}
+function context(extra={}){const security=require('../../security.js'),c=vm.createContext({console,Date,Math,Blob,crypto:webcrypto,window:{},FB:null,S:{me:'staff'},DGInspectionCore:require('../../app/inspection-core.js'),render(){},toast(){},confirm:()=>true,dgConfirm:async()=>true,resolveNames(){},...security,DGSecurity:security,...extra});vm.runInContext(dataJS,c);c.listAllRecords=(name,opts)=>c.DGData.readAll(c.db,name,opts);return c}
 function load(c,start,end){const a=html.indexOf(start),b=html.indexOf(end,a);assert(a>=0&&b>a,start);vm.runInContext(html.slice(a,b),c)}
 function backing(initial={}){let data=JSON.stringify(initial);return{fail:false,getItem:()=>data,setItem(key,value){if(this.fail)throw Object.assign(new Error('quota'),{name:'QuotaExceededError'});data=value},dump:()=>JSON.parse(data)}}
 function local(initial={}){const storage=backing(initial),c=context();return{storage,db:c.DGData.createLocalDB({storage}),api:c.DGData}}
@@ -134,8 +134,9 @@ test('a cross-store import repairs a failed raw marker and preserves an already 
   await db.doc('reports/'+rows[0].id).update({status:'완료'});raw.fail(null);await c.importCitizenReports();rows=await c.listAllRecords('reports');assert.equal(rows.length,1);assert.equal(rows[0].status,'완료');assert.equal(raw.records['citizen_reports/raw'].imported,true);
 });
 
-test('an offline inspection rejected as stale retries only the immutable evidence',async()=>{
+test('an offline inspection transaction refreshes its decision after a concurrent newer inspection',async()=>{
   const f=firestore({'lights/p':{status:'정상',lastInspected:1,updatedAt:1}}),c=context({db:f.db,FB:{fs:f.db},S:{me:'u'},byId:()=>({id:'p'}),repSlots:()=>({}),GAL:{}});appStorage(c);load(c,'async function inspectionOperations(job,server=false){','async function saveInspection');
-  const real=f.db.batch;let attempts=0;f.db.batch=()=>{const b=real();return{set:(...args)=>b.set(...args),commit:async()=>{attempts++;if(attempts===1){f.records['lights/p']={status:'고장',lastInspected:30,updatedAt:30};throw Object.assign(Error('older pending write'),{code:'permission-denied'})}await b.commit()}}};
+  const real=f.db.runTransaction.bind(f.db);let attempts=0;
+  f.db.runTransaction=async callback=>{for(;;){attempts++;try{return await real(async tx=>callback({get:async ref=>{const snap=await tx.get(ref);if(attempts===1){f.records['lights/p']={status:'고장',lastInspected:30,updatedAt:30};throw Object.assign(Error('transaction read changed'),{code:'aborted'})}return snap},set:(...args)=>tx.set(...args)}))}catch(error){if(error.code!=='aborted'||attempts>=3)throw error}}};
   await c.commitInspectionJob({id:'offline',rec:{lightId:'p',result:'정상',date:10,inspector:'u'},photos:[],fill:[],reps:{}});assert.equal(attempts,2);assert.equal(f.records['inspections/offline'].result,'정상');assert.equal(f.records['lights/p'].lastInspected,30);assert.equal(f.records['lights/p'].status,'고장');
 });

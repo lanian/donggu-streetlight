@@ -15,7 +15,7 @@ function section(start, end) {
   return html.slice(a, b);
 }
 function context(values = {}) {
-  const c = vm.createContext({ console, Date, Math, crypto: webcrypto, window: {}, FB: null, S: {me:'staff'}, fetch: async()=>{throw new Error('test has no network')}, ...require('../../security.js'), ...values });
+  const c = vm.createContext({ console, Date, Math, crypto: webcrypto, window: {}, FB: null, S: {me:'staff'}, DGInspectionCore: require('../../app/inspection-core.js'), fetch: async()=>{throw new Error('test has no network')}, ...require('../../security.js'), ...values });
   vm.runInContext(dataSource,c);c.listAllRecords=(name,options)=>c.DGData.readAll(c.db,name,options);return c;
 }
 function load(ctx, start, end) { vm.runInContext(section(start, end), ctx); }
@@ -70,6 +70,11 @@ function memoryDb(initial = {}) {
           if (control.loseBatchAck) { control.loseBatchAck = false; throw new Error('simulated lost acknowledgement'); }
         },
       };
+    },
+    async runTransaction(callback) {
+      const batch = db.batch(); let writes = false;
+      await callback({ get: async ref => { assert.equal(writes, false, 'transaction reads precede writes'); return ref.get(); }, set: (ref, value, options) => { writes = true; batch.set(ref, value, options); } });
+      return batch.commit();
     },
   };
   return { db, records, control };

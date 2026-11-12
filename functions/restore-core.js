@@ -1,10 +1,11 @@
 'use strict';
 const crypto = require('node:crypto');
 const { InputError } = require('./core');
+const Essential = require('./essential-restore');
 const MAX_DOCUMENTS = 200, MAX_BYTES = 4 * 1024 * 1024;
-const PRIMARY = ['workOrders', 'workEvents', 'inventory', 'inventoryMoves', 'reportEvents', 'lightingTasks', 'lightingRuns'];
+const PRIMARY = ['workOrders', 'workEvents', 'inventory', 'inventoryMoves', 'reportEvents', 'lightingTasks', 'lightingRuns', ...Essential.COLLECTIONS];
 const DEPENDENCIES = ['photos', 'reports', 'inspections', 'lightingContext'];
-const IMMUTABLE = new Set(['workEvents', 'inventoryMoves', 'reportEvents', 'lightingRuns']);
+const IMMUTABLE = new Set(['workEvents', 'inventoryMoves', 'reportEvents', 'lightingRuns', ...Essential.IMMUTABLE]);
 const STATES = ['draft', 'assigned', 'in_progress', 'completed', 'verified', 'cancelled'];
 const fail = (message, code = 'invalid-argument') => { throw new InputError(message, code); };
 const plain = v => !!v && typeof v === 'object' && !Array.isArray(v) && [Object.prototype, null].includes(Object.getPrototypeOf(v));
@@ -38,8 +39,10 @@ function validate(collection, d) {
   const inspect = (v, depth = 0) => { if (depth > 20) fail('복원 자료가 너무 깊어요.'); if (v && typeof v === 'object') { if (!Array.isArray(v) && !plain(v)) fail('복원 객체 형식을 확인해 주세요.'); for (const k of Object.keys(v)) { if (['__proto__', 'constructor', 'prototype'].includes(k)) fail('허용되지 않은 복원 필드입니다.'); inspect(v[k], depth + 1); } } else canonical(v); };
   inspect(d);
   if (Buffer.byteLength(canonical(d)) > 950000) fail('개별 복원 문서가 너무 커요.');
+  if (Essential.COLLECTIONS.includes(collection)) return Essential.validate(collection,d,{keys,text,id,integer,number,choice,ids,meta,fail,digest});
   if (collection === 'workOrders') {
-    keys(d, ['schemaVersion','lightId','code','dong','title','description','type','priority','status','assignedTo','dueAt','createdAt','createdBy','updatedAt','updatedBy','revision','reportIds','inspectionIds','beforePhotos','afterPhotos','completionNote','completedAt','completedBy','verificationNote','verifiedAt','verifiedBy','parts','costTotal','measurements','stockApplied','accountedCost'], ['schemaVersion','lightId','title','type','priority','status','assignedTo','createdAt','createdBy','updatedAt','updatedBy','revision','reportIds','inspectionIds','beforePhotos','afterPhotos','parts','costTotal','measurements']);
+    keys(d, ['schemaVersion','lightId','code','dong','title','description','type','priority','status','assignedTo','dueAt','createdAt','createdBy','updatedAt','updatedBy','revision','reportIds','inspectionIds','beforePhotos','afterPhotos','completionNote','completedAt','completedBy','verificationNote','verifiedAt','verifiedBy','parts','costTotal','measurements','stockApplied','accountedCost','workflowVersion','acknowledgedAt','acknowledgedBy','hold','diagnosis','repairAction'], ['schemaVersion','lightId','title','type','priority','status','assignedTo','createdAt','createdBy','updatedAt','updatedBy','revision','reportIds','inspectionIds','beforePhotos','afterPhotos','parts','costTotal','measurements']);
+    Essential.work(d,{keys,text,integer,choice,fail});
     if (d.schemaVersion !== 1) fail('작업 스키마를 확인해 주세요.'); id(d.lightId); text(d.title, 200, true); text(d.createdBy, 128, true); text(d.updatedBy, 128, true); text(d.assignedTo, 128);
     integer(d.createdAt, 1); integer(d.updatedAt, d.createdAt); integer(d.revision, 1); integer(d.dueAt);
     choice(d.status, STATES); choice(d.type, ['수리','재점검','신설검토','철거','기타']); choice(d.priority, ['긴급','높음','보통','낮음']);
@@ -75,6 +78,7 @@ function validate(collection, d) {
   } else if (collection === 'reports') {
     choice(d.status, ['접수','처리중','완료']); if (d.lightId) id(d.lightId); if (d.workId) id(d.workId); integer(d.createdAt, 1); if (d.updatedAt !== undefined) integer(d.updatedAt, 1); if (d.linkRevision !== undefined) integer(d.linkRevision, 1); if (d.linkEventId) id(d.linkEventId);
   } else if (collection === 'inspections') {
+    Essential.inspection(d,{keys,text,integer,number,choice,fail});
     id(d.lightId); text(d.inspector,128,true); integer(d.date,1); choice(d.result,['정상','점검필요','고장','수리중']);
     if (d.thumbs !== undefined) { if (!Array.isArray(d.thumbs)||d.thumbs.length>6) fail('점검 사진 목록을 확인해 주세요.'); for(const t of d.thumbs){id(t.id);text(t.t,900000,true);if(!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(t.t))fail('점검 썸네일이 올바르지 않아요.');} }
   } else if (collection === 'lightingContext') {
@@ -131,7 +135,7 @@ function references(entries) {
     if (e.collection === 'inspections') for(const t of d.thumbs||[])add('photos',t.id);
     if (e.collection === 'lightingTasks' && d.status === 'completed') add('lightingContext',d.observationId);
   }
-  return [...paths];
+  return [...new Set([...paths,...Essential.references(entries)])];
 }
 function materialize(plan, current) {
   const result = new Map(current), writes = [], counts = { restored:0, added:0, replaced:0, skipped:0 };
@@ -174,7 +178,7 @@ function validateGraph(plan, current) {
     if(e.collection==='inventoryMoves'){const item=need('inventory/'+d.itemId,'입출고 대상 자재가 빠졌어요');if(d.revision>item.revision)fail('입출고 revision이 재고보다 큽니다.','failed-precondition');if(d.workId)need('workOrders/'+d.workId,'입출고 작업이 빠졌어요');}
     if(e.collection==='reportEvents'){const report=need('reports/'+d.reportId,'연결 이력의 신고가 빠졌어요');if(d.revision>(report.linkRevision||0))fail('신고 연결 이력 revision이 올바르지 않아요.','failed-precondition');}
     if(e.collection==='reports'&&d.workId){const w=need('workOrders/'+d.workId,'신고의 연결 작업이 빠졌어요');if(w.lightId!==d.lightId||!w.reportIds.includes(e.id))fail('신고와 작업 연결이 일치하지 않아요.','failed-precondition');}
-    if(e.collection==='inspections')for(const t of d.thumbs||[]){const p=need('photos/'+t.id,'점검 원본 사진이 빠졌어요');if(p.inspectionId!==e.id||p.lightId!==d.lightId||p.by!==d.inspector||p.kind!=='inspection')fail('점검 사진의 시설·작성자 연결이 다릅니다.','failed-precondition');}
+    if(e.collection==='inspections')for(const t of d.thumbs||[]){const p=need('photos/'+t.id,'점검 원본 사진이 빠졌어요');if((p.inspId??p.inspectionId)!==e.id||(p.inspId!==undefined&&p.inspectionId!==undefined&&p.inspId!==p.inspectionId)||p.lightId!==d.lightId||p.by!==d.inspector||p.kind!=='inspection')fail('점검 사진의 시설·작성자 연결이 다릅니다.','failed-precondition');}
     if(e.collection==='lightingTasks'&&d.status==='completed'){
       const o=need('lightingContext/'+d.observationId,'재확인 업무의 현장 관찰이 빠졌어요');
       const active=o.schedule==='always'||o.schedule==='hours'&&(o.startMinute<o.endMinute?d.reviewMinute>=o.startMinute&&d.reviewMinute<o.endMinute:d.reviewMinute>=o.startMinute||d.reviewMinute<o.endMinute);
@@ -182,6 +186,7 @@ function validateGraph(plan, current) {
       if(o.kind!=='observation'||o.removed||!o.nightConfirmed||!['bright','adequate','dark'].includes(o.level)||o.observedAt<d.createdAt-300000||o.observedAt+o.validDays*86400000<d.completedAt||distance>d.radius+o.radius||!active)fail('재확인 완료의 관찰 근거가 유효하지 않아요.','failed-precondition');
     }
   }
+  Essential.graph(plan.entries,data,{fail,canonical});
   return prepared;
 }
 module.exports={MAX_DOCUMENTS,MAX_BYTES,PRIMARY,DEPENDENCIES,IMMUTABLE,fail,plain,canonical,hash,id,normalize,validate,references,materialize,validateGraph};

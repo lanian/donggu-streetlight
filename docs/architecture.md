@@ -22,4 +22,6 @@ Approximate distribution-box coordinates remain in the source registry with thei
 
 ## Release assets
 
+Background maps share `DongguPWA.tileLayer`, which delegates to `DongguMapLayers.create`. The returned layer group keeps `tileerror` compatibility and exposes `getMode`, `setMode` and `mapmodechange`. It changes only background layers and retains the Leaflet map, overlays and view. VWorld imagery uses dedicated unfiltered panes; the rotating patrol map hosts its selector outside the turning container. The selector has no form field ID, so display preferences cannot enter business drafts. Online imagery is excluded from the service-worker tile archive even if the ordinary-provider cache setting conflicts.
+
 `sw.js` precaches both entry scripts/styles and all feature dependencies, including `app/privacy.js`. Its version must match `APP_VER` in `app/staff-app.js`. Pages publishes the existing allowlisted directories, so new assets inside `app/` and `report/` are included. Preserve the existing update confirmation, unsent-work checks, focus return and history-stack contracts when changing the compatibility entry point.

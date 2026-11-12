@@ -5,7 +5,7 @@
   const C = root.DGOperationsCore;
   let api, loading = null, reloadRequested = false, attached = false, detailToken = 0, editorRequest = 0;
   let draftWrites = Promise.resolve();
-  const draftVersions = new WeakMap(), editorTokens = new WeakMap(), draftOwners = new WeakMap();
+  const draftVersions = new WeakMap(), editorTokens = new WeakMap(), draftOwners = new WeakMap(), processSettlements = new Map();
   let subscriptions = null, watchedWorkKey = '', watchedReportId = '';
   let editConflict = null;
   let drivingSession = null, drivingToken = 0;
@@ -40,12 +40,25 @@
     return name + ' · ' + time(metadata.fetchedAt);
   }
   async function readOrder(id) {
-    const snap = await api.database().doc('workOrders/' + id).get(api.firebase() && navigator.onLine !== false ? { source: 'server' } : undefined);
+    let snap;
+    try { snap = await api.database().doc('workOrders/' + id).get(api.firebase() && navigator.onLine !== false ? { source: 'server' } : undefined); }
+    catch (error) { if (offlineFailure(error) && root.DGFieldKit?.record) { const cached = await root.DGFieldKit.record('workOrders', id); if (cached) return cached; } throw error; }
     return snap?.exists !== false && snap?.data() ? { ...snap.data(), id } : null;
   }
+  function offlineFailure(error) { const code=String(error.code||'').replace(/^(?:firestore|functions)\//,''); return !['permission-denied', 'unauthenticated'].includes(code) && (navigator.onLine === false || ['unavailable', 'offline', 'deadline-exceeded'].includes(code)); }
   async function loadReports(lightId) {
-    const records = await api.readAll('reports', { where: [['lightId', '==', lightId]], requireServer: !!api.firebase() && navigator.onLine !== false });
-    state.reports = [...state.reports.filter(r => r.lightId !== lightId), ...records]; bindReportUpdates(lightId); return records;
+    const owner = captureOwner(), gen = api.navGen?.(), request = editorRequest, current = () => ownsContext(owner) && request === editorRequest && (gen == null || api.navAlive(gen));
+    let records, metadata;
+    try { records = await api.readAll('reports', { where: [['lightId', '==', lightId]], requireServer: !!api.firebase() && navigator.onLine !== false, onMetadata: value => { metadata = value; } }); }
+    catch (error) {
+      if (!current()) return [];
+      if (!offlineFailure(error) || !root.DGFieldKit?.forLight) throw error;
+      const prepared = await root.DGFieldKit.forLight('reports', lightId); if (!current()) return [];
+      if (!prepared) throw error; records = prepared.rows; metadata = { source: 'prepared', preparedAt: prepared.preparedAt, fetchedAt: prepared.preparedAt, scope: prepared.scope, coverage: prepared.coverage, complete: false };
+    }
+    if (!current()) return [];
+    state.reportMeta ||= {}; state.reportMeta[lightId] = metadata || null;
+    state.reports = [...state.reports.filter(r => r.lightId !== lightId), ...records]; if (metadata?.source !== 'prepared') bindReportUpdates(lightId); return records;
   }
   async function load(force, append = false) {
     if (loading) { if (force) reloadRequested = true; return loading; }
@@ -130,11 +143,11 @@
     const d = state.draft, c = state.completion;
     if (state.edit && !state.edit.cancelled && ownerForm(state.edit, 'workEdit')) return true;
     if (d && !d.cancelled && ownerForm(d, 'workDraft') && (d.pending || d.photoTasks || Q('#woTitle')?.value || Q('#woDescription')?.value || d.photos?.length)) return true;
-    return !!(c && !c.cancelled && ownerForm(c, 'workCompletion') && (c.pending || c.photoTasks || Q('#woCompletionNote')?.value || c.photos?.length));
+    return !!(c && !c.cancelled && ownerForm(c, 'workCompletion') && (c.pending || c.photoTasks || Q('#woCompletionNote')?.value || c.photos?.length || c.holdDraft && JSON.stringify(c.holdDraft) !== c.holdBaseline));
   }
   function view() {
     ensure(); const rows = state.workQueryKey === filterKey() ? selectedOrders() : [], pending = state.jobs.filter(j => j.kind === 'work' && j.state !== 'synced').length;
-    return '<div class="panel"><div class="split"><button class="btn sodium" data-dg="new-work"' + (!admin() || !supported() ? ' disabled' : '') + '>작업 지시 등록</button><button class="btn ghost" data-dg="refresh">새로고침</button><button class="btn ghost" data-dg="work-csv">CSV</button></div>' +
+    return '<div class="panel"><div class="split"><button class="btn sodium" data-dg="new-work"' + (!admin() || !supported() ? ' disabled' : '') + '>작업 지시 등록</button><button class="btn ghost" data-dg="refresh">새로고침</button><button class="btn ghost" data-dg="attention-work">미확인·긴급 알림함</button><button class="btn ghost" data-pm="open">정기점검 계획</button><button class="btn ghost" data-dg="work-csv">CSV</button></div>' +
       (!supported() ? '<p class="notice">작업 배정과 검수는 이 기기 저장 또는 Firebase 공유 저장에서 사용할 수 있어요.</p>' : '') +
       '<label class="f" for="woFilter">처리 상태</label><select class="f-in" id="woFilter"><option value="open"' + (state.filter === 'open' ? ' selected' : '') + '>미완료 전체</option><option value="all"' + (state.filter === 'all' ? ' selected' : '') + '>전체 기록</option>' + Object.entries(C.STATES).map(([v, t]) => '<option value="' + v + '"' + (state.filter === v ? ' selected' : '') + '>' + t + '</option>').join('') + '</select>' +
       '<div class="grid2"><select class="f-in" id="woDeadline" aria-label="완료 기한">' + Object.entries({ all: '기한 전체', today: '오늘 기한 (KST)', overdue: '기한 초과' }).map(([v,t]) => '<option value="' + v + '"' + (state.deadline === v ? ' selected' : '') + '>' + t + '</option>').join('') + '</select><select class="f-in" id="woDong" aria-label="작업 대상 동">' + api.dongOptions(state.workDong) + '</select></div><label class="f"><input type="checkbox" id="woUrgent"' + (state.urgent ? ' checked' : '') + '> 긴급 작업만</label>' +
@@ -291,7 +304,7 @@
     if (d.pending) return api.toast('이 작업은 저장 대기함에서 처리 중이에요.');
     if (d.photoTasks) return api.toast('첨부 사진을 처리한 뒤 저장해 주세요.');
     const input = Object.fromEntries(['title', 'description', 'type', 'priority', 'assignedTo', 'dueAt', 'reportIds'].map(key => [key, clone(d[key])]));
-    input.parts = clone(d.parts || []);
+    input.parts = clone(d.parts || []); input.workflowVersion = 2;
     input.beforePhotos = d.photos.map(p => p.id);
     C.createOrder(input, light, api.state().me, Date.now());
     const job = { id: uuid('command'), kind: 'create', workId: d.id, actor: api.state().me, at: Date.now(), light: { id: light.id, code: light.code, dong: light.dong || '' }, input, photos: clone(d.photos), draftKey: d.storageId };
@@ -406,7 +419,7 @@
     const queued = (await owner.offline.jobs().catch(() => [])).find(row => row.id === job.id);
     if (!ownsContext(owner)) return;
     if (queued?.state === 'conflict') { await owner.offline.discard(job.id); if (!ownsContext(owner)) return; }
-    if (!queued || queued.state === 'conflict') { d.pending = null; await writeDraft(d, kind).catch(() => {}); if (form.isConnected) lockForm(form, false); }
+    if (!queued || queued.state === 'conflict') { d.pending = null; delete d.process; await writeDraft(d, kind).catch(() => {}); if (form.isConnected) lockForm(form, false); }
   }
   async function saveEdit(button) {
     const d = readEdit(), form = ownerForm(d, 'workEdit'), order = state.editOrder;
@@ -470,6 +483,58 @@
   function partRows(values) {
     return (values || []).map((p, i) => '<tr><td>' + E(p.name) + (p.inventoryId ? '<small>재고 연동</small>' : '') + '</td><td>' + p.qty + '</td><td>' + p.unitCost.toLocaleString() + '</td><td><button class="btn ghost sm" data-dg="remove-part" data-index="' + i + '">삭제</button></td></tr>').join('');
   }
+  function codeOptions(values, selected) { return '<option value="">선택해 주세요</option>' + Object.entries(values).map(([key, value]) => '<option value="' + E(key) + '"' + (key === selected ? ' selected' : '') + '>' + E(value) + '</option>').join(''); }
+  function causeActionControls(draft) { return '<div class="grid2"><div><label class="f" for="woDiagnosis">고장 원인 (필수)</label><select class="f-in" id="woDiagnosis">' + codeOptions(C.DIAGNOSES, draft.diagnosis) + '</select></div><div><label class="f" for="woRepairAction">조치 유형 (필수)</label><select class="f-in" id="woRepairAction">' + codeOptions(C.REPAIR_ACTIONS, draft.repairAction) + '</select></div></div>'; }
+  function defaultHold(order) { return { reason: order.hold?.reason || 'material', note: order.hold?.note || '', nextAt: dueValue(dateInput(order.hold?.nextAt || Date.now() + 86400000)), nextAction: order.hold?.nextAction || '' }; }
+  function processControls(order) {
+    const active = ['assigned', 'in_progress'].includes(order.status), allowed = active && (admin() || order.assignedTo === api.state().me), draft = state.completion;
+    if (!active && !order.acknowledgedAt && !order.hold) return '';
+    const held = draft?.holdDraft || defaultHold(order); if (draft) draft.holdBaseline = JSON.stringify(defaultHold(order));
+    return '<div class="panel dg-process"><h3>담당 확인과 보류</h3><p>배정 확인 ' + (order.acknowledgedAt && order.acknowledgedBy === order.assignedTo ? time(order.acknowledgedAt) : '미확인') + '</p>' + (active && order.assignedTo === api.state().me && (!order.acknowledgedAt || order.acknowledgedBy !== order.assignedTo) ? '<button class="btn sodium sm" data-dg="acknowledge-work">배정 확인했어요</button>' : '') + (order.hold ? '<p class="notice"><b>보류 · ' + E(C.HOLD_REASONS[order.hold.reason]) + '</b><br>' + E(order.hold.note) + '<br>다음 확인 ' + time(order.hold.nextAt) + '<br>다음 할 일: ' + E(order.hold.nextAction) + '</p>' + (allowed ? '<button class="btn sodium sm" data-dg="resume-work">보류 해제</button>' : '') : '') + (allowed ? '<details><summary>' + (order.hold ? '보류 내용 수정' : '작업 보류 기록') + '</summary><label class="f" for="woHoldReason">보류 사유</label><select class="f-in" id="woHoldReason">' + Object.entries(C.HOLD_REASONS).map(([key, label]) => '<option value="' + key + '"' + (key === held.reason ? ' selected' : '') + '>' + E(label) + '</option>').join('') + '</select><label class="f" for="woHoldNote">상세 사유</label><input class="f-in" id="woHoldNote" maxlength="500" value="' + E(held.note) + '"><label class="f" for="woHoldNext">다음 확인일</label><input class="f-in" id="woHoldNext" type="date" value="' + dateInput(held.nextAt) + '"><label class="f" for="woHoldAction">다음 할 일</label><input class="f-in" id="woHoldAction" maxlength="500" value="' + E(held.nextAction) + '"><p class="muted">보류해도 원래 완료 기한과 기한 초과 기록은 유지돼요.</p><button class="btn ghost" data-dg="hold-work">보류 저장</button></details>' : '') + '</div>';
+  }
+  async function processWork(action, button) {
+    const order = state.currentOrder, d = state.completion, form = ownerForm(d, 'workCompletion'); if (!order || !form || d.pending) return;
+    const owner = draftOwner(d), request = editorRequest; requireOwner(owner);
+    const input = { expectedRevision: order.revision };
+    if (action === 'hold') Object.assign(input, { reason: Q('#woHoldReason').value, note: Q('#woHoldNote').value, nextAt: dueValue(Q('#woHoldNext').value), nextAction: Q('#woHoldAction').value });
+    C.workProcess(order, action, input, owner.actor, admin(), Date.now());
+    await persistCompletion(); if (!ownsContext(owner) || ownerForm(d, 'workCompletion') !== form || state.currentOrder !== order) return;
+    const job = { id: uuid('work-process'), kind: action, workId: order.id, actor: owner.actor, at: Date.now(), input, draftKey: d.storageId, note: action === 'hold' ? '보류 · ' + C.HOLD_REASONS[input.reason] + ' · ' + input.nextAction : action === 'resume' ? '보류 해제' : '배정 수신 확인' };
+    d.pending = job.id; d.process = { kind: action, expectedRevision: order.revision }; lockForm(form, true); button.disabled = true;
+    try { await writeDraft(d, 'workCompletion'); job.draftKey = d.storageId; requireOwner(owner); const result = await submit(job, job.note); if (result.state === 'synced') { await finishProcessDraft(job, d); if (!ownsContext(owner)) return; await load(true); if (request === editorRequest && form.isConnected) await openWork(order.id); } }
+    catch (error) { if (ownsContext(owner)) await recoverRejected(job, d, 'workCompletion', form); throw error; }
+    finally { if (ownsContext(owner) && form.isConnected) { lockForm(form, !!d.pending); button.disabled = !!d.pending; } }
+  }
+  function finishProcessDraft(job, original) {
+    if (processSettlements.has(job.id)) return processSettlements.get(job.id);
+    const task = (async () => {
+      const owner = captureOwner();
+      if (job.actor && job.actor !== owner.actor) return;
+      let d = original || (state.completion?.pending === job.id ? state.completion : null);
+      if (d && !ownsContext(draftOwner(d))) return;
+      if (!d) { const saved = await owner.offline.get('workCompletion', job.draftKey || job.workId); if (!ownsContext(owner) || !saved || saved.pending !== job.id) return; d = adoptDraft(saved, 'workCompletion', job.draftKey || job.workId); }
+      if (!ownsContext(owner) || d.pending !== job.id) return;
+      const work = await readOrder(job.workId); if (!ownsContext(owner) || d.pending !== job.id || !work) return;
+      const preserve = d.note?.trim() || d.diagnosis || d.repairAction || d.photos?.length || JSON.stringify(d.parts || []) !== JSON.stringify(work.parts || []) || JSON.stringify(d.measurements || []) !== JSON.stringify(work.measurements || []) || job.kind === 'acknowledge' && d.holdDraft && JSON.stringify(d.holdDraft) !== d.holdBaseline;
+      if (!preserve) return clearWorkDraft(d, 'workCompletion', { delivered: true });
+      d.pending = null; delete d.process;
+      if (work.revision === job.input.expectedRevision + 1) {
+        d.expectedRevision = work.revision;
+        if (job.kind !== 'acknowledge') { d.holdDraft = defaultHold(work); d.holdBaseline = JSON.stringify(d.holdDraft); }
+      } else api.toast('입력한 조치 내용은 초안으로 유지했어요. 작업이 추가 변경되어 최신 기록을 확인해 주세요.');
+      await writeDraft(d, 'workCompletion');
+    })();
+    processSettlements.set(job.id, task); task.then(() => processSettlements.delete(job.id), () => processSettlements.delete(job.id)); return task;
+  }
+  async function openAttention() {
+    const request = ++editorRequest, owner = captureOwner(), gen = api.navGen?.(), current = () => request === editorRequest && ownsContext(owner) && (gen == null || api.navAlive(gen));
+    await persistActive(); if (!current()) return;
+    let rows = [], metadata, error = '';
+    try { rows = await api.readAll('workOrders', { where: [['status', 'in', ['draft', 'assigned', 'in_progress', 'completed']], ...(!admin() ? [['assignedTo', '==', owner.actor]] : [])], requireServer: !!api.firebase(), onMetadata: value => { metadata = value; } }); } catch (e) { error = e.message; }
+    if (!current()) return;
+    const items = C.attentionItems(rows, owner.actor, admin(), Date.now());
+    api.navigate(heading('미확인·긴급 알림함', admin() ? '조회 권한 내 전체 미완료 작업' : '내 담당 미완료 작업') + '<div id="woAttention"><div class="panel"><p>배정 미확인·긴급·기한 임박/초과·보류 확인일을 모아 보여요. 앱 밖의 알림 발송은 별도 운영 연결이 필요해요.</p><p class="muted">' + E(sourceText(metadata)) + ' · 대상 ' + items.length + '건</p><button class="btn ghost" data-dg="attention-work">다시 조회</button></div>' + (error ? '<p class="notice" role="alert">' + E(error) + ' 전체 자료를 확인하지 못했어요. 다시 조회해 주세요.</p>' : items.map(item => '<button class="light-row" data-dg="open-work" data-id="' + E(item.id) + '"><b>' + E(item.title) + '</b><small>' + E(item.reasons.join(' · ')) + '</small><small>' + E(label(item.assignedTo)) + ' · 기한 ' + time(item.dueAt) + '</small></button>').join('') || '<p class="empty">현재 확인할 알림이 없어요.</p>') + '</div>', { key: 'work:attention', reopen: openAttention });
+  }
   async function openWork(id, resumeId, navigation = {}) {
     const owned = () => !navigation.isCurrent || navigation.isCurrent();
     if (!owned()) return;
@@ -486,7 +551,7 @@
     state.lightVersion = (api.byId(order.lightId) || {}).updatedAt || null;
     state.reportVersions = Object.fromEntries((order.reportIds || []).map(reportId => { const r = state.reports.find(x => x.id === reportId); return [reportId, r && (r.updatedAt || r.createdAt || null)]; }));
     const token = ++detailToken;
-    state.completion = oldCompletion && oldCompletion.expectedRevision === order.revision ? oldCompletion : { workId: id, lightId: order.lightId, expectedRevision: order.revision, photos: [], existingPhotos: order.afterPhotos || [], parts: order.parts || [], measurements: order.measurements || [], note: order.completionNote || '' };
+    state.completion = oldCompletion && oldCompletion.expectedRevision === order.revision ? oldCompletion : { workId: id, lightId: order.lightId, expectedRevision: order.revision, photos: [], existingPhotos: order.afterPhotos || [], parts: order.parts || [], measurements: order.measurements || [], note: order.completionNote || '', diagnosis: order.diagnosis || '', repairAction: order.repairAction || '' };
     const completion = adoptDraft(state.completion, 'workCompletion', oldCompletion && oldCompletion.expectedRevision === order.revision ? resumeId || id : id, !!(oldCompletion && oldCompletion.expectedRevision === order.revision));
     if (oldCompletion && oldCompletion.expectedRevision !== order.revision) {
       completion.storageId = uuid('completion'); draftVersions.set(completion, null);
@@ -496,11 +561,13 @@
     api.navigate(heading(order.title, order.code + ' · ' + C.STATES[order.status]) + '<div class="panel dg-work-detail" id="woDetail" data-draft-id="' + E(completion.storageId) + '" data-editor-token="' + E(editorTokens.get(completion)) + '"><fieldset style="border:0;padding:0;margin:0;min-width:0"' + (completion.pending ? ' disabled' : '') + '>' +
       '<p>' + E(order.description || '추가 작업 내용 없음') + '</p><p><b>담당</b> ' + E(label(order.assignedTo)) + ' · <b>기한</b> ' + time(order.dueAt) + ' · <b>우선순위</b> ' + E(order.priority) + '</p>' +
       (admin() && editable(order) ? '<button class="btn ghost sm" data-dg="edit-work" data-id="' + E(id) + '">작업 정보 수정</button>' : '') + '<button class="btn ghost sm" data-light="' + E(order.lightId) + '">시설 점검 열기</button><h3>조치 전·후 증빙</h3><div id="woEvidence" class="pstrip" aria-live="polite">사진 불러오는 중…</div>' +
-      (order.completionNote ? '<h3>조치 내용</h3><p class="dg-pre">' + E(order.completionNote) + '</p>' : '') +
+      (state.reportMeta?.[order.lightId]?.source === 'prepared' ? '<p class="notice" id="woPreparedReports">출동 준비자료 · 준비 ' + time(state.reportMeta[order.lightId].preparedAt) + '<br>신고 범위: 이 시설의 미완료·작업 연결 신고. 준비 이후의 변경과 서버 전체 자료는 온라인에서 다시 확인해 주세요.</p>' : '') +
+      processControls(order) +
+      (order.completionNote ? '<h3>조치 내용</h3><p class="dg-pre">' + E(order.completionNote) + '</p><p>원인 ' + E(C.DIAGNOSES[order.diagnosis] || '이전 기록 · 미분류') + ' · 조치 ' + E(C.REPAIR_ACTIONS[order.repairAction] || '미분류') + '</p>' : '') +
       ((order.parts || []).length ? '<h3>' + (['draft', 'assigned', 'in_progress'].includes(order.status) ? '예정 자재' : '기록한 사용 자재') + '</h3><div class="dg-table"><table><thead><tr><th>자재</th><th>수량</th><th>단가 (원)</th></tr></thead><tbody>' + order.parts.map(part => '<tr><td>' + E(part.name) + (part.inventoryId ? '<small>재고 연동</small>' : '') + '</td><td>' + E(part.qty) + '</td><td>' + Number(part.unitCost).toLocaleString() + '</td></tr>').join('') + '</tbody></table></div>' : '') + '<p>' + (['draft', 'assigned', 'in_progress'].includes(order.status) ? '예정 자재 비용 ' : '자재 비용 ') + Number(order.costTotal || 0).toLocaleString() + '원</p>' + (order.measurements || []).map(m => '<p>실측 조도 ' + E(m.lux) + ' lux · ' + time(m.at) + ' · ' + E(m.note) + '</p>').join('') +
       (order.verificationNote ? '<p class="notice">검수 의견: ' + E(order.verificationNote) + '</p>' : '') +
       (admin() && allowed.includes('assigned') ? '<label class="f" for="woReassign">담당자</label><select class="f-in" id="woReassign">' + staffOptions(order.assignedTo) + '</select><label class="f" for="woNewDue">완료 기한</label><input class="f-in" type="date" id="woNewDue" value="' + dateInput(order.dueAt) + '">' : '') +
-      (allowed.includes('completed') ? '<h3>작업 완료 요청</h3><label class="f" for="woCompletionNote">조치 내용</label><textarea class="f-in" id="woCompletionNote" maxlength="2000">' + E(completion.note) + '</textarea><label class="f" for="woAfter">조치 후 사진 (필수, 최대 6장)</label><input type="file" id="woAfter" accept="image/*" multiple><div id="woAfterPreview" class="pstrip">' + photoPreviews(completion.photos) + '</div><p id="woPhotoNotice" class="muted" role="status"></p>' +
+      (allowed.includes('completed') ? '<h3>작업 완료 요청</h3>' + causeActionControls(completion) + '<label class="f" for="woCompletionNote">조치 내용</label><textarea class="f-in" id="woCompletionNote" maxlength="2000">' + E(completion.note) + '</textarea><label class="f" for="woAfter">조치 후 사진 (필수, 최대 6장)</label><input type="file" id="woAfter" accept="image/*" multiple><div id="woAfterPreview" class="pstrip">' + photoPreviews(completion.photos) + '</div><p id="woPhotoNotice" class="muted" role="status"></p>' +
       '<h3>사용 자재</h3><div class="grid2"><select class="f-in" id="woStockPart" aria-label="등록 자재"><option value="">직접 입력</option>' + state.inventory.map(p => '<option value="' + E(p.id) + '">' + E(p.name) + ' · 재고 ' + p.quantity + E(p.unit) + '</option>').join('') + '</select><input class="f-in" id="woPartName" placeholder="자재명" aria-label="자재명"></div><div class="grid2"><input class="f-in" id="woPartQty" type="number" min="0.001" step="0.001" value="1" aria-label="사용 수량"><input class="f-in" id="woPartCost" type="number" min="0" value="0" aria-label="단가(원)"></div><button class="btn ghost sm" data-dg="add-part">자재 추가</button><div class="dg-table"><table><thead><tr><th>자재</th><th>수량</th><th>단가</th><th>관리</th></tr></thead><tbody id="woParts">' + partRows(completion.parts) + '</tbody></table></div><p class="muted">재고 연동 자재는 관리자의 완료 검수 시 출고돼요.</p>' +
       '<h3>조도계 실측 (선택)</h3><div class="grid2"><input class="f-in" id="woLux" type="number" min="0" max="200000" step="0.1" placeholder="lux" aria-label="실측 조도"><input class="f-in" id="woLuxNote" maxlength="300" placeholder="측정 위치·기기·조건" aria-label="실측 조건"></div><button class="btn ghost sm" data-dg="add-lux">실측 추가</button><div id="woMeasurements">' + measureRows(completion.measurements) + '</div><p class="muted">조도계로 측정한 값을 입력해요. 지도 밝기 예측과 별도로 보관돼요.</p>' : '') +
       (admin() && order.status === 'completed' ? '<h3>완료 검수</h3><label class="f" for="woVerification">검수 의견 / 보완 사유</label><textarea class="f-in" id="woVerification" maxlength="2000"></textarea><label class="f" for="woFacilityStatus">검수 후 시설 상태</label><select class="f-in" id="woFacilityStatus"><option value="">현재 시설 상태 유지</option>' + options(['정상', '점검필요', '고장', '수리중'], '') + '</select><label class="f"><input type="checkbox" id="woCloseReports"> 연결된 신고도 완료 처리하고 연락처 삭제</label>' : '') +
@@ -514,7 +581,13 @@
     catch (error) { if (detailCurrent() && Q('#woEvents')) Q('#woEvents').textContent = '처리 이력을 불러오지 못했어요.'; }
   }
   function measureRows(values) { return values.map((m, i) => '<p>' + m.lux + ' lux · ' + E(m.note) + ' <button class="btn ghost sm" data-dg="remove-lux" data-index="' + i + '">삭제</button></p>').join(''); }
-  async function persistCompletion() { const d = state.completion; if (!d || d.pending || !ownerForm(d, 'workCompletion') || !Q('#woCompletionNote')) return; d.note = Q('#woCompletionNote').value; await writeDraft(d, 'workCompletion'); }
+  async function persistCompletion() {
+    const d = state.completion; if (!d || d.pending || !ownerForm(d, 'workCompletion')) return;
+    if (Q('#woHoldReason')) d.holdDraft = { reason: Q('#woHoldReason').value, note: Q('#woHoldNote').value, nextAt: dueValue(Q('#woHoldNext').value), nextAction: Q('#woHoldAction').value };
+    if (Q('#woCompletionNote')) { d.note = Q('#woCompletionNote').value; d.diagnosis = Q('#woDiagnosis')?.value || ''; d.repairAction = Q('#woRepairAction')?.value || ''; }
+    else if (!d.holdDraft || JSON.stringify(d.holdDraft) === d.holdBaseline) return;
+    await writeDraft(d, 'workCompletion');
+  }
   async function transitionWork(button) {
     const order = state.currentOrder, d = state.completion, form = ownerForm(d, 'workCompletion');
     if (!order || order.id !== button.dataset.id || !form || d.pending) return;
@@ -525,13 +598,13 @@
     if (!ownsContext(owner) || ownerForm(d, 'workCompletion') !== form || state.currentOrder !== order) return;
     const input = { expectedRevision: order.revision, ...(Q('#woReassign') ? { assignedTo: Q('#woReassign').value, dueAt: dueValue(Q('#woNewDue').value) } : {}),
       completionNote: d.note, afterPhotos: [...(d.existingPhotos || []), ...d.photos.map(p => p.id)],
-      parts: clone(d.parts), measurements: clone(d.measurements), verificationNote: Q('#woVerification') ? Q('#woVerification').value : '' };
+      parts: clone(d.parts), measurements: clone(d.measurements), verificationNote: Q('#woVerification') ? Q('#woVerification').value : '', ...(target === 'completed' && Q('#woDiagnosis') ? { diagnosis: d.diagnosis, repairAction: d.repairAction } : {}) };
     C.transition(order, target, input, api.state().me, admin(), Date.now());
     if (['cancelled', 'verified'].includes(target) && !await ask(target === 'verified' ? '조치 후 원본 사진과 조치 내용을 확인했나요? 검수 승인 시 연결된 자재 재고도 반영돼요.' : '이 작업을 취소해요. 처리 이력은 유지돼요.', target === 'verified' ? { title: '검수 승인', ok: '확인했어요, 승인' } : { title: '작업을 취소할까요?', ok: '작업 취소', cancel: '돌아가기', danger: true })) return;
     requireOwner(owner);
     const job = { id: uuid('command'), kind: 'transition', workId: order.id, target, actor: owner.actor, at: Date.now(), input, photos: target === 'completed' ? clone(d.photos) : [], facilityStatus: Q('#woFacilityStatus') ? Q('#woFacilityStatus').value : '', lightUpdatedAt: state.lightVersion, closeReports: !!(Q('#woCloseReports') && Q('#woCloseReports').checked), draftKey: d.storageId };
     if (job.closeReports) job.reportVersions = { ...state.reportVersions };
-    d.pending = job.id; lockForm(form, true); button.disabled = true;
+    d.pending = job.id; delete d.process; lockForm(form, true); button.disabled = true;
     try {
       await writeDraft(d, 'workCompletion'); job.draftKey = d.storageId;
       requireOwner(owner);
@@ -699,14 +772,14 @@
   async function refreshQueue() {
     if (!root.DGOffline.ready) return;
     const owner = captureOwner(), jobs = await owner.offline.jobs(); if (!ownsContext(owner)) return;
-    const kinds = await Promise.all(['draft', 'patrol', 'patrolTargets', 'inventoryDraft', 'workDraft', 'workCompletion', 'workEdit', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(kind => owner.offline.list(kind)));
+    const kinds = await Promise.all(['draft', 'patrol', 'patrolTargets', 'inventoryDraft', 'assetDraft', 'preventiveDraft', 'workDraft', 'workCompletion', 'workEdit', 'lightingDraft', 'lightingTaskDraft', 'lightingAreaDraft'].map(kind => owner.offline.list(kind)));
     if (!ownsContext(owner)) return;
     state.jobs = jobs; state.drafts = kinds.flat(); notify();
   }
   function queueView() {
     const statuses = { queued: '전송 대기', sending: '서버 확인 중', failed: '실패 · 재시도 가능', conflict: '변경 충돌 · 확인 필요', synced: '서버/저장소 반영 완료' };
     return '<div class="panel"><p>' + (root.DGOffline.durable ? '이 기기에 초안과 미전송 작업을 보관해요.' : '공유 기기 모드: 현재 창에서만 대기해요. 전송 완료를 확인한 뒤 닫아 주세요.') + '</p><div class="split"><button class="btn sodium" data-dg="retry-all">대기 작업 전송</button><button class="btn ghost" data-dg="queue-refresh">새로고침</button></div></div><h3>저장 작업 ' + state.jobs.filter(j => j.state !== 'synced').length + '건 대기</h3>' + (state.jobs.length ? state.jobs.map(j => '<div class="panel"><b>' + E(j.summary) + '</b><p>' + statuses[j.state] + ' · ' + time(j.updatedAt) + '</p>' + (j.error ? '<p class="notice">' + E(j.error) + '</p>' : '') + '<div class="split">' + (['queued', 'failed', 'conflict'].includes(j.state) ? '<button class="btn ghost sm" data-dg="retry-job" data-id="' + E(j.id) + '">재시도</button>' : '') + (j.state !== 'sending' ? '<button class="btn ghost sm" data-dg="discard-job" data-id="' + E(j.id) + '">' + (j.state === 'synced' ? '완료 목록에서 지우기' : '대기 작업 폐기') + '</button>' : '') + '</div></div>').join('') : '<div class="empty">대기 중인 저장 작업이 없어요.</div>') +
-      '<h3>작성 중인 초안</h3>' + state.drafts.map(d => '<div class="panel"><b>' + E(d.kind === 'draft' ? (api.byId(d.id) || {}).code || d.id : d.kind === 'patrol' ? '이전 순찰' : d.kind === 'patrolTargets' ? '다음 순찰 대상' : d.kind === 'inventoryDraft' ? '자재 정보 수정 · ' + (d.value?.name || d.id) : d.kind === 'lightingDraft' ? '외부 광원·현장 밝기 초안' : d.kind === 'lightingAreaDraft' ? '밝기 검토 구역 초안' : d.kind === 'lightingTaskDraft' ? '밝기 재확인 업무 초안' : (d.value?.title || (api.byId(d.value?.lightId) || {}).code || '보수 작업 초안')) + '</b><p class="muted">' + time(d.updatedAt) + '</p><div class="split"><button class="btn ghost sm" ' + (d.kind === 'patrolTargets' ? 'data-ptnext' : 'data-dg="recover-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '"') + '>이어 쓰기</button><button class="btn ghost sm" data-dg="discard-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '">초안 폐기</button></div></div>').join('');
+      '<h3>작성 중인 초안</h3>' + state.drafts.map(d => '<div class="panel"><b>' + E(d.kind === 'draft' ? (api.byId(d.id) || {}).code || d.id : d.kind === 'patrol' ? '이전 순찰' : d.kind === 'patrolTargets' ? '다음 순찰 대상' : d.kind === 'inventoryDraft' ? '자재 정보 수정 · ' + (d.value?.name || d.id) : d.kind === 'assetDraft' ? '시설 관계·교체 초안' : d.kind === 'preventiveDraft' ? '정기점검 계획 · ' + (d.value?.title || '작성 중') : d.kind === 'lightingDraft' ? '외부 광원·현장 밝기 초안' : d.kind === 'lightingAreaDraft' ? '밝기 검토 구역 초안' : d.kind === 'lightingTaskDraft' ? '밝기 재확인 업무 초안' : (d.value?.title || (api.byId(d.value?.lightId) || {}).code || '보수 작업 초안')) + '</b><p class="muted">' + time(d.updatedAt) + '</p><div class="split"><button class="btn ghost sm" ' + (d.kind === 'patrolTargets' ? 'data-ptnext' : 'data-dg="recover-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '"') + '>이어 쓰기</button><button class="btn ghost sm" data-dg="discard-draft" data-kind="' + E(d.kind) + '" data-id="' + E(d.id) + '">초안 폐기</button></div></div>').join('');
   }
   async function download(name, rows) {
     const cell = root.DGSecurity ? root.DGSecurity.csvCell : v => '"' + (/^[=+@\-\t\r\n]/.test(String(v || '')) ? "'" : '') + String(v == null ? '' : v).replace(/"/g, '""') + '"';
@@ -718,6 +791,8 @@
     if (action === 'driving-locate') return locateDriving();
     if (action === 'driving-open') return openDriving(button);
     if (action === 'driving-close') { drivingSession = null; return notify(); }
+    if (action === 'attention-work') return openAttention();
+    if (['acknowledge-work', 'hold-work', 'resume-work'].includes(action)) return processWork(action.split('-')[0], button);
     if (action === 'new-work') return newWork(button.dataset.lightId, button.dataset.reportId);
     if (action === 'resume-stale-work-edit') return resumeStaleEdit(true);
     if (action === 'edit-latest-work') return resumeStaleEdit(false);
@@ -792,7 +867,7 @@
       if (job && job.kind === 'work' && job.payload) await releasePending(job);
       return refreshQueue();
     }
-    if (action === 'recover-draft') { if (button.dataset.kind === 'inventoryDraft') return root.DGManagement.resumeInventoryDraft(button.dataset.id); if (button.dataset.kind === 'lightingAreaDraft') return root.DGLightingAreas.openEditor(null, button.dataset.id, true); if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return api.openLight(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workEdit') { const saved = await root.DGOffline.get('workEdit', button.dataset.id); return saved ? openEdit(saved.workId, button.dataset.id) : refreshQueue(); } if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
+    if (action === 'recover-draft') { if (button.dataset.kind === 'assetDraft') return root.DGAssetMaintenance.resumeDraft(button.dataset.id); if (button.dataset.kind === 'preventiveDraft') return root.DGPreventive.resumeDraft(button.dataset.id); if (button.dataset.kind === 'inventoryDraft') return root.DGManagement.resumeInventoryDraft(button.dataset.id); if (button.dataset.kind === 'lightingAreaDraft') return root.DGLightingAreas.openEditor(null, button.dataset.id, true); if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return api.openLight(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workEdit') { const saved = await root.DGOffline.get('workEdit', button.dataset.id); return saved ? openEdit(saved.workId, button.dataset.id) : refreshQueue(); } if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
     if (action === 'discard-draft') {
       const owner = captureOwner();
       if (!await ask('작성 중인 이 초안을 폐기할까요?', { ok: '폐기', danger: true })) return;
@@ -800,6 +875,8 @@
       const kind = button.dataset.kind, id = button.dataset.id, saved = await owner.offline.get(kind, id);
       if (!ownsContext(owner)) return;
       if (kind === 'inventoryDraft') { await root.DGManagement.discardInventoryDraft(id, { confirmed: true }); return refreshQueue(); }
+      if (kind === 'assetDraft') { await root.DGAssetMaintenance.discardDraft(id, { confirmed: true }); return refreshQueue(); }
+      if (kind === 'preventiveDraft') { await root.DGPreventive.discardDraft(id, { confirmed: true }); return refreshQueue(); }
       if (kind === 'lightingAreaDraft') { await root.DGLightingAreas.discardDraft(id); return refreshQueue(); }
       if (kind === 'lightingTaskDraft') { await root.DGLightingWorkflows.discardDraft(id); return refreshQueue(); }
       if (kind === 'lightingDraft') { const active = root.DGLighting.state.draft; await root.DGLighting.clearDraft(active?.recordId === id ? active : saved); return refreshQueue(); }
@@ -817,7 +894,7 @@
       if (e.target.id === 'woLight') { const dl = Q('#woLightChoices'); if (dl) dl.innerHTML = lightSuggestions(e.target.value); }
       if (e.target.closest('#woNewForm') === ownerForm(state.draft, 'workDraft')) persistNew().catch(error => api.toast(error.message));
       if (e.target.closest('#woEditForm') === ownerForm(state.edit, 'workEdit')) persistEdit().catch(error => api.toast(error.message));
-      if (e.target.id === 'woCompletionNote') persistCompletion().catch(error => api.toast(error.message));
+      if (['woCompletionNote', 'woDiagnosis', 'woRepairAction', 'woHoldReason', 'woHoldNote', 'woHoldNext', 'woHoldAction'].includes(e.target.id)) persistCompletion().catch(error => api.toast(error.message));
     });
     document.addEventListener('change', e => {
       (async () => {
@@ -839,6 +916,7 @@
         }
         if (e.target.closest('#woNewForm') === ownerForm(state.draft, 'workDraft')) await persistNew();
         if (e.target.closest('#woEditForm') === ownerForm(state.edit, 'workEdit')) await persistEdit();
+        if (['woDiagnosis', 'woRepairAction', 'woHoldReason', 'woHoldNext'].includes(e.target.id)) await persistCompletion();
         if (e.target.id === 'woPlanStockPart') { const item = state.inventory.find(row => row.id === e.target.value); if (item) { Q('#woPlanPartName').value = item.name; Q('#woPlanPartCost').value = item.unitCost; } }
         if (e.target.id === 'woStockPart') { const item = state.inventory.find(x => x.id === e.target.value); if (item) { Q('#woPartName').value = item.name; Q('#woPartCost').value = item.unitCost; } }
         if (e.target.id === 'dgDueDong') { state.dueDong = e.target.value; state.dueShow = 60; notify(); }
@@ -850,7 +928,8 @@
     root.DGOffline.subscribe(event => {
       if (event.type === 'synced' && event.job.kind === 'work') {
         const payload = event.job.payload;
-        if (payload && (payload.kind === 'create' || payload.kind === 'transition' || payload.kind === 'update')) {
+        if (payload && ['acknowledge', 'hold', 'resume'].includes(payload.kind)) finishProcessDraft(payload).catch(error => api.toast(error.message));
+        else if (payload && (['create', 'transition', 'update'].includes(payload.kind))) {
           const kind = payload.kind === 'create' ? 'workDraft' : payload.kind === 'update' ? 'workEdit' : 'workCompletion', active = kind === 'workDraft' ? state.draft : kind === 'workEdit' ? state.edit : state.completion;
           const owner = active?.pending === event.job.id ? active : { id: payload.workId, workId: payload.workId, storageId: payload.draftKey || (kind === 'workDraft' ? 'new' : payload.workId), pending: event.job.id };
           clearWorkDraft(owner, kind, { delivered: true }).catch(error => api.toast(error.message));
@@ -868,7 +947,7 @@
       if (entry.value?.pending !== job.id) continue;
       const active = kind === 'workDraft' ? state.draft : kind === 'workEdit' ? state.edit : state.completion;
       const d = active?.storageId === entry.id ? active : adoptDraft(entry.value, kind, entry.id);
-      d.pending = null; await writeDraft(d, kind);
+      d.pending = null; delete d.process; await writeDraft(d, kind);
       const form = ownerForm(d, kind); if (form) lockForm(form, false);
     }
   }
@@ -884,11 +963,14 @@
       const d = adoptDraft(entry.value, kind, entry.id); d.photoTasks = 0;
       if (!d.pending) continue;
       const job = jobs.get(d.pending);
-      if (job?.kind === 'work' && job.state === 'synced') await clearWorkDraft(d, kind, { delivered: true });
-      else if (!job) { d.pending = null; await writeDraft(d, kind); }
+      if (job?.kind === 'work' && job.state === 'synced') {
+        if (d.process && kind === 'workCompletion') await finishProcessDraft({ id: job.id, workId: d.workId, kind: d.process.kind, input: { expectedRevision: d.process.expectedRevision }, draftKey: d.storageId }, d);
+        else await clearWorkDraft(d, kind, { delivered: true });
+      }
+      else if (!job) { d.pending = null; delete d.process; await writeDraft(d, kind); }
     }
     if (ownsContext(owner)) await refreshQueue();
   }
-  root.DGOperations = { attach, ready, load, view, dueView, queueView, openWork, openEdit, newWork, submit, download, refreshQueue, state, uuid, workFilters, selectedOrders, fullSelectedOrders, workLights, loadReports, readOrder, sourceText, subscribeUpdates, hasActiveDraft, persistActive, persistNew, persistCompletion, persistEdit, writeDraft, clearWorkDraft,
+  root.DGOperations = { attach, ready, load, view, dueView, queueView, openWork, openEdit, openAttention, newWork, submit, download, refreshQueue, state, uuid, workFilters, selectedOrders, fullSelectedOrders, workLights, loadReports, readOrder, sourceText, subscribeUpdates, hasActiveDraft, persistActive, persistNew, persistCompletion, persistEdit, writeDraft, clearWorkDraft,
     inspectionState: light => C.inspectionState(light, Number(state.settings.inspectionDays) || 90, Date.now()) };
 })(globalThis);
