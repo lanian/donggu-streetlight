@@ -180,3 +180,11 @@ test('a completion still waiting to be sent is not rebased onto the newer revisi
   const stored = await f.offline.get('workCompletion', 'w1');
   assert.equal(stored.pending, 'queued-completion'); assert.equal(stored.expectedRevision, 2);
 });
+test('the edit form locks the assignee of a work awaiting review and explains how to reassign it', async () => {
+  const f = await fixture();
+  await f.db.doc('workOrders/done').set({ lightId: 'a', code: 'A', title: '램프 교체', status: 'completed', assignedTo: 'local', completedBy: 'local', completedAt: 2, priority: '보통', type: '수리', createdAt: 1, updatedAt: 2, revision: 3, dueAt: 0, beforePhotos: [], afterPhotos: ['x'], reportIds: [], parts: [], measurements: [], completionNote: '교체' });
+  let markup = ''; f.api.navigate = html => { markup = html; };
+  await f.ui.openEdit('done');
+  assert.match(markup, /id="woEditAssignee" disabled/);
+  assert.match(markup, /담당자와 실제 자재 내역은 보완 요청 후/);
+});

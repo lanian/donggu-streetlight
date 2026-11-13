@@ -62,6 +62,7 @@
     if (input.type !== undefined) { if (!TYPES.includes(input.type)) fail('작업 종류를 확인해 주세요.'); next.type = input.type; }
     if (input.priority !== undefined) { if (!PRIORITIES.includes(input.priority)) fail('우선순위를 확인해 주세요.'); next.priority = input.priority; }
     if (input.assignedTo !== undefined) next.assignedTo = text(input.assignedTo, 180);
+    if (next.assignedTo !== order.assignedTo && next.status === 'completed') fail('검수 대기 작업의 담당자는 보완 요청으로 작업을 되돌린 뒤 바꿔 주세요.', 'failed-precondition');
     if (next.assignedTo !== order.assignedTo) { next.acknowledgedAt = 0; next.acknowledgedBy = ''; next.hold = null; }
     if (next.status !== 'draft' && !next.assignedTo) fail('담당자를 선택해 주세요.');
     if (input.dueAt !== undefined) { next.dueAt = finite(input.dueAt, 0, Number.MAX_SAFE_INTEGER, '완료 기한'); if (!Number.isSafeInteger(next.dueAt)) fail('완료 기한을 확인해 주세요.'); }

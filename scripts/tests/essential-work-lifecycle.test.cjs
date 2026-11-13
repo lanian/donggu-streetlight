@@ -54,3 +54,11 @@ test('actual circuit statistics use confirmed circuit links and never infer a ci
   const value = C.analytics(visits, [], [], lights, 0, 2000, [], { links: [{ lightId: 'p', circuitId: 'c' }], circuits: [{ id: 'c', name: '1회로' }] });
   assert.deepEqual(value.circuits, [['1회로', 1], ['회로 미등록', 1]]); assert.deepEqual(value.switchTypes, [['GPS', 2]]);
 });
+// A work awaiting review records who completed it; the server rules also refuse resetting its
+// acknowledgement there. Reassignment goes through "보완 요청" first, like changing its parts.
+test('a work awaiting review cannot be reassigned but its other details can still be corrected', () => {
+  const completed = { ...C.workProcess(order(), 'acknowledge', { expectedRevision: 1 }, 'local', false, 2000), status: 'completed', completedBy: 'local', completedAt: 2500 };
+  assert.throws(() => C.updateOrder(completed, { expectedRevision: 2, assignedTo: 'worker' }, 'admin', true, 3000), { code: 'failed-precondition', message: /보완 요청/ });
+  const corrected = C.updateOrder(completed, { expectedRevision: 2, title: '제목 정정', assignedTo: 'local' }, 'admin', true, 3000);
+  assert.equal(corrected.title, '제목 정정'); assert.equal(corrected.acknowledgedBy, 'local'); assert.equal(corrected.acknowledgedAt, 2000);
+});
