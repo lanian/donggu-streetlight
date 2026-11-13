@@ -26,8 +26,10 @@ function configureOfficialLink(id,url,status=false){
   const link=$(id);link.hidden=status&&!url;
   if(url){link.href=url;link.removeAttribute("aria-disabled");link.removeAttribute("tabindex")}
   else{link.removeAttribute("href");link.setAttribute("aria-disabled","true");link.tabIndex=-1}
-  link.onclick=event=>{const approved=status?officialStatusTarget():officialTarget();if(!officialRequested()||!approved){event.preventDefault();$("#officialDestinationNotice").textContent="운영서비스 연결 주소를 확인할 수 없어요. 담당자에게 확인해 주세요.";return}link.href=approved;$("#officialDestinationNotice").textContent="운영서비스에서 신고 또는 조회를 마쳐 주세요. 이 페이지에서는 접수 여부를 확인할 수 없어요."};
+  link.onclick=event=>{const approved=status?officialStatusTarget():officialTarget();if(!officialRequested()||!approved){event.preventDefault();$("#officialDestinationNotice").textContent=officialUnreachableText();return}link.href=approved;$("#officialDestinationNotice").textContent="운영서비스에서 신고 또는 조회를 마쳐 주세요. 이 페이지에서는 접수 여부를 확인할 수 없어요."};
 }
+// With no usable operating-service link the configured phone is the only way left to report.
+const officialUnreachableText=()=>"운영서비스 연결 주소를 확인할 수 없어요. "+(contactPhone?contactPhone+"로 연락해 주세요.":"담당자에게 확인해 주세요.");
 function configureDelivery(){
   const mode=deliveryMode(),btn=$("#send"),notice=$("#deliveryNotice"),official=officialRequested();
   $("#officialEntry").hidden=!official;$("#officialFacilityState").hidden=!official;$("#officialCopyActions").hidden=!official;$("#assistSummary").hidden=!official;$("#contentAssist").open=!official;$("#contentAssist").className=official?"content-assist official-assist":"content-assist";
@@ -36,8 +38,9 @@ function configureDelivery(){
     $("#codeLabel").textContent="기둥에 붙은 표찰 번호 (선택). 모르면 비워 두고 운영서비스 지도에서 시설을 찾아 주세요.";
     $("#orgLine").textContent="비공식 신고 안내 · 실제 접수는 운영서비스에서";$("#officialName").textContent=String(C.officialName||"운영서비스").slice(0,100);
     configureOfficialLink("#officialOpen",officialTarget());configureOfficialLink("#officialOpenAfterCopy",officialTarget());configureOfficialLink("#officialStatus",officialStatusTarget(),true);
-    $("#officialDestinationNotice").textContent=mode?"새 창의 운영서비스에서 시설 선택·휴대폰 확인 등 필요한 절차를 진행해 주세요.":"운영서비스 연결 주소를 확인할 수 없어요. 담당자에게 확인해 주세요.";
+    $("#officialDestinationNotice").textContent=mode?"새 창의 운영서비스에서 시설 선택·휴대폰 확인 등 필요한 절차를 진행해 주세요.":officialUnreachableText();
     $("#useGps").checked=false;st.pos=null;gpsRevision++;st.photo=null;photoRevision++;$("#prev").hidden=true;$("#photoDel").hidden=true;$("#statusOpen").hidden=true;
+    const tel=contactPhone.replace(/[^0-9+]/g,"");$("#officialPhoneLine").hidden=!tel;if(tel){$("#officialPhone").href="tel:"+tel;$("#officialPhone").textContent=contactPhone}
     updateOfficialSummary();
   }
   btn.disabled=!mode||official;btn.textContent=mode==="gateway"?"신고 보내기":mode==="external"?"신고 내용 준비하기":"신고 접수 준비 중";

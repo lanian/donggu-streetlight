@@ -171,6 +171,18 @@ const turn = () => new Promise(resolve => setTimeout(resolve, 30));
         assert.equal(await page.locator('#privateInputs').isVisible(), false); assert.equal(await page.evaluate(() => __officialProbe.gpsCalls), 0); assert.deepEqual(sdkRequests, []); assert.deepEqual(mutations, []); assert.deepEqual(targetRequests, []); await assertUnsent(page);
       }, { config: { backend: 'official', officialUrl: url, officialName: '검증용 운영서비스' } });
     }
+    await scenario('a configured official phone stays reachable when the operating service cannot be used', async ({ page, mutations, targetRequests }) => {
+      const phone = page.locator('#officialPhone'); assert.equal(await phone.isVisible(), true);
+      assert.equal(await phone.getAttribute('href'), 'tel:0621234567'); assert.equal(await phone.textContent(), '062-123-4567');
+      assert.deepEqual(mutations, []); assert.deepEqual(targetRequests, []); await assertUnsent(page);
+    }, { config: { backend: 'official', officialUrl: official, officialName: '검증용 운영서비스', phone: '062-123-4567' } });
+    await scenario('an unusable destination names the configured phone instead of a dead end', async ({ page }) => {
+      assert.match(await page.locator('#officialDestinationNotice').textContent(), /062-123-4567/);
+      assert.equal(await page.locator('#officialPhone').isVisible(), true);
+    }, { config: { backend: 'official', officialUrl: 'https://evil.example/report', phone: '062-123-4567' } });
+    await scenario('without a configured phone no placeholder contact is shown', async ({ page }) => {
+      assert.equal(await page.locator('#officialPhoneLine').isVisible(), false);
+    }, { config: { backend: 'official', officialUrl: official } });
     await scenario('a bad optional status target does not replace the valid report destination', async ({ page }) => {
       assert.equal(await page.locator('#officialOpen').getAttribute('href'), official); assert.equal(await page.locator('#officialStatus').isVisible(), false); await assertUnsent(page);
     }, { config: { backend: 'official', officialUrl: official, officialStatusUrl: 'https://evil.example/status' } });
