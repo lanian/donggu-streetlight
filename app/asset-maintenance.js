@@ -195,6 +195,14 @@
     const d = readForm(), form = editor(); if (!d || !form || d.pending || d.readonly || !writable()) return;
     const owner = owners.get(d), token = d.token, navigationSequence = sequence;
     const data = C.normalize(d.entity, d.data), job = { id: uid('asset-operation'), entity: d.entity, recordId: d.recordId, expectedRevision: d.expectedRevision, data, actor: owner.actor, at: Date.now() };
+    if (['cabinet', 'circuit'].includes(d.entity) && data.disabled) {
+      // A retired cabinet/circuit cannot parent an outage update, so an open outage would become unresolvable.
+      button.disabled = true;
+      try { await load(true); } finally { if (button.isConnected) button.disabled = false; }
+      requireOwner(owner); if (sequence !== navigationSequence || Q('#amForm')?.dataset.token !== token) return;
+      const open = C.openIncidentsOn(d.entity, d.recordId, state.incidents);
+      if (open.length) { d.error = '열린 장애 ' + open.length + '건(' + open.slice(0, 3).map(row => row.title || row.id).join(', ') + (open.length > 3 ? ' 외' : '') + ')이 연결돼 있어 사용 종료할 수 없어요. 장애를 먼저 복구 처리해 주세요.'; await writeDraft(d); requireOwner(owner); if (Q('#amForm')?.dataset.token === token) renderEditor(); return; }
+    }
     d.pending = job.id; d.error = ''; await writeDraft(d); requireOwner(owner); form.querySelector('fieldset').disabled = true; button.disabled = true;
     try {
       const result = await owner.offline.submit(JOB, job, { id: job.id, summary: titles[d.entity] + ' · ' + (data.label || data.title || lightName(data.lightId)) }); requireOwner(owner);
