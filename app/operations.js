@@ -551,11 +551,20 @@
     state.lightVersion = (api.byId(order.lightId) || {}).updatedAt || null;
     state.reportVersions = Object.fromEntries((order.reportIds || []).map(reportId => { const r = state.reports.find(x => x.id === reportId); return [reportId, r && (r.updatedAt || r.createdAt || null)]; }));
     const token = ++detailToken;
+    // An administrator edit (due date, priority, …) raises the revision while field input is unsent. Carry
+    // that input onto the latest revision in place, unless a submitted command still owns the draft or the
+    // work has left the field stages; the completion is still validated against the latest work on submit.
+    const rebased = oldCompletion && oldCompletion.expectedRevision !== order.revision && !oldCompletion.pending && ['assigned', 'in_progress'].includes(order.status);
+    if (rebased) { delete oldCompletion.process; Object.assign(oldCompletion, { lightId: order.lightId, expectedRevision: order.revision, existingPhotos: order.afterPhotos || [] }); }
     state.completion = oldCompletion && oldCompletion.expectedRevision === order.revision ? oldCompletion : { workId: id, lightId: order.lightId, expectedRevision: order.revision, photos: [], existingPhotos: order.afterPhotos || [], parts: order.parts || [], measurements: order.measurements || [], note: order.completionNote || '', diagnosis: order.diagnosis || '', repairAction: order.repairAction || '' };
     const completion = adoptDraft(state.completion, 'workCompletion', oldCompletion && oldCompletion.expectedRevision === order.revision ? resumeId || id : id, !!(oldCompletion && oldCompletion.expectedRevision === order.revision));
     if (oldCompletion && oldCompletion.expectedRevision !== order.revision) {
       completion.storageId = uuid('completion'); draftVersions.set(completion, null);
       api.toast('작업 버전이 바뀌었어요. 이전 초안은 대기함에 남기고 최신 작업을 열었어요.');
+    }
+    if (rebased) {
+      await writeDraft(completion, 'workCompletion'); if (!current()) return;
+      api.toast('작업 정보(담당·기한 등)가 바뀌었어요. 입력한 조치 내용과 사진은 최신 작업에 옮겼으니 확인 후 요청해 주세요.');
     }
     const allowed = C.actions(order, api.state().me, admin());
     api.navigate(heading(order.title, order.code + ' · ' + C.STATES[order.status]) + '<div class="panel dg-work-detail" id="woDetail" data-draft-id="' + E(completion.storageId) + '" data-editor-token="' + E(editorTokens.get(completion)) + '"><fieldset style="border:0;padding:0;margin:0;min-width:0"' + (completion.pending ? ' disabled' : '') + '>' +
