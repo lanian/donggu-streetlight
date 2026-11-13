@@ -229,3 +229,18 @@ test('a permission failure is not retried automatically when the connection retu
   await f.ui.load(true); f.fireWindow('online'); await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(calls, 1); assert.equal(f.ui.state.error, '권한이 없어요.');
 });
+
+// The plan map hands back a reorder callback; the plan list, saved plan and vehicle routes all read state.plan.
+test('the plan map moves an unfinished stop and saves the reordered plan with recomputed legs', async () => {
+  const f = await fixture(); let opened = null;
+  f.api.openMap = (scope, options) => { opened = { scope, ...options }; };
+  f.ui.state.plan = C.planLegs({ createdAt: Date.now(), stops: [{ id: 'a', code: 'A', dong: '동명동', lat: 35.14, lng: 126.92 }, { id: 'b', code: 'B', dong: '산수동', lat: 35.15, lng: 126.93 }] });
+  f.click('plan-map'); await until(() => opened);
+  assert.deepEqual([...opened.order], ['a', 'b']); assert.equal(typeof opened.reorder, 'function');
+  const result = await opened.reorder('b', 'next');
+  assert.deepEqual([...result.order], ['b', 'a']); assert.equal(result.next, 'b');
+  assert.deepEqual(f.ui.state.plan.stops.map(stop => stop.id).join(), 'b,a');
+  assert.equal(f.ui.state.plan.stops[0].distanceFromPrevious, 0); assert.ok(f.ui.state.plan.stops[1].distanceFromPrevious > 0);
+  assert.equal((await f.offline.get('plan', 'current')).stops.map(stop => stop.id).join(), 'b,a');
+  assert.equal(await opened.reorder('b', 'next'), null, 'a stop that is already next is not moved');
+});

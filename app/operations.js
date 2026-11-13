@@ -800,6 +800,14 @@
       drivingView(plan) +
       plan.stops.map((s, i) => '<div class="dg-plan-stop' + (done[i] ? ' done' : '') + (i === nextIndex ? ' next' : '') + '"><label><input type="checkbox" data-plan-visited="' + i + '"' + (s.visited ? ' checked' : '') + (done[i] && !s.visited ? ' disabled title="점검을 저장해 완료됐어요"' : '') + '> <span class="n">' + (i + 1) + '</span> <b>' + E(s.code) + '</b><small>' + E(s.dong) + (i ? (s.distanceFromPrevious < 15 ? ' · 앞 시설과 같은 자리' : ' · +' + fmtM(s.distanceFromPrevious)) : ' · 출발') + (done[i] && !s.visited ? ' · <span class="dg-auto">점검 완료</span>' : '') + '</small></label><span class="dg-plan-acts"><button class="btn ghost sm" data-light="' + E(s.id) + '">점검</button>' + (s.workIds || []).map((id, n) => '<button class="btn ghost sm" data-dg="open-work" data-id="' + E(id) + '">보수 ' + (n + 1) + '</button>').join('') + '<button class="btn ghost sm" data-dg="plan-up" data-index="' + i + '"' + (!i ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 위로">위로</button><button class="btn ghost sm" data-dg="plan-down" data-index="' + i + '"' + (i === plan.stops.length - 1 ? ' disabled' : '') + ' aria-label="' + E(s.code) + ' 아래로">아래로</button></span></div>').join('') + '</div>';
   }
+  function planMapView(plan) { const done = plan.stops.filter(s => stopDone(plan, s)).map(s => s.id), next = plan.stops.find(s => !done.includes(s.id)); return { order: plan.stops.map(s => s.id), done, next: next?.id || null }; }
+  // Called by the plan map. Only the plan the map was opened for is changed; a replaced or cleared plan is left alone.
+  async function reorderFromMap(plan, id, where) {
+    if (state.plan !== plan) return null;
+    const stops = C.moveOpenStop(plan.stops, id, where, stop => stopDone(plan, stop)); if (!stops) return null;
+    plan.stops = stops; relegs(plan); plan.reorderedAt = Date.now();
+    await root.DGOffline.put('plan', 'current', plan); notify(); return planMapView(plan);
+  }
   async function refreshQueue() {
     if (!root.DGOffline.ready) return;
     const owner = captureOwner(), jobs = await owner.offline.jobs(); if (!ownsContext(owner)) return;
@@ -861,7 +869,7 @@
     }
     if (action === 'pick-none') { state.planPick.clear(); return notify(); }
     if (action === 'make-plan') { const chosen = [...state.planPick].map(id => api.byId(id)).filter(Boolean).slice(0, 200); if (!chosen.length) throw new Error('방문할 시설을 선택해 주세요.'); state.plan = C.planVisits(chosen, state.pos || api.state().pos); state.planPick.clear(); await root.DGOffline.put('plan', 'current', state.plan); api.toast(state.plan.stops.length + '곳 방문 계획을 만들었어요.'); return notify(); }
-    if (action === 'plan-map') { const done = state.plan.stops.filter(s => stopDone(state.plan, s)).map(s => s.id), next = state.plan.stops.find(s => !done.includes(s.id)); return api.openMap('custom', { title: '방문 계획 · 직선 순서', pts: state.plan.stops.map(s => api.byId(s.id)).filter(Boolean), ordered: true, order: state.plan.stops.map(s => s.id), done, next: next?.id || null }); }
+    if (action === 'plan-map') { const plan = state.plan, view = planMapView(plan); return api.openMap('custom', { title: '방문 계획 · 직선 순서', pts: plan.stops.map(s => api.byId(s.id)).filter(Boolean), ordered: true, ...view, reorder: (id, where) => reorderFromMap(plan, id, where) }); }
     if (action === 'plan-route-ahead') return routeAhead(state.plan);
     if (action === 'plan-route') return api.route ? api.route(button.dataset.id) : api.toast('길찾기를 쓸 수 없어요.');
     if (action === 'plan-visit') { const s = state.plan.stops[+button.dataset.index]; if (!s) return; s.visited = true; await root.DGOffline.put('plan', 'current', state.plan); return notify(); }

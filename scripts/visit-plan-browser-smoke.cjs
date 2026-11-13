@@ -109,7 +109,24 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
     assert.equal(await page.locator('#gmap .mapcl').count(), 0, 'no grouping on a plan map');
     await page.locator('.maprt').nth(2).click(); await page.locator('#mapCard:not([hidden])').waitFor();
     assert.equal(await page.locator('#mapCard b').first().textContent(), await page.evaluate(() => byId(DGOperations.state.plan.stops[2].id).code));
+
+    // 5b. the plan map's card reorders unfinished stops; numbers, the line and the saved plan follow
+    checks.push('reordering from the plan map');
+    const sixth = await page.evaluate(() => DGOperations.state.plan.stops[5].id);
+    await page.locator('.maprt').nth(5).click(); await page.locator('#mapCard [data-map-move="next"]').waitFor();
+    await page.locator('#mapCard [data-map-move="next"]').click();
+    await page.waitForFunction(id => DGOperations.state.plan.stops[2].id === id, sixth);
+    await page.waitForFunction(id => document.querySelector('.maprt.next div')?.textContent === '3' && document.querySelector('#mapCard b')?.textContent === byId(id).code, sixth);
+    assert.equal(await page.evaluate(async () => (await DGOffline.get('plan', 'current')).stops[2].id), sixth, 'the new order is saved on the device');
+    assert.equal(await page.locator('#mapCard [data-map-move="next"]').isDisabled(), true, 'the next stop cannot move to next again');
+    assert.equal(await page.locator('#mapCard [data-map-move="earlier"]').isDisabled(), true, 'finished stops stay ahead of it');
+    await page.locator('#mapCard [data-map-move="later"]').click();
+    await page.waitForFunction(id => DGOperations.state.plan.stops[3].id === id, sixth);
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('.maprt div')].map(d => d.textContent)), ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+    await page.locator('.maprt').nth(0).click(); await page.locator('#mapCard:not([hidden])').waitFor();
+    assert.equal(await page.locator('#mapCard [data-map-move]').count(), 0, 'a finished stop has no reorder buttons');
     await page.goBack(); await page.locator('.dg-plan').waitFor();
+    assert.equal(await page.evaluate(id => document.querySelectorAll('.dg-plan-stop')[3].textContent.includes(byId(id).code), sixth), true, 'the plan list shows the order chosen on the map');
 
     // 6. 길찾기 from the next card offers the map apps for that stop
     checks.push('길찾기 from the next card');

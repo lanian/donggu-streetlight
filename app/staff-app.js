@@ -1290,6 +1290,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.mapChoice){showMapCard(t.dataset.mapChoice,true);return}
   if(t.dataset.mapGroup!==undefined){showMapGroup(GM.group||[]);return}
   if(t.dataset.mapRoute){mapRoute(t.dataset.mapRoute);return}
+  if(t.dataset.mapMove&&t.closest("#mapCard")){mapMoveStop(t.dataset.id,t.dataset.mapMove);return}
   if(t.dataset.kind&&t.closest("#arKind")){ar.kind=t.dataset.kind;document.querySelectorAll("#arKind button").forEach(b=>b.setAttribute("aria-pressed",b===t));arList();arDraw();return}
   if(t.dataset.ck&&draft){draft.checks[t.dataset.ck]=t.dataset.v;t.parentElement.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed",b===t));const reason=document.querySelector(`[data-inspection-reason="${t.dataset.ck}"]`);if(reason)reason.hidden=!["uninspected","na"].includes(t.dataset.v);suggestResult();return}
   if(t.id==="allOk"&&draft){CHECKS.forEach(([k])=>draft.checks[k]="ok");document.querySelectorAll("#checks .pair button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.v==="ok"));draft.manual=false;suggestResult();return}
@@ -2742,6 +2743,20 @@ function showMapGroup(ids){
   card.innerHTML=`<button type="button" class="x" data-map-cardclose aria-label="목록 닫기">×</button><h4 class="mapgroup-title">가까운 시설 ${rows.length}개</h4><p class="muted small">표찰 번호를 확인하고 시설을 선택하세요.</p>${approx?`<p class="mapcard-approx">${approx}개는 분전함 기준 추정 위치예요. 현장에서 표찰과 실제 위치를 확인하세요.</p>`:""}<div class="mapgroup-list">${rows.map(l=>`<button type="button" data-map-choice="${esc(l.id)}">${kindBadge(l.kind)}<b>${GM.route?`${GM.route.order.indexOf(l.id)+1}. `:""}${esc(l.code)}</b><span class="stc st-${esc(l.status)}">${esc(l.status)}</span>${GM.route?.done.has(l.id)?'<small>완료</small>':GM.route?.next===l.id?'<small>다음 방문지</small>':""}</button>`).join("")}</div>`;
   card.hidden=false;drawMapMarkers();card.querySelector("[data-map-choice]")?.focus({preventScroll:true});
 }
+/* A visit plan opened with a reorder callback lets an unfinished stop move among the stops still to visit. */
+function mapOrderControls(l){
+  const r=GM.route;if(!r?.reorder||!r.order.includes(l.id)||r.done.has(l.id))return"";
+  const open=r.order.filter(id=>!r.done.has(id)),at=open.indexOf(l.id),first=at===0,last=at===open.length-1,id=esc(l.id);
+  return `<div class="mapcard-order"><span class="muted small" role="status">방문 순서 ${r.order.indexOf(l.id)+1}번 · 남은 ${open.length}곳 중 ${at+1}번째</span><div class="mapcard-btns"><button type="button" class="btn sm ghost" data-map-move="next" data-id="${id}"${first?" disabled":""}>다음 방문지로</button><button type="button" class="btn sm ghost" data-map-move="earlier" data-id="${id}"${first?" disabled":""}>한 칸 앞</button><button type="button" class="btn sm ghost" data-map-move="later" data-id="${id}"${last?" disabled":""}>한 칸 뒤</button></div></div>`;
+}
+async function mapMoveStop(id,where){
+  const r=GM.route;if(!r?.reorder)return;
+  document.querySelectorAll("#mapCard [data-map-move]").forEach(b=>b.disabled=true);
+  let view=null;try{view=await r.reorder(id,where)}catch(e){toast(e.message||"방문 순서를 바꾸지 못했어요.")}
+  if(GM.route!==r)return; // the map was closed or replaced meanwhile
+  if(view){const shown=new Set(r.ids);Object.assign(r,{order:view.order,done:new Set(view.done),next:view.next,ids:view.order.filter(x=>shown.has(x))});Object.assign(r.source,{order:view.order,done:view.done,next:view.next})}
+  showMapCard(id);
+}
 function mapCardHtml(l){
   const due=isDue(l);
   return `<button type="button" class="x" data-map-cardclose aria-label="카드 닫기">×</button>
@@ -2751,6 +2766,7 @@ function mapCardHtml(l){
       <div class="muted small">마지막 점검 ${fmtD(l.lastInspected)}${due?' · <span style="color:var(--warn)">주기 경과</span>':""}</div></div></div>
     ${l.posApprox?'<p class="mapcard-approx">분전함 기준 추정 위치예요. 현장에서 표찰과 실제 위치를 확인하세요.</p>':""}
     ${GM.group&&mapGroupRows(GM.group).length>1?`<button type="button" class="mapgroup-back" data-map-group>가까운 시설 ${mapGroupRows(GM.group).length}개 목록</button>`:""}
+    ${mapOrderControls(l)}
     <div class="mapcard-btns"><button class="btn sm" data-map-open="${esc(l.id)}">${S.canWrite?"점검하기":"자세히"}</button><button class="btn sm ghost" data-map-route="${esc(l.id)}">${DEV.field?"길찾기":"지도 앱·좌표"}</button></div>`;
 }
 function showMapCard(id,focus=false){
@@ -2820,7 +2836,7 @@ function openMap(scope,one){
   // the saved view of this level (coming back) is only handed over inside openSheet, so peek at it first for the chips
   const pre=(NAV.restoring&&NAV.restoring.gen===NAV.gen&&NAV.restoring.e&&NAV.restoring.e.map)||NAV.mapView||null;const f=pre&&pre.filters;
   gmapKind=f?f.kind:"전체";GM.status=f?f.status:"전체";GM.hidden=new Set(f?f.hidden:[]);GM.q=f?f.q||"":"";GM.sel=f?f.sel:null;GM.group=Array.isArray(f?.group)?f.group.slice():null;GM.near=false;
-  GM.route=scope==="custom"&&one&&one.ordered?{ids:pts.map(l=>l.id),order:one.order||pts.map(l=>l.id),done:new Set(one.done||[]),next:one.next||null}:null;
+  GM.route=scope==="custom"&&one&&one.ordered?{ids:pts.map(l=>l.id),order:one.order||pts.map(l=>l.id),done:new Set(one.done||[]),next:one.next||null,reorder:typeof one.reorder==="function"?one.reorder:null,source:one}:null;
   navRoute("map:"+scope+(scope==="one"&&one?":"+one.id:scope==="custom"&&one?":"+(one.title||""):""),()=>openMap(scope,one));
   openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted" id="mapCount">${pts.length.toLocaleString()}개</span></h3><div class="muted">마커 속은 상태, 테두리는 종류예요. 확대 후 겹친 숫자를 누르면 시설 목록이 열려요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="mapfilters">${kindChips(gmapKind,"mapKind",kindCounts(pts))}${statusChips(GM.status,"mapStat",mapStatusCounts(pts))}</div>

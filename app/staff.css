@@ -446,6 +446,7 @@ nav.tabs button:focus-visible{outline:3px solid var(--fix);outline-offset:-3px}
 .mapcard .x{position:absolute;right:6px;top:6px;width:36px;height:36px;border:0;background:none;font-size:20px;color:var(--ink-2)}
 .mapcard-row{display:flex;gap:10px;align-items:flex-start;padding-right:30px}.mapcard-row .rthumb{width:64px;height:64px;border-radius:10px;object-fit:cover;flex:none}.mapcard-main{min-width:0;flex:1;font-size:14px;line-height:1.4}.mapcard-main b{font-size:16px}.mapcard-st{font-weight:700}.mapcard-main .muted{font-size:12px}.mapcard-main .small{margin-top:2px}
 .mapcard-btns{display:flex;gap:8px;margin-top:10px}.mapcard-btns .btn{flex:1;min-height:44px}
+.mapcard-order{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}.mapcard-order .mapcard-btns{margin-top:6px}.mapcard-order .btn{padding-left:6px;padding-right:6px;white-space:nowrap}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .maplbl{background:rgba(23,34,58,.92);border-color:#2C3850;color:#E8ECF3}}:root[data-theme="dark"] .maplbl{background:rgba(23,34,58,.92);border-color:#2C3850;color:#E8ECF3}
 .maplegend i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:4px;border:2px solid #fff;box-shadow:0 0 0 1px #0003}
 .stage{background:#000;border-radius:12px;overflow:hidden;display:flex;justify-content:center}
