@@ -12,9 +12,9 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 async function until(check) { for (let n = 0; n < 300; n++) { if (await check()) return; await new Promise(r => setTimeout(r, 1)); } assert.fail('Expected UI state was not reached'); }
 async function fixture(shared) {
   let fields = {}, closes = 0, dbJSON = '{}', html = '';
-  const events = {}, messages = [], control = { failDraft: false, photo: null };
+  const events = {}, windowEvents = {}, messages = [], control = { failDraft: false, photo: null };
   const document = { querySelector: s => fields[s] || null, querySelectorAll: s => s === '[data-work-report]:checked' ? (ctx.DGOperations.state.draft?.reportIds || []).map(id => ({ dataset: { workReport: id } })) : [], addEventListener: (name, fn) => (events[name] ||= []).push(fn) };
-  const ctx = vm.createContext({ console, Date, Math, TextEncoder, structuredClone, crypto: webcrypto, document, navigator: { onLine: true, locks: { request: async (_, fn) => fn() } }, setTimeout, clearTimeout, confirm: () => true, DGOperationsCore: C, DGWorkCommands: W, DGSecurity: { safeImageSrc: s => s } });
+  const ctx = vm.createContext({ console, Date, Math, TextEncoder, structuredClone, crypto: webcrypto, document, navigator: { onLine: true, locks: { request: async (_, fn) => fn() } }, setTimeout, clearTimeout, addEventListener: (name, fn) => (windowEvents[name] ||= []).push(fn), confirm: () => true, DGOperationsCore: C, DGWorkCommands: W, DGSecurity: { safeImageSrc: s => s } });
   vm.runInContext(source('app/data.js'), ctx);
   const db = ctx.DGData.createLocalDB({ storage: { getItem: () => dbJSON, setItem: (_, value) => { dbJSON = value; } }, indexedDB: null });
   vm.runInContext(source('app/offline.js'), ctx);
@@ -49,6 +49,7 @@ async function fixture(shared) {
   return { ctx, api, ui: ctx.DGOperations, offline, adapter, control, messages, db, field: id => fields[id], closed: () => closes, html: () => html,
     showOther(markup) { for (const field of Object.values(fields)) field.isConnected = false; fields = {}; html = markup; },
     async open(lightId = 'a', reportId, resumeId) { await ctx.DGOperations.newWork(lightId, reportId, resumeId); return ctx.DGOperations.state.draft; },
+    fireWindow(name) { for (const fn of windowEvents[name] || []) fn({}); },
     input(id, value) { fields[id].value = value; emit('input', fields[id]); },
     fireInput(target) { emit('input', target); },
     addPhoto() { const element = fields['#woBefore']; element.files = [{ type: 'image/png', size: 1 }]; emit('change', element); },
@@ -210,4 +211,21 @@ test('a device storage failure while carrying the input over still opens the wor
   const f = await fixture(); await completionAfterAdminEdit(f);
   f.control.failDraft = true; await f.ui.openWork('w1');
   assert.match(f.html(), /id="woDetail"/); assert.equal(f.ui.state.completion.note, '안정기 교체');
+});
+
+// A failed list load used to stay failed until the worker pressed refresh, even after the signal returned.
+const unreachable = () => Object.assign(new Error('Failed to get documents from server.'), { code: 'unavailable' });
+test('a work list that failed for lack of connection reloads by itself once the device is back online', async () => {
+  const f = await fixture(); let failing = true;
+  f.api.readPage = async (name, options) => { if (failing) throw unreachable(); return f.ctx.DGData.readPage(f.db, name, options); };
+  await f.ui.load(true);
+  assert.match(f.ui.state.error, /연결되면 자동으로 다시/); assert.match(f.ui.state.error, /출동 자료/);
+  failing = false; f.fireWindow('online');
+  await until(() => f.ui.state.loaded && !f.ui.state.error);
+});
+test('a permission failure is not retried automatically when the connection returns', async () => {
+  const f = await fixture(); let calls = 0;
+  f.api.readPage = async () => { calls++; throw Object.assign(new Error('권한이 없어요.'), { code: 'permission-denied' }); };
+  await f.ui.load(true); f.fireWindow('online'); await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(calls, 1); assert.equal(f.ui.state.error, '권한이 없어요.');
 });

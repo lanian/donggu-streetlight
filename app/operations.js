@@ -85,9 +85,13 @@
           state.orders = rows; state.cursor = cursor; state.hasMore = hasMore; state.workMeta = meta; state.workQueryKey = key;
           state.inventory = inventory.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
           state.settings = { ...state.settings, ...(settings.find(x => x.id === 'operations') || {}) };
-          state.loaded = true; state.error = ''; state.at = meta?.fetchedAt || Date.now();
+          state.loaded = true; state.error = ''; state.offlineError = false; state.at = meta?.fetchedAt || Date.now();
           if (subscriptions) bindWorkUpdates();
-        } catch (error) { state.error = error.message || '업무 기록을 불러오지 못했어요.'; }
+        } catch (error) {
+          // Only connection failures wait for the signal; the list still never shows unconfirmed server data.
+          state.offlineError = offlineFailure(error);
+          state.error = (error.message || '업무 기록을 불러오지 못했어요.') + (state.offlineError ? ' 연결되면 자동으로 다시 불러와요. 미리 준비한 작업은 관리 현황의 출동 자료에서 볼 수 있어요.' : '');
+        }
         append = false;
       } while (reloadRequested);
       loading = null; notify(); return state;
@@ -916,6 +920,7 @@
     api = context;
     root.DGOffline.register('work', job => root.DGWorkCommands.execute(job, { db: api.database(), fb: api.firebase(), user: api.state().me, admin: admin() }));
     if (attached) return; attached = true;
+    if (root.addEventListener) root.addEventListener('online', () => { if (state.error && state.offlineError && !loading) { state.error = ''; state.offlineError = false; notify(); load(true); } });
     document.addEventListener('click', e => { const button = e.target.closest('[data-dg]'); if (!button) return; Promise.resolve().then(() => handle(button)).catch(error => api.toast(error.message || '처리하지 못했어요.')); });
     document.addEventListener('input', e => {
       if (e.target.id === 'woLight') { const dl = Q('#woLightChoices'); if (dl) dl.innerHTML = lightSuggestions(e.target.value); }
