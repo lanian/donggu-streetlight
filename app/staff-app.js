@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v75-visit-plan-reorder";
+const APP_VER="v76-asset-facility-reads";
 const RELEASE_NOTES=[
+  {v:"v76-asset-facility-reads",d:"2026-11-13",t:"시설 화면의 분전함·회로·부품 이력을 그 시설 자료만 읽어 표시 · 서버 읽기와 데이터 사용량 감소"},
   {v:"v75-visit-plan-reorder",d:"2026-11-13",t:"방문계획 지도에서 방문지를 눌러 다음 방문지로·한 칸 앞·한 칸 뒤로 순서 변경"},
   {v:"v74-maintenance-fixes",d:"2026-11-13",t:"철거 시설이 있어도 정기점검 회차 진행, 작업 수정 중 현장 완료 입력 보존, 출동 자료 보관 기기의 입력 지연 개선, 검수 대기 담당자 변경 안내, 이전 작업의 배정 미확인 알림 정리, 연결 복구 시 작업 목록 자동 재조회, 열린 장애가 있는 분전함 사용 종료 방지, 주민 신고 화면 전화 연결"},
   {v:"v73-maintenance",d:"2026-11-12",t:"배정 확인·보류, 분전함·공동 장애, 점검 증빙·정기점검·부품 이력·오프라인 출동 자료 추가"},
