@@ -29,8 +29,11 @@ async function fixture(lights, answer = true) {
     byId: id => byId.get(id), render() {}, inDong: () => true, dongOptions: () => '', toast: message => messages.push(message), navGen: () => 0, navAlive: () => true, navigate() {} };
   vmContext.DGPreventive.attach(api); await vmContext.DGPreventive.load();
   // Press the plan's "이번 회차 생성" button through the same delegated click handler the page uses.
-  const button = { disabled: false, isConnected: true, dataset: { pm: 'generate', id: 'plan' } };
-  return { dump, asked, messages, generate: async () => { listeners.click({ target: { closest: () => button } }); await settle(); } };
+  // generate() disables the button first and re-enables it in its finally block, so the button returning
+  // to enabled marks the end of the whole flow regardless of how slow the hashing is under load.
+  let disabled = false, finished;
+  const button = { isConnected: true, dataset: { pm: 'generate', id: 'plan' }, get disabled() { return disabled; }, set disabled(value) { if (disabled && !value && finished) finished(); disabled = value; } };
+  return { dump, asked, messages, generate: async () => { const done = new Promise(resolve => { finished = resolve; }); listeners.click({ target: { closest: () => button } }); await done; await settle(); } };
 }
 const light = (id, extra = {}) => ({ id, code: 'C-' + id, dong: '동명동', ...extra });
 
