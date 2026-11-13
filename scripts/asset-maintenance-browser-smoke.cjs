@@ -95,6 +95,11 @@ const poll = async (page, fn, arg) => { for (let i = 0; i < 150; i++) { if (awai
     for (const id of await page.evaluate(() => assetLights)) await page.locator('[data-am-pick="' + id + '"]').check();
     await page.locator('[data-am="save"]').click(); await poll(page, async () => (await db.readAll('outageIncidents')).length === 1);
     const incidentId = await page.evaluate(async () => (await db.readAll('outageIncidents'))[0].id);
+    await page.evaluate(id => DGAssetMaintenance.edit('cabinet', id), cabinetId);
+    await page.locator('#amDisabled').check(); await page.locator('[data-am="save"]').click();
+    await poll(page, () => /열린 장애/.test(document.querySelector('#amForm')?.innerText || ''));
+    assert.equal(await page.evaluate(async id => !!(await db.doc('cabinets/' + id).get()).data().disabled, cabinetId), false);
+    checks.push('a cabinet under an open outage is not retired, so the outage stays resolvable');
     await page.evaluate(id => DGAssetMaintenance.edit('incident', id), incidentId);
     await page.locator('#amStatus').selectOption('resolved'); await page.locator('#amResolution').fill('두 시설 현장 복구 확인');
     await page.locator('[data-am="save"]').click(); assert.equal(await page.evaluate(async id => (await db.doc('outageIncidents/' + id).get()).data().status, incidentId), 'open');

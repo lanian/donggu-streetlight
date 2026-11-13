@@ -102,3 +102,17 @@ test('Firestore preparation completes every reference read before writes and sup
   await Commands.execute(job('incident', 'outage', incident()), { ...f.context, user: 'local', fb });
   assert.equal(records.get('outageIncidents/outage').status, 'open'); assert.equal(records.has('assetOperations/op-incident'), true);
 });
+// Rules and commands require an open outage's cabinet and circuit to be in use, so retiring one under an
+// open outage would leave that outage impossible to resolve. Disabling is refused while any outage is open.
+test('open outages on a cabinet or circuit are reported before it is retired', () => {
+  const Core = require('../../app/asset-maintenance-core.js');
+  const incidents = [
+    { id: 'open-cab', title: '분전함 전체 소등', status: 'open', cabinetId: 'cab', circuitId: '' },
+    { id: 'open-cir', title: '1회로 소등', status: 'open', cabinetId: 'cab', circuitId: 'cir' },
+    { id: 'closed', title: '복구한 장애', status: 'resolved', cabinetId: 'cab', circuitId: 'cir' },
+    { id: 'other', title: '다른 분전함', status: 'open', cabinetId: 'other', circuitId: 'x' }
+  ];
+  assert.deepEqual(Core.openIncidentsOn('cabinet', 'cab', incidents).map(row => row.id), ['open-cab', 'open-cir']);
+  assert.deepEqual(Core.openIncidentsOn('circuit', 'cir', incidents).map(row => row.id), ['open-cir']);
+  assert.deepEqual(Core.openIncidentsOn('cabinet', 'none', incidents), []);
+});

@@ -85,9 +85,13 @@
           state.orders = rows; state.cursor = cursor; state.hasMore = hasMore; state.workMeta = meta; state.workQueryKey = key;
           state.inventory = inventory.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
           state.settings = { ...state.settings, ...(settings.find(x => x.id === 'operations') || {}) };
-          state.loaded = true; state.error = ''; state.at = meta?.fetchedAt || Date.now();
+          state.loaded = true; state.error = ''; state.offlineError = false; state.at = meta?.fetchedAt || Date.now();
           if (subscriptions) bindWorkUpdates();
-        } catch (error) { state.error = error.message || '업무 기록을 불러오지 못했어요.'; }
+        } catch (error) {
+          // Only connection failures wait for the signal; the list still never shows unconfirmed server data.
+          state.offlineError = offlineFailure(error);
+          state.error = (error.message || '업무 기록을 불러오지 못했어요.') + (state.offlineError ? ' 연결되면 자동으로 다시 불러와요. 미리 준비한 작업은 관리 현황의 출동 자료에서 볼 수 있어요.' : '');
+        }
         append = false;
       } while (reloadRequested);
       loading = null; notify(); return state;
@@ -376,7 +380,7 @@
   }
   function renderEdit(d, order) {
     const id = order.id;
-    api.navigate(heading('작업 정보 수정', order.code + ' · ' + C.STATES[order.status] + ' 상태를 유지해요.') + '<div class="panel" id="woEditForm" data-draft-id="' + E(d.storageId) + '" data-editor-token="' + E(editorTokens.get(d)) + '"><fieldset style="border:0;padding:0;margin:0;min-width:0"' + (d.pending ? ' disabled' : '') + '><label class="f" for="woEditTitle">작업 제목</label><input class="f-in" id="woEditTitle" maxlength="120" value="' + E(d.title) + '"><label class="f" for="woEditDescription">작업 내용</label><textarea class="f-in" id="woEditDescription" maxlength="2000">' + E(d.description) + '</textarea><div class="grid2"><div><label class="f" for="woEditType">작업 종류</label><select class="f-in" id="woEditType">' + options(C.TYPES, d.type) + '</select></div><div><label class="f" for="woEditPriority">우선순위</label><select class="f-in" id="woEditPriority">' + options(C.PRIORITIES, d.priority) + '</select></div></div><label class="f" for="woEditAssignee">담당자</label><select class="f-in" id="woEditAssignee">' + staffOptions(d.assignedTo) + '</select><label class="f" for="woEditDue">완료 기한 (비우면 기한 해제)</label><input class="f-in" type="date" id="woEditDue" value="' + dateInput(d.dueAt) + '">' + (order.status !== 'completed' ? plannedEditor(d.parts || []) : '<p class="muted">검수 대기 중인 작업의 실제 자재 내역은 보완 요청 후 변경할 수 있어요.</p>') + '<button class="btn sodium block" data-dg="save-work-edit">정보 수정 저장</button></fieldset><p class="muted" id="woEditState" role="status">' + (d.pending ? '저장 대기함에서 전송 결과를 확인 중이에요.' : '입력 내용을 자동 보관해요. 시설·신고·사진·처리 상태는 유지돼요.') + '</p><button class="btn ghost block" data-dg="open-work" data-id="' + E(id) + '">작업 상세 확인</button></div>', { key: 'work:edit:' + id, reopen: () => openEdit(id, d.storageId) });
+    api.navigate(heading('작업 정보 수정', order.code + ' · ' + C.STATES[order.status] + ' 상태를 유지해요.') + '<div class="panel" id="woEditForm" data-draft-id="' + E(d.storageId) + '" data-editor-token="' + E(editorTokens.get(d)) + '"><fieldset style="border:0;padding:0;margin:0;min-width:0"' + (d.pending ? ' disabled' : '') + '><label class="f" for="woEditTitle">작업 제목</label><input class="f-in" id="woEditTitle" maxlength="120" value="' + E(d.title) + '"><label class="f" for="woEditDescription">작업 내용</label><textarea class="f-in" id="woEditDescription" maxlength="2000">' + E(d.description) + '</textarea><div class="grid2"><div><label class="f" for="woEditType">작업 종류</label><select class="f-in" id="woEditType">' + options(C.TYPES, d.type) + '</select></div><div><label class="f" for="woEditPriority">우선순위</label><select class="f-in" id="woEditPriority">' + options(C.PRIORITIES, d.priority) + '</select></div></div><label class="f" for="woEditAssignee">담당자</label><select class="f-in" id="woEditAssignee"' + (order.status === 'completed' ? ' disabled' : '') + '>' + staffOptions(d.assignedTo) + '</select><label class="f" for="woEditDue">완료 기한 (비우면 기한 해제)</label><input class="f-in" type="date" id="woEditDue" value="' + dateInput(d.dueAt) + '">' + (order.status !== 'completed' ? plannedEditor(d.parts || []) : '<p class="muted">검수 대기 중인 작업의 담당자와 실제 자재 내역은 보완 요청 후 변경할 수 있어요.</p>') + '<button class="btn sodium block" data-dg="save-work-edit">정보 수정 저장</button></fieldset><p class="muted" id="woEditState" role="status">' + (d.pending ? '저장 대기함에서 전송 결과를 확인 중이에요.' : '입력 내용을 자동 보관해요. 시설·신고·사진·처리 상태는 유지돼요.') + '</p><button class="btn ghost block" data-dg="open-work" data-id="' + E(id) + '">작업 상세 확인</button></div>', { key: 'work:edit:' + id, reopen: () => openEdit(id, d.storageId) });
   }
   function showEditConflict(saved, order, key, owner) {
     if (!ownsContext(owner)) return;
@@ -535,6 +539,21 @@
     const items = C.attentionItems(rows, owner.actor, admin(), Date.now());
     api.navigate(heading('미확인·긴급 알림함', admin() ? '조회 권한 내 전체 미완료 작업' : '내 담당 미완료 작업') + '<div id="woAttention"><div class="panel"><p>배정 미확인·긴급·기한 임박/초과·보류 확인일을 모아 보여요. 앱 밖의 알림 발송은 별도 운영 연결이 필요해요.</p><p class="muted">' + E(sourceText(metadata)) + ' · 대상 ' + items.length + '건</p><button class="btn ghost" data-dg="attention-work">다시 조회</button></div>' + (error ? '<p class="notice" role="alert">' + E(error) + ' 전체 자료를 확인하지 못했어요. 다시 조회해 주세요.</p>' : items.map(item => '<button class="light-row" data-dg="open-work" data-id="' + E(item.id) + '"><b>' + E(item.title) + '</b><small>' + E(item.reasons.join(' · ')) + '</small><small>' + E(label(item.assignedTo)) + ' · 기한 ' + time(item.dueAt) + '</small></button>').join('') || '<p class="empty">현재 확인할 알림이 없어요.</p>') + '</div>', { key: 'work:attention', reopen: openAttention });
   }
+  // Parts and measurements are also edited by administrators. A completion draft records the values it
+  // started from, so carrying it to a newer revision can tell who changed what: values the worker did not
+  // touch follow the latest work, and values the worker entered are kept (they record what was actually
+  // used) but flagged for review when the administrator changed them too or the draft predates baselines.
+  const fieldBaselines = order => ({ partsBaseline: JSON.stringify(order.parts || []), measurementsBaseline: JSON.stringify(order.measurements || []) });
+  function carryFieldValues(d, order) {
+    let review = false;
+    for (const [key, baseKey] of [['parts', 'partsBaseline'], ['measurements', 'measurementsBaseline']]) {
+      const mine = JSON.stringify(d[key] || []), latest = JSON.stringify(order[key] || []), base = d[baseKey];
+      if (mine === latest) continue;
+      if (typeof base === 'string' && mine === base) d[key] = clone(order[key] || []);
+      else if (typeof base !== 'string' || latest !== base) review = true;
+    }
+    Object.assign(d, fieldBaselines(order)); return review;
+  }
   async function openWork(id, resumeId, navigation = {}) {
     const owned = () => !navigation.isCurrent || navigation.isCurrent();
     if (!owned()) return;
@@ -551,11 +570,23 @@
     state.lightVersion = (api.byId(order.lightId) || {}).updatedAt || null;
     state.reportVersions = Object.fromEntries((order.reportIds || []).map(reportId => { const r = state.reports.find(x => x.id === reportId); return [reportId, r && (r.updatedAt || r.createdAt || null)]; }));
     const token = ++detailToken;
-    state.completion = oldCompletion && oldCompletion.expectedRevision === order.revision ? oldCompletion : { workId: id, lightId: order.lightId, expectedRevision: order.revision, photos: [], existingPhotos: order.afterPhotos || [], parts: order.parts || [], measurements: order.measurements || [], note: order.completionNote || '', diagnosis: order.diagnosis || '', repairAction: order.repairAction || '' };
+    // An administrator edit (due date, priority, …) raises the revision while field input is unsent. Carry
+    // that input onto the latest revision in place, unless a submitted command still owns the draft or the
+    // work has left the field stages; the completion is still validated against the latest work on submit.
+    const rebased = oldCompletion && oldCompletion.expectedRevision !== order.revision && !oldCompletion.pending && ['assigned', 'in_progress'].includes(order.status) && order.assignedTo === owner.actor;
+    let reviewParts = false;
+    if (rebased) { delete oldCompletion.process; reviewParts = carryFieldValues(oldCompletion, order); Object.assign(oldCompletion, { lightId: order.lightId, expectedRevision: order.revision, existingPhotos: order.afterPhotos || [] }); }
+    state.completion = oldCompletion && oldCompletion.expectedRevision === order.revision ? oldCompletion : { workId: id, lightId: order.lightId, expectedRevision: order.revision, photos: [], existingPhotos: order.afterPhotos || [], parts: order.parts || [], measurements: order.measurements || [], ...fieldBaselines(order), note: order.completionNote || '', diagnosis: order.diagnosis || '', repairAction: order.repairAction || '' };
     const completion = adoptDraft(state.completion, 'workCompletion', oldCompletion && oldCompletion.expectedRevision === order.revision ? resumeId || id : id, !!(oldCompletion && oldCompletion.expectedRevision === order.revision));
     if (oldCompletion && oldCompletion.expectedRevision !== order.revision) {
       completion.storageId = uuid('completion'); draftVersions.set(completion, null);
       api.toast('작업 버전이 바뀌었어요. 이전 초안은 대기함에 남기고 최신 작업을 열었어요.');
+    }
+    if (rebased) {
+      // The carried draft is already in memory; a storage failure must not keep the work from opening.
+      try { await writeDraft(completion, 'workCompletion'); } catch (error) { if (current()) api.toast('기기에 초안을 저장하지 못했어요. 화면의 입력은 유지돼요. ' + error.message); }
+      if (!current()) return;
+      api.toast(reviewParts ? '작업 정보가 바뀌었어요. 조치 내용과 사진은 최신 작업에 옮겼어요. 관리자가 바꾼 예정 자재·측정값이 있어 입력한 값을 유지했으니, 사용 자재를 확인한 뒤 요청해 주세요.' : '작업 정보(담당·기한·자재 등)가 바뀌었어요. 입력한 조치 내용과 사진은 최신 작업에 옮겼으니 확인 후 요청해 주세요.');
     }
     const allowed = C.actions(order, api.state().me, admin());
     api.navigate(heading(order.title, order.code + ' · ' + C.STATES[order.status]) + '<div class="panel dg-work-detail" id="woDetail" data-draft-id="' + E(completion.storageId) + '" data-editor-token="' + E(editorTokens.get(completion)) + '"><fieldset style="border:0;padding:0;margin:0;min-width:0"' + (completion.pending ? ' disabled' : '') + '>' +
@@ -889,6 +920,7 @@
     api = context;
     root.DGOffline.register('work', job => root.DGWorkCommands.execute(job, { db: api.database(), fb: api.firebase(), user: api.state().me, admin: admin() }));
     if (attached) return; attached = true;
+    if (root.addEventListener) root.addEventListener('online', () => { if (state.error && state.offlineError && !loading) { state.error = ''; state.offlineError = false; notify(); load(true); } });
     document.addEventListener('click', e => { const button = e.target.closest('[data-dg]'); if (!button) return; Promise.resolve().then(() => handle(button)).catch(error => api.toast(error.message || '처리하지 못했어요.')); });
     document.addEventListener('input', e => {
       if (e.target.id === 'woLight') { const dl = Q('#woLightChoices'); if (dl) dl.innerHTML = lightSuggestions(e.target.value); }

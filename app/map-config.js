@@ -5,7 +5,7 @@
    Only public, domain-restricted API keys belong here; never use server secrets.
    Example (disabled):
    { name: '허가된 기관 지도', urlTemplate: 'https://maps.example/{z}/{x}/{y}.png?key={key}',
-     attribution: '© 지도 제공기관', maxZoom: 19, requiresKey: true, apiKey: '05098281-437F-478D-B584-059393B1904F',
+     attribution: '© 지도 제공기관', maxZoom: 19, requiresKey: true, apiKey: 'YOUR-PUBLIC-DOMAIN-RESTRICTED-KEY',
      offlineAllowed: true, cacheDays: 7 }
 */
 globalThis.DONGGU_MAP_PROVIDER = null;

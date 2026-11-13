@@ -12,9 +12,9 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 async function until(check) { for (let n = 0; n < 300; n++) { if (await check()) return; await new Promise(r => setTimeout(r, 1)); } assert.fail('Expected UI state was not reached'); }
 async function fixture(shared) {
   let fields = {}, closes = 0, dbJSON = '{}', html = '';
-  const events = {}, messages = [], control = { failDraft: false, photo: null };
+  const events = {}, windowEvents = {}, messages = [], control = { failDraft: false, photo: null };
   const document = { querySelector: s => fields[s] || null, querySelectorAll: s => s === '[data-work-report]:checked' ? (ctx.DGOperations.state.draft?.reportIds || []).map(id => ({ dataset: { workReport: id } })) : [], addEventListener: (name, fn) => (events[name] ||= []).push(fn) };
-  const ctx = vm.createContext({ console, Date, Math, TextEncoder, structuredClone, crypto: webcrypto, document, navigator: { onLine: true, locks: { request: async (_, fn) => fn() } }, setTimeout, clearTimeout, confirm: () => true, DGOperationsCore: C, DGWorkCommands: W, DGSecurity: { safeImageSrc: s => s } });
+  const ctx = vm.createContext({ console, Date, Math, TextEncoder, structuredClone, crypto: webcrypto, document, navigator: { onLine: true, locks: { request: async (_, fn) => fn() } }, setTimeout, clearTimeout, addEventListener: (name, fn) => (windowEvents[name] ||= []).push(fn), confirm: () => true, DGOperationsCore: C, DGWorkCommands: W, DGSecurity: { safeImageSrc: s => s } });
   vm.runInContext(source('app/data.js'), ctx);
   const db = ctx.DGData.createLocalDB({ storage: { getItem: () => dbJSON, setItem: (_, value) => { dbJSON = value; } }, indexedDB: null });
   vm.runInContext(source('app/offline.js'), ctx);
@@ -49,6 +49,7 @@ async function fixture(shared) {
   return { ctx, api, ui: ctx.DGOperations, offline, adapter, control, messages, db, field: id => fields[id], closed: () => closes, html: () => html,
     showOther(markup) { for (const field of Object.values(fields)) field.isConnected = false; fields = {}; html = markup; },
     async open(lightId = 'a', reportId, resumeId) { await ctx.DGOperations.newWork(lightId, reportId, resumeId); return ctx.DGOperations.state.draft; },
+    fireWindow(name) { for (const fn of windowEvents[name] || []) fn({}); },
     input(id, value) { fields[id].value = value; emit('input', fields[id]); },
     fireInput(target) { emit('input', target); },
     addPhoto() { const element = fields['#woBefore']; element.files = [{ type: 'image/png', size: 1 }]; emit('change', element); },
@@ -150,4 +151,81 @@ test('client-side district filters keep paging until all matching work is accoun
   assert.equal(calls, 4); assert.equal(f.ui.selectedOrders().length, 40); assert.equal(f.ui.state.hasMore, false);
   assert.equal(f.ui.state.workMeta.source, 'local');
   const exported = await f.ui.fullSelectedOrders(); assert.equal(exported.rows.length, 40);
+});
+
+// A field worker's completion input (note, cause, after-photos) must survive an administrator editing
+// the work (due date, priority, …) in the meantime. Reopening used to start a blank draft under a new key,
+// and the outbox "이어 쓰기" hit the same revision check, so the photos could not be recovered.
+async function completionAfterAdminEdit(f, extra = {}, change = {}) {
+  const base = { lightId: 'a', code: 'A', title: '램프 교체', status: 'in_progress', assignedTo: 'local', priority: '보통', createdAt: 1, updatedAt: 1, revision: 2, dueAt: 0, beforePhotos: [], afterPhotos: [], reportIds: [], parts: [], measurements: [] };
+  await f.db.doc('workOrders/w1').set(base);
+  await f.ui.openWork('w1');
+  const d = f.ui.state.completion; d.photos.push({ id: 'after-1', data: 'data:image/jpeg;base64,AA==', label: '조치 후' }); Object.assign(d, extra);
+  f.field('#woCompletionNote').value = '안정기 교체'; await f.ui.persistCompletion(); if (extra.pending) await f.ui.writeDraft(d, 'workCompletion');
+  await f.db.doc('workOrders/w1').set({ ...base, dueAt: 5000, revision: 3, updatedAt: 2, ...change });
+  f.ui.state.completion = null;
+}
+test('a newer work revision carries the unfinished completion input instead of opening a blank draft', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f);
+  await f.ui.openWork('w1');
+  const reopened = f.ui.state.completion;
+  assert.equal(reopened.expectedRevision, 3); assert.equal(reopened.note, '안정기 교체'); assert.deepEqual([...reopened.photos.map(p => p.id)], ['after-1']);
+  assert.equal(reopened.storageId, 'w1');
+  f.ui.state.completion = null; await f.ui.openWork('w1');
+  assert.equal(f.ui.state.completion.note, '안정기 교체', 'reopening keeps restoring the same draft');
+  assert.deepEqual([...(await f.offline.list('workCompletion')).map(row => row.id)], ['w1'], 'no blank copy is left under another key');
+});
+test('a completion still waiting to be sent is not rebased onto the newer revision', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f, { pending: 'queued-completion' });
+  await f.ui.openWork('w1');
+  const stored = await f.offline.get('workCompletion', 'w1');
+  assert.equal(stored.pending, 'queued-completion'); assert.equal(stored.expectedRevision, 2);
+});
+test('the edit form locks the assignee of a work awaiting review and explains how to reassign it', async () => {
+  const f = await fixture();
+  await f.db.doc('workOrders/done').set({ lightId: 'a', code: 'A', title: '램프 교체', status: 'completed', assignedTo: 'local', completedBy: 'local', completedAt: 2, priority: '보통', type: '수리', createdAt: 1, updatedAt: 2, revision: 3, dueAt: 0, beforePhotos: [], afterPhotos: ['x'], reportIds: [], parts: [], measurements: [], completionNote: '교체' });
+  let markup = ''; f.api.navigate = html => { markup = html; };
+  await f.ui.openEdit('done');
+  assert.match(markup, /id="woEditAssignee" disabled/);
+  assert.match(markup, /담당자와 실제 자재 내역은 보완 요청 후/);
+});
+
+const plannedByAdmin = [{ name: '안정기', qty: 1, unitCost: 1000 }], usedByWorker = [{ name: '램프', qty: 2, unitCost: 500 }];
+test('planned parts changed by the administrator replace untouched draft parts when the input is carried over', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f, {}, { parts: plannedByAdmin });
+  await f.ui.openWork('w1');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.ui.state.completion.parts)), plannedByAdmin); assert.equal(f.ui.state.completion.note, '안정기 교체');
+});
+test('parts the worker entered are kept but flagged for review when the administrator also changed them', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f, { parts: usedByWorker }, { parts: plannedByAdmin });
+  await f.ui.openWork('w1');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.ui.state.completion.parts)), usedByWorker);
+  assert.ok(f.messages.some(message => /자재/.test(message) && /확인/.test(message)));
+});
+test('a work reassigned to someone else does not pick up the previous assignee draft', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f, {}, { assignedTo: 'worker' });
+  await f.ui.openWork('w1');
+  assert.equal((await f.offline.get('workCompletion', 'w1')).expectedRevision, 2);
+});
+test('a device storage failure while carrying the input over still opens the work', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f);
+  f.control.failDraft = true; await f.ui.openWork('w1');
+  assert.match(f.html(), /id="woDetail"/); assert.equal(f.ui.state.completion.note, '안정기 교체');
+});
+
+// A failed list load used to stay failed until the worker pressed refresh, even after the signal returned.
+const unreachable = () => Object.assign(new Error('Failed to get documents from server.'), { code: 'unavailable' });
+test('a work list that failed for lack of connection reloads by itself once the device is back online', async () => {
+  const f = await fixture(); let failing = true;
+  f.api.readPage = async (name, options) => { if (failing) throw unreachable(); return f.ctx.DGData.readPage(f.db, name, options); };
+  await f.ui.load(true);
+  assert.match(f.ui.state.error, /연결되면 자동으로 다시/); assert.match(f.ui.state.error, /출동 자료/);
+  failing = false; f.fireWindow('online');
+  await until(() => f.ui.state.loaded && !f.ui.state.error);
+});
+test('a permission failure is not retried automatically when the connection returns', async () => {
+  const f = await fixture(); let calls = 0;
+  f.api.readPage = async () => { calls++; throw Object.assign(new Error('권한이 없어요.'), { code: 'permission-denied' }); };
+  await f.ui.load(true); f.fireWindow('online'); await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(calls, 1); assert.equal(f.ui.state.error, '권한이 없어요.');
 });

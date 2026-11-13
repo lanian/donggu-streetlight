@@ -62,6 +62,7 @@
     if (input.type !== undefined) { if (!TYPES.includes(input.type)) fail('작업 종류를 확인해 주세요.'); next.type = input.type; }
     if (input.priority !== undefined) { if (!PRIORITIES.includes(input.priority)) fail('우선순위를 확인해 주세요.'); next.priority = input.priority; }
     if (input.assignedTo !== undefined) next.assignedTo = text(input.assignedTo, 180);
+    if (next.assignedTo !== order.assignedTo && next.status === 'completed') fail('검수 대기 작업의 담당자는 보완 요청으로 작업을 되돌린 뒤 바꿔 주세요.', 'failed-precondition');
     if (next.assignedTo !== order.assignedTo) { next.acknowledgedAt = 0; next.acknowledgedBy = ''; next.hold = null; }
     if (next.status !== 'draft' && !next.assignedTo) fail('담당자를 선택해 주세요.');
     if (input.dueAt !== undefined) { next.dueAt = finite(input.dueAt, 0, Number.MAX_SAFE_INTEGER, '완료 기한'); if (!Number.isSafeInteger(next.dueAt)) fail('완료 기한을 확인해 주세요.'); }
@@ -125,9 +126,11 @@
     return next;
   }
   function attentionItems(orders, actor, admin, now = Date.now()) {
-    return (orders || []).filter(order => !['verified', 'cancelled'].includes(order.status) && (admin || order.assignedTo === actor)).map(order => {
-      const reasons = [];
-      if (order.assignedTo && ['assigned', 'in_progress'].includes(order.status) && (!order.acknowledgedAt || order.acknowledgedBy !== order.assignedTo)) reasons.push('배정 미확인');
+    // Work handed in for review is the administrator's to act on. A work with no acknowledgedAt field at all
+    // was assigned before acknowledgement existed; reassignment records acknowledgedAt: 0 and flags it again.
+    return (orders || []).filter(order => !['verified', 'cancelled'].includes(order.status) && (admin || order.assignedTo === actor && order.status !== 'completed')).map(order => {
+      const reasons = [], tracksAcknowledgement = order.workflowVersion === 2 || Object.hasOwn(order, 'acknowledgedAt');
+      if (order.assignedTo && tracksAcknowledgement && ['assigned', 'in_progress'].includes(order.status) && (!order.acknowledgedAt || order.acknowledgedBy !== order.assignedTo)) reasons.push('배정 미확인');
       if (order.priority === '긴급') reasons.push('긴급');
       if (order.dueAt && order.dueAt < now) reasons.push('기한 초과'); else if (order.dueAt && order.dueAt <= now + 86400000) reasons.push('기한 임박');
       if (order.hold?.nextAt <= now) reasons.push('보류 확인일 도래');

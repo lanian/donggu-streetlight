@@ -75,5 +75,7 @@
     if (entity === 'replacement' && (record.revision !== 1 || data.replacedAt > record.createdAt || record.updatedAt !== record.createdAt || record.updatedBy !== record.createdBy)) fail('교체 이력은 최초 기록을 유지해야 해요.');
     return { ...data, ...Object.fromEntries(META.map(key => [key, record[key]])) };
   }
-  return Object.freeze({ COLLECTIONS, COMPONENTS, META, MAX_TIME, normalize, validateRecord, id, actor, fail, clone });
+  // Outages that would become impossible to resolve if this cabinet or circuit were retired.
+  function openIncidentsOn(entity, recordId, incidents) { const key = entity === 'cabinet' ? 'cabinetId' : 'circuitId'; return (incidents || []).filter(row => row.status !== 'resolved' && row[key] === recordId); }
+  return Object.freeze({ COLLECTIONS, COMPONENTS, META, MAX_TIME, normalize, validateRecord, openIncidentsOn, id, actor, fail, clone });
 });

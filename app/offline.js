@@ -84,8 +84,10 @@
       }),
       remove: key => transact('readwrite', store => store.delete(ns + '|' + key)),
       list: prefix => transact('readonly', (store, done) => {
-        const r = store.index('namespace').getAll(ns);
-        r.onsuccess = () => done(r.result.filter(x => x.item.startsWith(prefix)).map(x => x.value));
+        // Read only this kind's primary-key range: draft checks run on every autosave, and loading the
+        // whole namespace would also copy the multi-megabyte field kit packet each time.
+        const lower = ns + '|' + prefix, r = store.getAll(IDBKeyRange.bound(lower, lower + '￿'));
+        r.onsuccess = () => done(r.result.filter(x => x.namespace === ns && x.item.startsWith(prefix)).map(x => x.value));
       }),
       clear: () => transact('readwrite', store => {
         const r = store.index('namespace').openKeyCursor(ns);

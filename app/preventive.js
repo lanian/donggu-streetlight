@@ -100,12 +100,30 @@
     if (currentJob && ['failed', 'conflict'].includes(currentJob.state)) await captured.offline.discard(currentJob.id); if (!owns(captured)) return false;
     return clear(d);
   }
+  // A removed (or no longer registered) facility would block every future round, because each round
+  // needs a work order per plan target. The administrator confirms dropping those targets; the change is
+  // an ordinary plan save, so its receipt and revision record who removed them and when. A plan is never
+  // emptied: a registry that failed to load must not erase the targets. Returns true to continue generating.
+  async function dropGoneTargets(plan, captured, gen) {
+    const gone = plan.lightIds.filter(lightId => { const light = api.byId(lightId); return !light || light.removed; });
+    if (!gone.length) return true;
+    if (gone.length === plan.lightIds.length) throw new Error('계획의 대상 시설이 모두 철거·제외됐거나 대장에서 확인되지 않아요. 대장을 확인하고 필요하면 계획을 중지해 주세요.');
+    const names = gone.map(lightId => api.byId(lightId)?.code || lightId), shown = names.slice(0, 5).join(', ') + (names.length > 5 ? ' 외 ' + (names.length - 5) + '곳' : '');
+    if (!await ask('철거·제외됐거나 대장에서 확인되지 않는 시설 ' + gone.length + '곳(' + shown + ')이 계획에 있어요. 계획에서 빼고 이번 회차를 진행할까요?', { ok: '계획에서 빼고 진행' })) return false;
+    if (!owns(captured) || gen != null && !api.navAlive(gen)) return false;
+    const lightIds = plan.lightIds.filter(lightId => !gone.includes(lightId));
+    const job = { id: uuid('pm-prune'), kind: 'save', planId: plan.id, actor: captured.actor, at: Date.now(), expectedRevision: plan.revision, data: { ...plan, lightIds } };
+    const result = await captured.offline.submit('preventive', job, { id: job.id, summary: '정기점검 대상 정리 · ' + plan.title }); if (!owns(captured)) return false;
+    if (result.state !== 'synced') throw new Error(result.error || '대상 정리를 대기함에서 확인한 뒤 이번 회차 생성을 이어 주세요.');
+    plan.lightIds = lightIds; plan.revision += 1; return true;
+  }
   async function generate(id, button) {
     const captured = owner(), gen = api.navGen?.(), plan = clone(state.plans.find(plan => plan.id === id)); if (!plan || !api.can('admin')) return;
     button.disabled = true;
     try {
       const all = await api.readAll('workOrders', { where: [['status', 'in', ['draft', 'assigned', 'in_progress', 'completed']]], requireServer: !!api.firebase() }); if (!owns(captured)) return;
-      const selected = plan.lightIds.map(lightId => { const light = api.byId(lightId); if (!light || light.removed) throw new Error('계획 대상 시설을 확인할 수 없어요. 대장과 계획을 확인해 주세요.'); const active = all.filter(work => work.lightId === lightId && work.type === plan.type).sort((a, b) => a.createdAt - b.createdAt)[0]; return { light: { id: light.id, code: light.code, dong: light.dong }, candidateWorkId: active?.id || '' }; });
+      if (!await dropGoneTargets(plan, captured, gen)) return;
+      const selected = plan.lightIds.map(lightId => { const light = api.byId(lightId); const active = all.filter(work => work.lightId === lightId && work.type === plan.type).sort((a, b) => a.createdAt - b.createdAt)[0]; return { light: { id: light.id, code: light.code, dong: light.dong }, candidateWorkId: active?.id || '' }; });
       for (let index = 0; index < selected.length; index += P.CHUNK) {
         if (!owns(captured)) return; const job = { id: uuid('pm-generate'), kind: 'generate', planId: id, actor: captured.actor, at: Date.now(), expectedRevision: plan.revision, scheduledAt: plan.nextAt, targets: selected.slice(index, index + P.CHUNK) };
         const result = await captured.offline.submit('preventive', job, { id: job.id, summary: '정기점검 회차 생성 · ' + plan.title }); if (!owns(captured)) return;
