@@ -62,3 +62,18 @@ test('a work awaiting review cannot be reassigned but its other details can stil
   const corrected = C.updateOrder(completed, { expectedRevision: 2, title: '제목 정정', assignedTo: 'local' }, 'admin', true, 3000);
   assert.equal(corrected.title, '제목 정정'); assert.equal(corrected.acknowledgedBy, 'local'); assert.equal(corrected.acknowledgedAt, 2000);
 });
+// Works assigned before acknowledgement existed (no acknowledgedAt field at all) would otherwise all appear
+// as "배정 미확인" right after the upgrade. A legacy work reassigned afterwards records acknowledgedAt: 0 and
+// is flagged again, because that assignment really is unacknowledged.
+test('works assigned before acknowledgement existed are not reported as unacknowledged', () => {
+  const legacy = { id: 'legacy', ...C.createOrder({ title: '이전 작업', assignedTo: 'local' }, { id: 'p', code: 'P' }, 'admin', 1000) };
+  assert.equal(Object.hasOwn(legacy, 'acknowledgedAt'), false);
+  assert.deepEqual(C.attentionItems([legacy], 'local', false, 2000), []);
+  const reassigned = { id: 'legacy', ...C.updateOrder(legacy, { expectedRevision: 1, assignedTo: 'worker' }, 'admin', true, 1500) };
+  assert.ok(C.attentionItems([reassigned], 'worker', false, 2000)[0].reasons.includes('배정 미확인'));
+});
+test('an assignee is not reminded about work already handed in for review, while administrators still are', () => {
+  const handedIn = { id: 'done', ...order({ priority: '긴급', dueAt: 1500 }), status: 'completed', completedBy: 'local', completedAt: 1800 };
+  assert.deepEqual(C.attentionItems([handedIn], 'local', false, 2000), []);
+  assert.deepEqual(C.attentionItems([handedIn], 'admin', true, 2000).map(row => row.id), ['done']);
+});

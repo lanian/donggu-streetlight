@@ -126,9 +126,11 @@
     return next;
   }
   function attentionItems(orders, actor, admin, now = Date.now()) {
-    return (orders || []).filter(order => !['verified', 'cancelled'].includes(order.status) && (admin || order.assignedTo === actor)).map(order => {
-      const reasons = [];
-      if (order.assignedTo && ['assigned', 'in_progress'].includes(order.status) && (!order.acknowledgedAt || order.acknowledgedBy !== order.assignedTo)) reasons.push('배정 미확인');
+    // Work handed in for review is the administrator's to act on. A work with no acknowledgedAt field at all
+    // was assigned before acknowledgement existed; reassignment records acknowledgedAt: 0 and flags it again.
+    return (orders || []).filter(order => !['verified', 'cancelled'].includes(order.status) && (admin || order.assignedTo === actor && order.status !== 'completed')).map(order => {
+      const reasons = [], tracksAcknowledgement = order.workflowVersion === 2 || Object.hasOwn(order, 'acknowledgedAt');
+      if (order.assignedTo && tracksAcknowledgement && ['assigned', 'in_progress'].includes(order.status) && (!order.acknowledgedAt || order.acknowledgedBy !== order.assignedTo)) reasons.push('배정 미확인');
       if (order.priority === '긴급') reasons.push('긴급');
       if (order.dueAt && order.dueAt < now) reasons.push('기한 초과'); else if (order.dueAt && order.dueAt <= now + 86400000) reasons.push('기한 임박');
       if (order.hold?.nextAt <= now) reasons.push('보류 확인일 도래');
