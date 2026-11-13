@@ -155,13 +155,13 @@ test('client-side district filters keep paging until all matching work is accoun
 // A field worker's completion input (note, cause, after-photos) must survive an administrator editing
 // the work (due date, priority, …) in the meantime. Reopening used to start a blank draft under a new key,
 // and the outbox "이어 쓰기" hit the same revision check, so the photos could not be recovered.
-async function completionAfterAdminEdit(f, extra = {}) {
+async function completionAfterAdminEdit(f, extra = {}, change = {}) {
   const base = { lightId: 'a', code: 'A', title: '램프 교체', status: 'in_progress', assignedTo: 'local', priority: '보통', createdAt: 1, updatedAt: 1, revision: 2, dueAt: 0, beforePhotos: [], afterPhotos: [], reportIds: [], parts: [], measurements: [] };
   await f.db.doc('workOrders/w1').set(base);
   await f.ui.openWork('w1');
   const d = f.ui.state.completion; d.photos.push({ id: 'after-1', data: 'data:image/jpeg;base64,AA==', label: '조치 후' }); Object.assign(d, extra);
   f.field('#woCompletionNote').value = '안정기 교체'; await f.ui.persistCompletion(); if (extra.pending) await f.ui.writeDraft(d, 'workCompletion');
-  await f.db.doc('workOrders/w1').set({ ...base, dueAt: 5000, revision: 3, updatedAt: 2 });
+  await f.db.doc('workOrders/w1').set({ ...base, dueAt: 5000, revision: 3, updatedAt: 2, ...change });
   f.ui.state.completion = null;
 }
 test('a newer work revision carries the unfinished completion input instead of opening a blank draft', async () => {
@@ -187,4 +187,27 @@ test('the edit form locks the assignee of a work awaiting review and explains ho
   await f.ui.openEdit('done');
   assert.match(markup, /id="woEditAssignee" disabled/);
   assert.match(markup, /담당자와 실제 자재 내역은 보완 요청 후/);
+});
+
+const plannedByAdmin = [{ name: '안정기', qty: 1, unitCost: 1000 }], usedByWorker = [{ name: '램프', qty: 2, unitCost: 500 }];
+test('planned parts changed by the administrator replace untouched draft parts when the input is carried over', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f, {}, { parts: plannedByAdmin });
+  await f.ui.openWork('w1');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.ui.state.completion.parts)), plannedByAdmin); assert.equal(f.ui.state.completion.note, '안정기 교체');
+});
+test('parts the worker entered are kept but flagged for review when the administrator also changed them', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f, { parts: usedByWorker }, { parts: plannedByAdmin });
+  await f.ui.openWork('w1');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.ui.state.completion.parts)), usedByWorker);
+  assert.ok(f.messages.some(message => /자재/.test(message) && /확인/.test(message)));
+});
+test('a work reassigned to someone else does not pick up the previous assignee draft', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f, {}, { assignedTo: 'worker' });
+  await f.ui.openWork('w1');
+  assert.equal((await f.offline.get('workCompletion', 'w1')).expectedRevision, 2);
+});
+test('a device storage failure while carrying the input over still opens the work', async () => {
+  const f = await fixture(); await completionAfterAdminEdit(f);
+  f.control.failDraft = true; await f.ui.openWork('w1');
+  assert.match(f.html(), /id="woDetail"/); assert.equal(f.ui.state.completion.note, '안정기 교체');
 });

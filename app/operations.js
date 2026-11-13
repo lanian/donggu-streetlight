@@ -535,6 +535,21 @@
     const items = C.attentionItems(rows, owner.actor, admin(), Date.now());
     api.navigate(heading('미확인·긴급 알림함', admin() ? '조회 권한 내 전체 미완료 작업' : '내 담당 미완료 작업') + '<div id="woAttention"><div class="panel"><p>배정 미확인·긴급·기한 임박/초과·보류 확인일을 모아 보여요. 앱 밖의 알림 발송은 별도 운영 연결이 필요해요.</p><p class="muted">' + E(sourceText(metadata)) + ' · 대상 ' + items.length + '건</p><button class="btn ghost" data-dg="attention-work">다시 조회</button></div>' + (error ? '<p class="notice" role="alert">' + E(error) + ' 전체 자료를 확인하지 못했어요. 다시 조회해 주세요.</p>' : items.map(item => '<button class="light-row" data-dg="open-work" data-id="' + E(item.id) + '"><b>' + E(item.title) + '</b><small>' + E(item.reasons.join(' · ')) + '</small><small>' + E(label(item.assignedTo)) + ' · 기한 ' + time(item.dueAt) + '</small></button>').join('') || '<p class="empty">현재 확인할 알림이 없어요.</p>') + '</div>', { key: 'work:attention', reopen: openAttention });
   }
+  // Parts and measurements are also edited by administrators. A completion draft records the values it
+  // started from, so carrying it to a newer revision can tell who changed what: values the worker did not
+  // touch follow the latest work, and values the worker entered are kept (they record what was actually
+  // used) but flagged for review when the administrator changed them too or the draft predates baselines.
+  const fieldBaselines = order => ({ partsBaseline: JSON.stringify(order.parts || []), measurementsBaseline: JSON.stringify(order.measurements || []) });
+  function carryFieldValues(d, order) {
+    let review = false;
+    for (const [key, baseKey] of [['parts', 'partsBaseline'], ['measurements', 'measurementsBaseline']]) {
+      const mine = JSON.stringify(d[key] || []), latest = JSON.stringify(order[key] || []), base = d[baseKey];
+      if (mine === latest) continue;
+      if (typeof base === 'string' && mine === base) d[key] = clone(order[key] || []);
+      else if (typeof base !== 'string' || latest !== base) review = true;
+    }
+    Object.assign(d, fieldBaselines(order)); return review;
+  }
   async function openWork(id, resumeId, navigation = {}) {
     const owned = () => !navigation.isCurrent || navigation.isCurrent();
     if (!owned()) return;
@@ -554,17 +569,20 @@
     // An administrator edit (due date, priority, …) raises the revision while field input is unsent. Carry
     // that input onto the latest revision in place, unless a submitted command still owns the draft or the
     // work has left the field stages; the completion is still validated against the latest work on submit.
-    const rebased = oldCompletion && oldCompletion.expectedRevision !== order.revision && !oldCompletion.pending && ['assigned', 'in_progress'].includes(order.status);
-    if (rebased) { delete oldCompletion.process; Object.assign(oldCompletion, { lightId: order.lightId, expectedRevision: order.revision, existingPhotos: order.afterPhotos || [] }); }
-    state.completion = oldCompletion && oldCompletion.expectedRevision === order.revision ? oldCompletion : { workId: id, lightId: order.lightId, expectedRevision: order.revision, photos: [], existingPhotos: order.afterPhotos || [], parts: order.parts || [], measurements: order.measurements || [], note: order.completionNote || '', diagnosis: order.diagnosis || '', repairAction: order.repairAction || '' };
+    const rebased = oldCompletion && oldCompletion.expectedRevision !== order.revision && !oldCompletion.pending && ['assigned', 'in_progress'].includes(order.status) && order.assignedTo === owner.actor;
+    let reviewParts = false;
+    if (rebased) { delete oldCompletion.process; reviewParts = carryFieldValues(oldCompletion, order); Object.assign(oldCompletion, { lightId: order.lightId, expectedRevision: order.revision, existingPhotos: order.afterPhotos || [] }); }
+    state.completion = oldCompletion && oldCompletion.expectedRevision === order.revision ? oldCompletion : { workId: id, lightId: order.lightId, expectedRevision: order.revision, photos: [], existingPhotos: order.afterPhotos || [], parts: order.parts || [], measurements: order.measurements || [], ...fieldBaselines(order), note: order.completionNote || '', diagnosis: order.diagnosis || '', repairAction: order.repairAction || '' };
     const completion = adoptDraft(state.completion, 'workCompletion', oldCompletion && oldCompletion.expectedRevision === order.revision ? resumeId || id : id, !!(oldCompletion && oldCompletion.expectedRevision === order.revision));
     if (oldCompletion && oldCompletion.expectedRevision !== order.revision) {
       completion.storageId = uuid('completion'); draftVersions.set(completion, null);
       api.toast('작업 버전이 바뀌었어요. 이전 초안은 대기함에 남기고 최신 작업을 열었어요.');
     }
     if (rebased) {
-      await writeDraft(completion, 'workCompletion'); if (!current()) return;
-      api.toast('작업 정보(담당·기한 등)가 바뀌었어요. 입력한 조치 내용과 사진은 최신 작업에 옮겼으니 확인 후 요청해 주세요.');
+      // The carried draft is already in memory; a storage failure must not keep the work from opening.
+      try { await writeDraft(completion, 'workCompletion'); } catch (error) { if (current()) api.toast('기기에 초안을 저장하지 못했어요. 화면의 입력은 유지돼요. ' + error.message); }
+      if (!current()) return;
+      api.toast(reviewParts ? '작업 정보가 바뀌었어요. 조치 내용과 사진은 최신 작업에 옮겼어요. 관리자가 바꾼 예정 자재·측정값이 있어 입력한 값을 유지했으니, 사용 자재를 확인한 뒤 요청해 주세요.' : '작업 정보(담당·기한·자재 등)가 바뀌었어요. 입력한 조치 내용과 사진은 최신 작업에 옮겼으니 확인 후 요청해 주세요.');
     }
     const allowed = C.actions(order, api.state().me, admin());
     api.navigate(heading(order.title, order.code + ' · ' + C.STATES[order.status]) + '<div class="panel dg-work-detail" id="woDetail" data-draft-id="' + E(completion.storageId) + '" data-editor-token="' + E(editorTokens.get(completion)) + '"><fieldset style="border:0;padding:0;margin:0;min-width:0"' + (completion.pending ? ' disabled' : '') + '>' +
