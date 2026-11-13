@@ -223,6 +223,16 @@
     return next;
   }
   /* legs between consecutive stops; the walk from the start position to the first stop is kept apart in startDistance */
+  // Move one unfinished stop of a visit plan: 'next' to the first unfinished place, 'earlier'/'later' past the
+  // neighbouring unfinished stop. Finished stops keep their place. Returns a new array, or null when nothing moves.
+  function moveOpenStop(stops, id, where, isDone) {
+    const open = stops.map((stop, index) => isDone(stop) ? -1 : index).filter(index => index >= 0), from = stops.findIndex(stop => stop.id === id), at = open.indexOf(from);
+    if (at < 0) return null;
+    const target = where === 'next' ? 0 : where === 'earlier' ? at - 1 : where === 'later' ? at + 1 : -1;
+    if (target < 0 || target >= open.length || target === at) return null;
+    const order = open.map(index => stops[index]), [moved] = order.splice(at, 1); order.splice(target, 0, moved);
+    const next = stops.slice(); open.forEach((index, n) => { next[index] = order[n]; }); return next;
+  }
   function planLegs(plan) {
     plan.stops.forEach((s, i) => { s.distanceFromPrevious = i ? Math.round(distance(plan.stops[i - 1], s)) : 0; });
     plan.distance = plan.stops.reduce((sum, s) => sum + s.distanceFromPrevious, 0);
@@ -381,5 +391,5 @@
     for (const row of rows) { row.available = Math.round((row.quantity - row.planned) * 1000) / 1000; row.shortage = Math.max(0, -row.available); row.workIds = [...new Set(row.workIds)]; }
     return { rows, unlinked };
   }
-  return { STATES, PRIORITIES, TYPES, DIAGNOSES, REPAIR_ACTIONS, HOLD_REASONS, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, updateOrder, transition, workProcess, attentionItems, inspectionState, kstDateKey, workQuery, filterOrders, distance, planLegs, PLAN_MAX, registryQuality, planVisits, reconcilePlan, normalizeRegistry, registryDiff, analytics, inventoryChange, inventoryForecast };
+  return { STATES, PRIORITIES, TYPES, DIAGNOSES, REPAIR_ACTIONS, HOLD_REASONS, FIELDS, text, list, parts, measurements, costTotal, createOrder, actions, updateOrder, transition, workProcess, attentionItems, inspectionState, kstDateKey, workQuery, filterOrders, distance, planLegs, moveOpenStop, PLAN_MAX, registryQuality, planVisits, reconcilePlan, normalizeRegistry, registryDiff, analytics, inventoryChange, inventoryForecast };
 });
