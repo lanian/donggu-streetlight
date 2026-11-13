@@ -2,7 +2,7 @@
 (function (root) {
   'use strict';
   const C = root.DGAssetMaintenanceCore, Commands = root.DGAssetMaintenanceCommands, KIND = 'assetDraft', JOB = 'asset-maintenance';
-  const state = { attached: false, loaded: false, loading: false, error: '', cabinets: [], circuits: [], links: [], incidents: [], replacements: [], drafts: [], draft: null, search: '', at: 0, complete: false };
+  const state = { attached: false, loaded: false, loading: false, error: '', cabinets: [], circuits: [], links: [], incidents: [], replacements: [], drafts: [], draft: null, search: '', at: 0, complete: false, facilities: {} };
   const keys = { cabinet: 'cabinets', circuit: 'circuits', link: 'links', incident: 'incidents', replacement: 'replacements' };
   const titles = { cabinet: '분전함', circuit: '회로', link: '시설 회로 연결', incident: '집단 장애', replacement: '부품 교체 이력' };
   const Q = selector => document.querySelector(selector), copy = C.clone;
@@ -15,7 +15,7 @@
   function requireOwner(value) { if (!owns(value)) throw Object.assign(new Error('계정이나 저장소가 바뀌어 이전 작업을 처리하지 않았어요.'), { code: 'account-changed' }); }
   const writable = () => api.can('admin') && (api.state().me === 'local' || !!api.firebase());
   function ownerScope() {
-    if (!owns(scope)) { scope = capture(); loadSequence++; refSequence++; loading = null; reloadRequested = false; state.loaded = false; state.loading = false; state.error = ''; state.draft = null; state.drafts = []; for (const name of Object.values(keys)) state[name] = []; }
+    if (!owns(scope)) { scope = capture(); loadSequence++; refSequence++; loading = null; reloadRequested = false; state.loaded = false; state.loading = false; state.error = ''; state.draft = null; state.drafts = []; state.facilities = {}; for (const name of Object.values(keys)) state[name] = []; }
     return scope;
   }
   const record = (entity, id) => state[keys[entity]].find(row => row.id === id);
@@ -75,10 +75,24 @@
   }
   async function open() { const owner = ownerScope(), gen = api.navGen?.(), request = ++sequence, current = () => owns(owner) && request === sequence && (gen == null || api.navAlive(gen)); await persistActive(); if (!current()) return; await load(true); if (!current()) return; api.navigate(heading('분전함·회로·시설 이력') + view(), { key: 'assets', reopen: open }); }
   function lightBody(lightId) {
-    const link = state.links.find(row => row.lightId === lightId), rows = state.replacements.filter(row => row.lightId === lightId).sort((a, b) => b.replacedAt - a.replacedAt);
-    return '<h3>분전함·회로와 부품 이력</h3>' + (state.error ? '<p class="notice">' + E(state.error) + '</p>' : !state.loaded ? '<p role="status">연결 정보를 조회하는 중…</p>' : '<p>' + E(link ? summary('link', link) : '확인된 분전함·회로 연결이 없어요.') + '</p>') + '<div class="split"><button class="btn ghost sm" data-am="light-history" data-id="' + E(lightId) + '">연결·부품 이력 보기</button>' + (writable() ? '<button class="btn ghost sm" data-am="light-link" data-id="' + E(lightId) + '">회로 연결 확인</button><button class="btn ghost sm" data-am="light-replacement" data-id="' + E(lightId) + '">부품 교체 기록</button>' : '') + '</div>' + (rows.length ? '<p class="muted">최근 교체: ' + E(C.COMPONENTS[rows[0].component] + ' · ' + date(rows[0].replacedAt)) + '</p>' : '');
+    const entry = state.facilities[lightId] || { loading: true }, link = entry.link, rows = entry.replacements || [], label = (row, id, missing) => row ? row.code + ' · ' + row.label : id ? missing : '미연결';
+    return '<h3>분전함·회로와 부품 이력</h3>' + (entry.error ? '<p class="notice">' + E(entry.error) + '</p>' : entry.loading ? '<p role="status">연결 정보를 조회하는 중…</p>' : '<p>' + E(link ? label(entry.cabinet, link.cabinetId, '확인되지 않은 분전함') + ' / ' + label(entry.circuit, link.circuitId, '확인되지 않은 회로') + ' · ' + link.confirmationNote : '확인된 분전함·회로 연결이 없어요.') + '</p>') + '<div class="split"><button class="btn ghost sm" data-am="light-history" data-id="' + E(lightId) + '">연결·부품 이력 보기</button>' + (writable() ? '<button class="btn ghost sm" data-am="light-link" data-id="' + E(lightId) + '">회로 연결 확인</button><button class="btn ghost sm" data-am="light-replacement" data-id="' + E(lightId) + '">부품 교체 기록</button>' : '') + '</div>' + (rows.length ? '<p class="muted">최근 교체: ' + E(C.COMPONENTS[rows[0].component] + ' · ' + date(rows[0].replacedAt)) + '</p>' : '');
   }
-  function lightHTML(lightId) { ownerScope(); if (!state.loaded && !state.loading) queueMicrotask(() => load()); return '<div class="panel" data-am-light="' + E(lightId) + '">' + lightBody(lightId) + '</div>'; }
+  // A facility screen needs only that facility's link, its cabinet and circuit, and its replacements. Reading them
+  // directly keeps every facility open from loading whole collections that grow toward one record per facility.
+  async function loadFacility(lightId) {
+    const owner = ownerScope(), entry = { loading: true }; state.facilities[lightId] = entry;
+    const current = () => owns(owner) && state.facilities[lightId] === entry, source = owner.fb ? { source: 'server' } : undefined;
+    const doc = async path => { const snap = await api.database().doc(path).get(source); return snap && snap.exists !== false && snap.data?.() ? { ...snap.data(), id: path.split('/')[1] } : null; };
+    try {
+      const [link, replacements] = await Promise.all([doc('assetLinks/' + lightId), api.readAll('assetReplacements', { where: [['lightId', '==', lightId]], requireServer: !!owner.fb })]);
+      const [cabinet, circuit] = await Promise.all([link?.cabinetId ? doc('cabinets/' + link.cabinetId) : null, link?.circuitId ? doc('circuits/' + link.circuitId) : null]);
+      if (!current()) return; Object.assign(entry, { loading: false, link, cabinet, circuit, replacements: replacements.sort((a, b) => b.replacedAt - a.replacedAt) });
+    } catch (error) { if (current()) Object.assign(entry, { loading: false, error: error.message || '연결 정보를 읽지 못했어요.' }); }
+    if (current()) refreshLightSummary();
+  }
+  function forgetFacilities() { state.facilities = {}; for (const el of document.querySelectorAll?.('[data-am-light]') || []) loadFacility(el.dataset.amLight); }
+  function lightHTML(lightId) { ownerScope(); if (!state.facilities[lightId]) queueMicrotask(() => { if (!state.facilities[lightId]) loadFacility(lightId); }); return '<div class="panel" data-am-light="' + E(lightId) + '">' + lightBody(lightId) + '</div>'; }
   function refreshLightSummary() { for (const el of document.querySelectorAll?.('[data-am-light]') || []) el.innerHTML = lightBody(el.dataset.amLight); }
   function defaults(entity, prefill = {}) {
     if (entity === 'cabinet') return { code: '', label: '', dong: '', lat: null, lng: null, note: '', disabled: false, ...prefill };
@@ -206,7 +220,7 @@
     d.pending = job.id; d.error = ''; await writeDraft(d); requireOwner(owner); form.querySelector('fieldset').disabled = true; button.disabled = true;
     try {
       const result = await owner.offline.submit(JOB, job, { id: job.id, summary: titles[d.entity] + ' · ' + (data.label || data.title || lightName(data.lightId)) }); requireOwner(owner);
-      if (result.state === 'synced') { await removeDraft(d); await load(true); if (owns(owner) && sequence === navigationSequence && Q('#amForm')?.dataset.token === token) await open(); api.toast('시설 관리 기록을 저장했어요.'); }
+      if (result.state === 'synced') { await removeDraft(d); forgetFacilities(); await load(true); if (owns(owner) && sequence === navigationSequence && Q('#amForm')?.dataset.token === token) await open(); api.toast('시설 관리 기록을 저장했어요.'); }
       else { d.error = result.error || '저장 대기함에서 전송 결과를 확인해 주세요.'; await writeDraft(d); await load(true); if (owns(owner) && sequence === navigationSequence && Q('#amForm')?.dataset.token === token) renderEditor(); }
     } catch (error) {
       if (!owns(owner)) return;
