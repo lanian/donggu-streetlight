@@ -78,6 +78,15 @@ async function poll(page, fn, arg) { const end = Date.now() + 30000; while (!awa
     const cachedPhoto = await page.evaluate(() => getPhoto('kit-photo')); assert.equal(cachedPhoto.workId, 'kit-work');
     assert.equal(await page.evaluate(id => DGFieldKit.currentLight(id)?.id, id), id);
     results.push('offline work detail and original-photo reads fall back to the prepared account-scoped snapshot');
+    // v77 weak signal: a work list that fails for lack of connection offers the prepared works in place.
+    await page.evaluate(() => closeSheet('all')); await poll(page, () => !NAV.stack.length && (history.state?.nav ?? 0) === 0 && !document.querySelector('#sheet.open'));
+    await page.evaluate(async () => { const list = listAllRecords; listAllRecords = async (collection, ...args) => { if (collection === 'inventory') throw Object.assign(new Error('연결할 수 없어요.'), { code: 'unavailable' }); return list(collection, ...args); }; await DGOperations.load(true); openAdminSection('works'); });
+    const prepared = page.locator('#woPrepared'); await prepared.waitFor();
+    assert.match(await prepared.innerText(), /출동 자료 · .+에 받은 사본/); assert.match(await prepared.innerText(), /서버 목록이 아니에요/);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await prepared.locator('[data-dg="open-prepared-work"][data-id="kit-work"]').click(); await page.locator('#woDetail').waitFor();
+    assert.match(await page.locator('#woPreparedReports').innerText(), /출동 준비자료/);
+    results.push('a work list that cannot reach the server lists the prepared works as a dated copy and opens them from that copy');
     assert.deepEqual(errors, []); console.log(JSON.stringify({ results, browserErrors: errors }, null, 2));
   } catch (error) { console.error(await page.locator('#sheetIn').innerText().catch(() => '')); throw error; }
   finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

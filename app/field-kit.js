@@ -150,6 +150,13 @@
     return rows && { rows, preparedAt: saved.preparedAt, source: saved.source, recentInspections: saved.recentInspections, scope: 'prepared-facility', coverage: collection === 'inspections' ? 'latest-3' : collection === 'reports' ? 'active-and-work-linked' : 'confirmed-link' };
   }
   function currentLight(id) { if (!api) return null; const current = reset(); return root.navigator?.onLine === false && owned(current) && state.packet?.records?.lights?.[id] ? clone(state.packet.records.lights[id]) : null; }
+  // The work screen's weak-signal fallback: this account's prepared works, or null until the packet is read.
+  function preparedWorks() {
+    if (!api) return null; const current = reset();
+    if (!state.loaded) { if (!loadPromise && current.offline.ready) ready().then(() => notify(current)).catch(() => {}); return null; }
+    const packet = state.packet; if (!owned(current) || !packet) return null;
+    return { preparedAt: packet.preparedAt, works: clone(packet.scope.workIds.map(id => packet.records.workOrders[id]).filter(Boolean)) };
+  }
   function cancel() { const current = reset(); if (state.committing) return false; request++; state.downloading = false; state.loading = false; state.error = '준비를 중단했어요. 이전에 완료한 자료는 유지돼요.'; notify(current); return true; }
   function view() {
     const current = reset(); if (!state.loaded && !loadPromise && current.offline.ready) ready().then(() => notify(current)).catch(error => { if (owned(current)) state.error = error.message; });
@@ -180,5 +187,5 @@
       Promise.resolve().then(() => ({ load: loadWorks, prepare: () => prepare(), cancel, discard })[button.dataset.fk]?.()).catch(error => api.toast(error.message));
     });
   }
-  root.DGFieldKit = { attach, view, open, ready, loadWorks, prepare, record, getPhoto, facility, forLight, currentLight, cancel, state, MAX_WORKS, MAX_PHOTOS, MAX_BYTES };
+  root.DGFieldKit = { attach, view, open, ready, loadWorks, prepare, record, getPhoto, facility, forLight, currentLight, preparedWorks, cancel, state, MAX_WORKS, MAX_PHOTOS, MAX_BYTES };
 })(globalThis);

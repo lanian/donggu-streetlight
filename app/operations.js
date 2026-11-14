@@ -3,7 +3,8 @@
   /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
   const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   const C = root.DGOperationsCore;
-  let api, loading = null, reloadRequested = false, attached = false, detailToken = 0, editorRequest = 0;
+  let api, loading = null, reloadRequested = false, attached = false, detailToken = 0, editorRequest = 0, slowTimer = null;
+  const SLOW_MS = 8000; // after this, a still-loading list also offers the prepared field-kit works
   let draftWrites = Promise.resolve();
   const draftVersions = new WeakMap(), editorTokens = new WeakMap(), draftOwners = new WeakMap(), processSettlements = new Map();
   let subscriptions = null, watchedWorkKey = '', watchedReportId = '';
@@ -39,22 +40,33 @@
     const name = { server: '서버 조회', cache: '기기 캐시 · 전체 여부 미확인', mixed: '서버·캐시 혼합', local: '이 기기 저장', artifact: '공유 저장소 · 전체 여부 미확인', unknown: '자료 출처 미확인' }[metadata.source] || '자료 출처 미확인';
     return name + ' · ' + time(metadata.fetchedAt);
   }
-  async function readOrder(id) {
+  async function readOrder(id, prepared = false) {
+    // Opened from the prepared works: use that copy instead of waiting on a slow server.
+    if (prepared && root.DGFieldKit?.record) { const copy = await root.DGFieldKit.record('workOrders', id); if (copy) return copy; }
     let snap;
     try { snap = await api.database().doc('workOrders/' + id).get(api.firebase() && navigator.onLine !== false ? { source: 'server' } : undefined); }
     catch (error) { if (offlineFailure(error) && root.DGFieldKit?.record) { const cached = await root.DGFieldKit.record('workOrders', id); if (cached) return cached; } throw error; }
     return snap?.exists !== false && snap?.data() ? { ...snap.data(), id } : null;
   }
   function offlineFailure(error) { const code=String(error.code||'').replace(/^(?:firestore|functions)\//,''); return !['permission-denied', 'unauthenticated'].includes(code) && (navigator.onLine === false || ['unavailable', 'offline', 'deadline-exceeded'].includes(code)); }
-  async function loadReports(lightId) {
+  async function loadReports(lightId, fromPrepared = false) {
     const owner = captureOwner(), gen = api.navGen?.(), request = editorRequest, current = () => ownsContext(owner) && request === editorRequest && (gen == null || api.navAlive(gen));
     let records, metadata;
-    try { records = await api.readAll('reports', { where: [['lightId', '==', lightId]], requireServer: !!api.firebase() && navigator.onLine !== false, onMetadata: value => { metadata = value; } }); }
-    catch (error) {
-      if (!current()) return [];
-      if (!offlineFailure(error) || !root.DGFieldKit?.forLight) throw error;
-      const prepared = await root.DGFieldKit.forLight('reports', lightId); if (!current()) return [];
-      if (!prepared) throw error; records = prepared.rows; metadata = { source: 'prepared', preparedAt: prepared.preparedAt, fetchedAt: prepared.preparedAt, scope: prepared.scope, coverage: prepared.coverage, complete: false };
+    const usePrepared = async error => {
+      const prepared = root.DGFieldKit?.forLight && await root.DGFieldKit.forLight('reports', lightId); if (!current()) return false;
+      if (!prepared) { if (error) throw error; return null; }
+      records = prepared.rows; metadata = { source: 'prepared', preparedAt: prepared.preparedAt, fetchedAt: prepared.preparedAt, scope: prepared.scope, coverage: prepared.coverage, complete: false }; return true;
+    };
+    // A work opened from the prepared works reads that facility's prepared reports first, without the server.
+    const used = fromPrepared ? await usePrepared(null) : null;
+    if (used === false) return [];
+    if (!used) {
+      try { records = await api.readAll('reports', { where: [['lightId', '==', lightId]], requireServer: !!api.firebase() && navigator.onLine !== false, onMetadata: value => { metadata = value; } }); }
+      catch (error) {
+        if (!current()) return [];
+        if (!offlineFailure(error)) throw error;
+        if (!await usePrepared(error)) return [];
+      }
     }
     if (!current()) return [];
     state.reportMeta ||= {}; state.reportMeta[lightId] = metadata || null;
@@ -90,12 +102,16 @@
         } catch (error) {
           // Only connection failures wait for the signal; the list still never shows unconfirmed server data.
           state.offlineError = offlineFailure(error);
-          state.error = (error.message || '업무 기록을 불러오지 못했어요.') + (state.offlineError ? ' 연결되면 자동으로 다시 불러와요. 미리 준비한 작업은 관리 현황의 출동 자료에서 볼 수 있어요.' : '');
+          state.error = (error.message || '업무 기록을 불러오지 못했어요.') + (state.offlineError ? ' 연결되면 자동으로 다시 불러와요.' : '');
         }
         append = false;
       } while (reloadRequested);
+      clearTimeout(slowTimer); slowTimer = null; state.slow = false;
       loading = null; notify(); return state;
     })();
+    // The server read keeps going; after SLOW_MS the screen also offers the prepared works (preparedPanel).
+    const attempt = loading;
+    clearTimeout(slowTimer); slowTimer = setTimeout(() => { if (loading === attempt) { state.slow = true; notify(); } }, SLOW_MS);
     return loading;
   }
   function ensure() { if ((!state.loaded || state.workQueryKey !== filterKey()) && !loading && !state.error) setTimeout(() => load(), 0); }
@@ -149,6 +165,17 @@
     if (d && !d.cancelled && ownerForm(d, 'workDraft') && (d.pending || d.photoTasks || Q('#woTitle')?.value || Q('#woDescription')?.value || d.photos?.length)) return true;
     return !!(c && !c.cancelled && ownerForm(c, 'workCompletion') && (c.pending || c.photoTasks || Q('#woCompletionNote')?.value || c.photos?.length || c.holdDraft && JSON.stringify(c.holdDraft) !== c.holdBaseline));
   }
+  // Weak signal: while the server list is slow (SLOW_MS) or failed for lack of connection, show the prepared
+  // field-kit works as a separate, dated copy. They are never mixed into the server list.
+  function preparedPanel() {
+    const listShown = state.loaded && state.workQueryKey === filterKey();
+    const slow = !!loading && state.slow && !listShown, failed = !!state.error && state.offlineError;
+    if (!slow && !failed) return '';
+    const kit = root.DGFieldKit?.preparedWorks?.(), wait = slow ? '<p role="status">연결이 느려 작업 목록을 기다리고 있어요. 서버 목록이 도착하면 자동으로 바뀌어요.</p>' : '';
+    if (!kit?.works?.length) return '<div class="panel" id="woPrepared">' + wait + '<p class="muted">출동 전에 관리 현황의 출동 자료 준비에서 내 작업을 받아 두면, 연결이 약할 때 여기서 바로 열 수 있어요.</p></div>';
+    return '<div class="panel" id="woPrepared">' + wait + '<h3>출동 자료 · ' + time(kit.preparedAt) + '에 받은 사본</h3><p class="muted">서버 목록이 아니에요. 받은 뒤 다른 직원이 바꾼 내용은 반영되지 않아요. 저장하면 전송 대기함을 거쳐 서버에서 다시 확인해요.</p><div class="list">' +
+      kit.works.map(w => '<button class="light-row dg-work-row" data-dg="open-prepared-work" data-id="' + E(w.id) + '"><span><b>' + E(w.title) + '</b><small>' + E(w.code || '') + ' · 기한 ' + time(w.dueAt) + '</small></span><span class="chip">' + E(C.STATES[w.status] || w.status) + '</span></button>').join('') + '</div></div>';
+  }
   function view() {
     ensure(); const rows = state.workQueryKey === filterKey() ? selectedOrders() : [], pending = state.jobs.filter(j => j.kind === 'work' && j.state !== 'synced').length;
     return '<div class="panel"><div class="split"><button class="btn sodium" data-dg="new-work"' + (!admin() || !supported() ? ' disabled' : '') + '>작업 지시 등록</button><button class="btn ghost" data-dg="refresh">새로고침</button><button class="btn ghost" data-dg="attention-work">미확인·긴급 알림함</button><button class="btn ghost" data-pm="open">정기점검 계획</button><button class="btn ghost" data-dg="work-csv">CSV</button></div>' +
@@ -156,7 +183,7 @@
       '<label class="f" for="woFilter">처리 상태</label><select class="f-in" id="woFilter"><option value="open"' + (state.filter === 'open' ? ' selected' : '') + '>미완료 전체</option><option value="all"' + (state.filter === 'all' ? ' selected' : '') + '>전체 기록</option>' + Object.entries(C.STATES).map(([v, t]) => '<option value="' + v + '"' + (state.filter === v ? ' selected' : '') + '>' + t + '</option>').join('') + '</select>' +
       '<div class="grid2"><select class="f-in" id="woDeadline" aria-label="완료 기한">' + Object.entries({ all: '기한 전체', today: '오늘 기한 (KST)', overdue: '기한 초과' }).map(([v,t]) => '<option value="' + v + '"' + (state.deadline === v ? ' selected' : '') + '>' + t + '</option>').join('') + '</select><select class="f-in" id="woDong" aria-label="작업 대상 동">' + api.dongOptions(state.workDong) + '</select></div><label class="f"><input type="checkbox" id="woUrgent"' + (state.urgent ? ' checked' : '') + '> 긴급 작업만</label>' +
       '<label class="f"><input type="checkbox" id="woMine"' + (state.mine ? ' checked' : '') + '> 내 담당만</label><p class="muted">' + (state.loaded && state.workQueryKey === filterKey() ? sourceText(state.workMeta) + ' · 조회된 ' + rows.length + '건' + (state.hasMore ? ' · 뒤에 자료가 더 있어요' : ' · 조회 범위 끝까지 확인') : '불러오는 중…') + (pending ? ' · 저장 대기 ' + pending + '건' : '') + '</p><div class="split"><button class="btn ghost" data-dg="work-map">조건 전체 지도</button><button class="btn ghost" data-dg="work-plan">조건 전체 방문 계획</button></div><p class="muted">목록은 페이지로 읽고 지도·CSV·방문 계획은 같은 조건의 전체 작업을 조회해요. 오늘 기한은 한국 시간 기준이에요.</p></div>' +
-      (state.error ? '<div class="notice" role="alert">' + E(state.error) + '</div>' : '') +
+      (state.error ? '<div class="notice" role="alert">' + E(state.error) + '</div>' : '') + preparedPanel() +
       bulkControl() + '<div class="list">' + rows.slice(0, state.show).map(workRow).join('') + '</div>' +
       (state.loaded && state.workQueryKey === filterKey() && !rows.length ? '<div class="empty">선택한 조건의 작업이 없어요.</div>' : '') + (rows.length > state.show || state.hasMore ? '<button class="btn ghost block" data-dg="more-work">다음 작업 더 보기</button>' : '');
   }
@@ -559,11 +586,13 @@
     if (!owned()) return;
     const gen = api.navGen ? api.navGen() : null, alive = () => gen === null || api.navAlive(gen);
     const request = ++editorRequest, owner = captureOwner(), current = () => request === editorRequest && owned() && alive() && ownsContext(owner);
+    // From the prepared works on a weak signal: don't wait for the list (here it only supplies the stock list).
+    const prepared = navigation.prepared === true;
     await persistActive(); if (!current()) return;
-    await load(); if (!current()) return;
-    const order = await readOrder(id); if (!current()) return;
+    if (!prepared) { await load(); if (!current()) return; }
+    const order = await readOrder(id, prepared); if (!current()) return;
     if (!order) return api.toast('작업을 찾을 수 없어요. 새로고침해 주세요.');
-    await loadReports(order.lightId); if (!current()) return;
+    await loadReports(order.lightId, prepared); if (!current()) return;
     const oldCompletion = root.DGOffline.ready && await root.DGOffline.get('workCompletion', resumeId || id);
     if (!current()) return;
     state.currentOrder = JSON.parse(JSON.stringify(order));
@@ -602,7 +631,7 @@
       '<h3>사용 자재</h3><div class="grid2"><select class="f-in" id="woStockPart" aria-label="등록 자재"><option value="">직접 입력</option>' + state.inventory.map(p => '<option value="' + E(p.id) + '">' + E(p.name) + ' · 재고 ' + p.quantity + E(p.unit) + '</option>').join('') + '</select><input class="f-in" id="woPartName" placeholder="자재명" aria-label="자재명"></div><div class="grid2"><input class="f-in" id="woPartQty" type="number" min="0.001" step="0.001" value="1" aria-label="사용 수량"><input class="f-in" id="woPartCost" type="number" min="0" value="0" aria-label="단가(원)"></div><button class="btn ghost sm" data-dg="add-part">자재 추가</button><div class="dg-table"><table><thead><tr><th>자재</th><th>수량</th><th>단가</th><th>관리</th></tr></thead><tbody id="woParts">' + partRows(completion.parts) + '</tbody></table></div><p class="muted">재고 연동 자재는 관리자의 완료 검수 시 출고돼요.</p>' +
       '<h3>조도계 실측 (선택)</h3><div class="grid2"><input class="f-in" id="woLux" type="number" min="0" max="200000" step="0.1" placeholder="lux" aria-label="실측 조도"><input class="f-in" id="woLuxNote" maxlength="300" placeholder="측정 위치·기기·조건" aria-label="실측 조건"></div><button class="btn ghost sm" data-dg="add-lux">실측 추가</button><div id="woMeasurements">' + measureRows(completion.measurements) + '</div><p class="muted">조도계로 측정한 값을 입력해요. 지도 밝기 예측과 별도로 보관돼요.</p>' : '') +
       (admin() && order.status === 'completed' ? '<h3>완료 검수</h3><label class="f" for="woVerification">검수 의견 / 보완 사유</label><textarea class="f-in" id="woVerification" maxlength="2000"></textarea><label class="f" for="woFacilityStatus">검수 후 시설 상태</label><select class="f-in" id="woFacilityStatus"><option value="">현재 시설 상태 유지</option>' + options(['정상', '점검필요', '고장', '수리중'], '') + '</select><label class="f"><input type="checkbox" id="woCloseReports"> 연결된 신고도 완료 처리하고 연락처 삭제</label>' : '') +
-      '<div class="split">' + allowed.map(target => '<button class="btn' + (target === 'cancelled' ? ' ghost' : ' sodium') + '" data-dg="transition-work" data-id="' + E(id) + '" data-status="' + target + '">' + E({ assigned: '담당 배정', in_progress: order.status === 'completed' ? '보완 요청' : '작업 시작', completed: '완료 검수 요청', verified: '검수 승인', cancelled: '작업 취소', draft: '배정 대기로 복원' }[target]) + '</button>').join('') + '</div></fieldset></div><h3>처리 이력</h3><div id="woEvents" class="panel" aria-live="polite">불러오는 중…</div>', { key: 'work:' + id, reopen: () => openWork(id, resumeId) });
+      '<div class="split">' + allowed.map(target => '<button class="btn' + (target === 'cancelled' ? ' ghost' : ' sodium') + '" data-dg="transition-work" data-id="' + E(id) + '" data-status="' + target + '">' + E({ assigned: '담당 배정', in_progress: order.status === 'completed' ? '보완 요청' : '작업 시작', completed: '완료 검수 요청', verified: '검수 승인', cancelled: '작업 취소', draft: '배정 대기로 복원' }[target]) + '</button>').join('') + '</div></fieldset></div><h3>처리 이력</h3><div id="woEvents" class="panel" aria-live="polite">불러오는 중…</div>', { key: 'work:' + id, reopen: () => openWork(id, resumeId, prepared ? { prepared } : undefined) });
     const detail = Q('#woDetail'), detailCurrent = () => request === editorRequest && token === detailToken && detail?.isConnected && Q('#woDetail') === detail;
     const evidence = [...(order.beforePhotos || []), ...(order.afterPhotos || [])];
     const results = await Promise.allSettled(evidence.map(async photoId => { const photo = await api.getPhoto(photoId), src = photo && root.DGSecurity.safeImageSrc(photo.data); return src ? '<figure><img src="' + E(src) + '" alt="' + E(photo.label || '작업 사진') + '"><figcaption>' + E(photo.label) + '</figcaption></figure>' : '<p class="notice">원본 사진을 확인할 수 없어요.</p>'; }));
@@ -841,6 +870,7 @@
     if (action === 'save-bulk-work') return saveBulk(button);
     if (action === 'clear-work-pick') { state.workPick.clear(); return notify(); }
     if (action === 'open-work') return openWork(button.dataset.id);
+    if (action === 'open-prepared-work') return openWork(button.dataset.id, undefined, { prepared: true });
     if (action === 'refresh') return load(true);
     if (action === 'more-work') { state.show += 60; if (state.hasMore) await load(false, true); return notify(); }
     if (action === 'create-work') return createWork(button);
