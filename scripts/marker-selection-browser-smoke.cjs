@@ -23,6 +23,13 @@ const server=http.createServer((req,res)=>{const pathname=new URL(req.url,'http:
   await page.waitForFunction(()=>document.querySelector('#mapCard .mapgroup-list').scrollTop>0,null,{timeout:3000}).catch(()=>{});
   assert.ok(await page.locator('#mapCard .mapgroup-list').evaluate(el=>el.scrollTop)>0,'touch drag scrolls the nearby-facility list');assert.equal(await center(),before,'the map stays put while the list scrolls');
   await page.locator('#mapCard .mapgroup-list').evaluate(el=>{el.scrollTop=0;});await cdp.detach();}
+ // v79: tapping "내 위치" twice to start and stop following never double-tap-zooms the map underneath.
+ {await page.evaluate(()=>gmap.setView(gmap.getCenter(),16,{animate:false}));await page.waitForTimeout(300);const zoom=()=>page.evaluate(()=>gmap.getZoom()),z=await zoom(),b=await page.locator('#mapLoc').boundingBox(),cdp=await context.newCDPSession(page),x=Math.round(b.x+b.width/2),y=Math.round(b.y+b.height/2);
+  await page.locator('#mapLoc').dblclick();await page.waitForTimeout(400);assert.equal(await zoom(),z,'double-clicking 내 위치 keeps the zoom');
+  for(let k=0;k<2;k++){await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForTimeout(80);}
+  await page.waitForTimeout(400);assert.equal(await zoom(),z,'double-tapping 내 위치 keeps the zoom');await cdp.detach();
+  await page.evaluate(()=>{ME.follow=false;meStop();gmap.setView([markerDuplicate[0].lat,markerDuplicate[0].lng],19,{animate:false});});await page.waitForTimeout(300);
+  if(!await page.locator('#mapCard [data-map-choice]').count()){await page.locator('#gmap .mapstack button').tap();}}
  await page.screenshot({path:path.join(artifacts,'overlap-list-390.png')});
  await page.locator('#mapCard [data-map-choice]').first().click();assert.equal(await page.locator('#mapCard b').first().innerText(),actual.first);assert.equal(await page.locator('#gmap .mapstack.sel').count(),1);
  await page.locator('#mapCard [data-map-group]').click();await page.locator('#mapCard [data-map-choice]').last().click();assert.equal(await page.locator('#mapCard b').first().innerText(),actual.last);

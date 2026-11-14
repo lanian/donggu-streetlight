@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v78-map-list-scroll";
+const APP_VER="v79-map-loc-double-tap";
 const RELEASE_NOTES=[
+  {v:"v79-map-loc-double-tap",d:"2026-11-14",t:"지도의 내 위치 버튼을 빠르게 두 번 눌러도 지도가 확대되지 않도록 수정"},
   {v:"v78-map-list-scroll",d:"2026-11-14",t:"지도의 가까운 시설 목록을 손가락으로 스크롤할 수 있게 수정 · 시설 카드 위에서 끌어도 지도가 움직이지 않음"},
   {v:"v77-slow-signal-field-kit",d:"2026-11-14",t:"연결이 느리거나 끊겨 작업 목록을 못 읽으면 받아 둔 출동 자료 작업을 바로 표시 · 출동 자료에서 연 작업은 서버를 기다리지 않음"},
   {v:"v76-asset-facility-reads",d:"2026-11-13",t:"시설 화면의 분전함·회로·부품 이력을 그 시설 자료만 읽어 표시 · 서버 읽기와 데이터 사용량 감소"},
@@ -2852,9 +2853,10 @@ function openMap(scope,one){
   if(!window.L){$("#mapNote").textContent="지도 라이브러리를 불러오지 못했어요.";return}
   if(gmap){gmap.remove();gmap=null}
   gmap=L.map("gmap",{zoomControl:true,attributionControl:true,tap:true,preferCanvas:true});
-  // The facility card lives inside the map container: keep its touches and wheel from dragging or zooming the map,
-  // so the nearby-facility list scrolls. Clicks still bubble to the document handlers.
-  {const card=$("#mapCard");if(card){L.DomEvent.disableClickPropagation(card);L.DomEvent.disableScrollPropagation(card)}}
+  // The facility card and the 내 위치 button live inside the map container: keep their touches, double taps and wheel
+  // from dragging or zooming the map, so the nearby-facility list scrolls and a quick second tap on 내 위치 does
+  // not zoom in. Clicks still bubble to the document handlers.
+  {const card=$("#mapCard"),loc=$("#mapLoc");if(card){L.DomEvent.disableClickPropagation(card);L.DomEvent.disableScrollPropagation(card)}if(loc)L.DomEvent.disableClickPropagation(loc)}
   const tiles=DongguPWA.tileLayer(L).addTo(gmap);
   const mapOwner=gmap,mapActive=()=>gmap===mapOwner&&!mapOwner._dgClosing&&$("#gmap")===mapOwner.getContainer();
   let errs=0;tiles.on("tileerror",event=>{const note=$("#mapNote");if(!mapActive()||!note||(event.mode&&event.mode!=="street"))return;if(++errs===4)note.textContent="지도 배경을 불러올 수 없어요. 마커 위치만 표시돼요."});
