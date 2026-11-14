@@ -34,7 +34,8 @@
   }
   function notify() { api.render(); refreshLightSummary(); }
   function load(force = false) {
-    const owner = ownerScope(); if (loading) { if (force) reloadRequested = true; return loading; } if (state.loaded && !force) return Promise.resolve(state);
+    const owner = ownerScope(); if (force) forgetFacilities(); // 새로고침 also re-reads the reused facility summaries
+    if (loading) { if (force) reloadRequested = true; return loading; } if (state.loaded && !force) return Promise.resolve(state);
     const request = ++loadSequence, current = () => owns(owner) && request === loadSequence;
     state.loading = true; state.error = '';
     loading = (async () => {
@@ -92,7 +93,7 @@
     if (current()) refreshLightSummary();
   }
   function forgetFacilities() { state.facilities = {}; for (const el of document.querySelectorAll?.('[data-am-light]') || []) loadFacility(el.dataset.amLight); }
-  function lightHTML(lightId) { ownerScope(); if (!state.facilities[lightId]) queueMicrotask(() => { if (!state.facilities[lightId]) loadFacility(lightId); }); return '<div class="panel" data-am-light="' + E(lightId) + '">' + lightBody(lightId) + '</div>'; }
+  function lightHTML(lightId) { ownerScope(); if (state.facilities[lightId]?.error) delete state.facilities[lightId]; /* a failed read is retried on the next open */ if (!state.facilities[lightId]) queueMicrotask(() => { if (!state.facilities[lightId]) loadFacility(lightId); }); return '<div class="panel" data-am-light="' + E(lightId) + '">' + lightBody(lightId) + '</div>'; }
   function refreshLightSummary() { for (const el of document.querySelectorAll?.('[data-am-light]') || []) el.innerHTML = lightBody(el.dataset.amLight); }
   function defaults(entity, prefill = {}) {
     if (entity === 'cabinet') return { code: '', label: '', dong: '', lat: null, lng: null, note: '', disabled: false, ...prefill };
@@ -220,7 +221,7 @@
     d.pending = job.id; d.error = ''; await writeDraft(d); requireOwner(owner); form.querySelector('fieldset').disabled = true; button.disabled = true;
     try {
       const result = await owner.offline.submit(JOB, job, { id: job.id, summary: titles[d.entity] + ' · ' + (data.label || data.title || lightName(data.lightId)) }); requireOwner(owner);
-      if (result.state === 'synced') { await removeDraft(d); forgetFacilities(); await load(true); if (owns(owner) && sequence === navigationSequence && Q('#amForm')?.dataset.token === token) await open(); api.toast('시설 관리 기록을 저장했어요.'); }
+      if (result.state === 'synced') { await removeDraft(d); await load(true); if (owns(owner) && sequence === navigationSequence && Q('#amForm')?.dataset.token === token) await open(); api.toast('시설 관리 기록을 저장했어요.'); }
       else { d.error = result.error || '저장 대기함에서 전송 결과를 확인해 주세요.'; await writeDraft(d); await load(true); if (owns(owner) && sequence === navigationSequence && Q('#amForm')?.dataset.token === token) renderEditor(); }
     } catch (error) {
       if (!owns(owner)) return;
@@ -292,7 +293,7 @@
       if ((d.entity === 'incident' && el.dataset.amPick) || (d.entity === 'replacement' && el.id === 'amLight')) loadReferences(d).catch(error => api.toast(error.message));
       writeDraft(d).catch(error => api.toast(error.message));
     });
-    unsubscribe = root.DGOffline.subscribe(event => { if (['ready', 'draft', 'removed', 'discarded', 'synced', 'cleared'].includes(event.type)) { const owner = ownerScope(); owner.offline.list(KIND).then(values => { if (owns(owner)) state.drafts = values; }).catch(() => {}); } });
+    unsubscribe = root.DGOffline.subscribe(event => { if (event.type === 'synced' && event.job?.kind === JOB) forgetFacilities(); /* a queued asset save was sent later */ if (['ready', 'draft', 'removed', 'discarded', 'synced', 'cleared'].includes(event.type)) { const owner = ownerScope(); owner.offline.list(KIND).then(values => { if (owns(owner)) state.drafts = values; }).catch(() => {}); } });
   }
   root.DGAssetMaintenance = { attach, ready, load, view, open, edit, lightHTML, circuitOf, persistActive, hasActiveDraft: () => dirty(readForm()), resumeDraft, discardDraft, state, KIND, JOB };
 })(globalThis);
