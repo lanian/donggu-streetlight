@@ -28,6 +28,9 @@ async function poll(page, predicate, value) {
   page.on('pageerror', error => errors.push(error.message));
   try {
     const ready = async () => { await page.waitForFunction(() => S.live && S.me === 'local' && DGOffline.ready); await page.evaluate(() => DGIntegration.whenReady()); };
+    // closeSheet('all') goes back through History asynchronously; a screen opened before that popstate lands is
+    // closed by it (sheet hidden, content left in place). Wait for the close to finish before opening the next one.
+    const closeAll = async () => { await page.evaluate(() => { if (NAV.stack.length) closeSheet('all'); }); await page.waitForFunction(() => !NAV.stack.length && (history.state?.nav ?? 0) === 0 && !document.querySelector('#sheet').classList.contains('open')); };
     await page.goto(origin); await ready();
     const light = await page.evaluate(async () => {
       const light = S.lights.find(row => !row.removed);
@@ -89,7 +92,7 @@ async function poll(page, predicate, value) {
     assert.equal(await page.evaluate(async () => (await db.doc('workOrders/work-feature-a').get()).data().title), '충돌 뒤 유지할 입력');
     results.push('stale editor compares preserved input with latest fields, rebases only by explicit choice, and cleans source only after sync');
 
-    await page.evaluate(async () => { closeSheet('all'); await DGOperations.load(true); openAdminSection('works'); });
+    await closeAll(); await page.evaluate(async () => { await DGOperations.load(true); openAdminSection('works'); });
     await page.locator('[data-work-pick="work-feature-a"]').check();
     await page.locator('[data-work-pick="work-feature-b"]').check();
     await page.locator('[data-dg="bulk-work"]').click();
@@ -121,8 +124,9 @@ async function poll(page, predicate, value) {
     await page.evaluate(async id => { const ref = db.doc('workOrders/' + id), old = (await ref.get()).data(); await ref.update({ assignedTo: 'former-staff', revision: old.revision + 1 }); await DGOperations.openEdit(id); }, draftId);
     assert.equal(await page.locator('#woEditAssignee').inputValue(), 'former-staff', 'editing a title must preserve an assignee absent from the active staff list');
     results.push('metadata editor retains the current assignee when the staff list no longer contains them');
+    await closeAll();
     await page.evaluate(async id => {
-      closeSheet('all'); DGOperations.state.workPick.clear();
+      DGOperations.state.workPick.clear();
       await db.doc('workOrders/work-feature-draft').set(DGOperationsCore.createOrder({ title: '일괄 배정할 대기 작업' }, byId(id), 'local', Date.now()));
       await DGOperations.load(true); openAdminSection('works');
     }, light.id);
