@@ -242,5 +242,24 @@ test('the plan map moves an unfinished stop and saves the reordered plan with re
   assert.deepEqual(f.ui.state.plan.stops.map(stop => stop.id).join(), 'b,a');
   assert.equal(f.ui.state.plan.stops[0].distanceFromPrevious, 0); assert.ok(f.ui.state.plan.stops[1].distanceFromPrevious > 0);
   assert.equal((await f.offline.get('plan', 'current')).stops.map(stop => stop.id).join(), 'b,a');
-  assert.equal(await opened.reorder('b', 'next'), null, 'a stop that is already next is not moved');
+  const same = await opened.reorder('b', 'next');
+  assert.deepEqual([...same.order], ['b', 'a'], 'a stop that is already next is not moved; the map gets the current order back');
+});
+// v80: the map's copy of the plan can fall behind (a stop finished after the map opened, the plan replaced, a
+// failed save). Each case must reach the map instead of a silent no-op that leaves stale numbers and buttons.
+test('a map reorder that cannot apply refreshes the map, and a failed save or replaced plan is reported', async () => {
+  const f = await fixture(); let opened = null;
+  f.api.openMap = (scope, options) => { opened = { scope, ...options }; };
+  const stop = (id, lat) => ({ id, code: id.toUpperCase(), dong: '동명동', lat, lng: 126.92 });
+  f.ui.state.plan = C.planLegs({ createdAt: Date.now(), stops: [stop('a', 35.14), stop('b', 35.15), stop('c', 35.16)] });
+  f.click('plan-map'); await until(() => opened);
+  f.ui.state.plan.stops[2].visited = true; // finished after the map opened
+  const view = await opened.reorder('c', 'earlier');
+  assert.ok(view, 'the map gets the current plan back'); assert.ok(view.done.includes('c'), 'and now sees the stop as finished');
+  const put = f.offline.put; f.offline.put = async () => { throw new Error('저장 공간 부족'); };
+  await assert.rejects(opened.reorder('b', 'next'));
+  assert.equal(f.ui.state.plan.stops.map(s => s.id).join(), 'a,b,c', 'a failed save leaves the plan order as it was');
+  f.offline.put = put;
+  f.ui.state.plan = C.planLegs({ createdAt: Date.now(), stops: [stop('x', 35.14), stop('y', 35.15)] });
+  await assert.rejects(opened.reorder('b', 'next'), /계획 지도를 다시 열어/);
 });
