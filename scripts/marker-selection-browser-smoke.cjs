@@ -17,6 +17,12 @@ const server=http.createServer((req,res)=>{const pathname=new URL(req.url,'http:
  assert.equal((await page.locator('#gmap .mapstack button').innerText()).trim(),'39');
  assert.equal(await page.locator('#gmap .mapstack button').evaluate(el=>{const r=el.getBoundingClientRect();return r.width>=44&&r.height>=44;}),true);
  await page.locator('#gmap .mapstack button').tap();assert.equal(await page.locator('#mapCard [data-map-choice]').count(),39);assert.match(await page.locator('#mapCard').innerText(),/추정/);
+ // v78: a finger drag on the chooser scrolls the list instead of dragging (or zooming) the map underneath.
+ {const cdp=await context.newCDPSession(page),box=await page.locator('#mapCard .mapgroup-list').boundingBox(),x=Math.round(box.x+box.width/2),y=Math.round(box.y+box.height*.7),center=()=>page.evaluate(()=>gmap.getCenter().toString()),before=await center();
+  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});for(let i=1;i<=10;i++){await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y-15*i}]});await page.waitForTimeout(16);}await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  await page.waitForFunction(()=>document.querySelector('#mapCard .mapgroup-list').scrollTop>0,null,{timeout:3000}).catch(()=>{});
+  assert.ok(await page.locator('#mapCard .mapgroup-list').evaluate(el=>el.scrollTop)>0,'touch drag scrolls the nearby-facility list');assert.equal(await center(),before,'the map stays put while the list scrolls');
+  await page.locator('#mapCard .mapgroup-list').evaluate(el=>{el.scrollTop=0;});await cdp.detach();}
  await page.screenshot({path:path.join(artifacts,'overlap-list-390.png')});
  await page.locator('#mapCard [data-map-choice]').first().click();assert.equal(await page.locator('#mapCard b').first().innerText(),actual.first);assert.equal(await page.locator('#gmap .mapstack.sel').count(),1);
  await page.locator('#mapCard [data-map-group]').click();await page.locator('#mapCard [data-map-choice]').last().click();assert.equal(await page.locator('#mapCard b').first().innerText(),actual.last);
