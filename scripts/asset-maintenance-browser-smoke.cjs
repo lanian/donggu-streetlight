@@ -114,6 +114,14 @@ const poll = async (page, fn, arg) => { for (let i = 0; i < 150; i++) { if (awai
     assert.equal(await page.locator('#amLabel').inputValue(), '복구할 분전함 초안');
     await page.locator('[data-am="discard-draft"]').click(); await poll(page, async id => !(await DGOffline.get('assetDraft', id)), draftId);
     checks.push('unsaved topology draft survives reload and explicit discard removes only that draft');
+    // after a reload the facility screen shows its confirmed link from that facility's own records,
+    // without loading the whole cabinet/circuit/link collections
+    const linkedLight = await page.evaluate(async () => (await db.readAll('assetLinks'))[0].lightId);
+    await page.reload(); await page.waitForFunction(() => S.live && DGOffline.ready); await page.evaluate(async () => { await DGIntegration.whenReady(); S.demoRole = 'admin'; });
+    await page.evaluate(id => openLight(id), linkedLight);
+    await poll(page, () => /CAB-UI · 동명 실제 분전함 \/ C-UI · 북측 실제 회로/.test(document.querySelector('[data-am-light]')?.textContent || ''));
+    assert.equal(await page.evaluate(() => DGAssetMaintenance.state.loaded), false, 'opening one facility does not load every asset collection');
+    checks.push('a facility screen reads only its own link, cabinet, circuit and replacements');
     await page.evaluate(() => DGAssetMaintenance.open());
     await page.screenshot({ path: path.join(process.env.TEMP || process.env.TMP || root, 'streetlight-v61-assets.png'), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); assert.deepEqual(errors, []);
