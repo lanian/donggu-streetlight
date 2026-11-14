@@ -219,7 +219,7 @@ test('a work list that failed for lack of connection reloads by itself once the 
   const f = await fixture(); let failing = true;
   f.api.readPage = async (name, options) => { if (failing) throw unreachable(); return f.ctx.DGData.readPage(f.db, name, options); };
   await f.ui.load(true);
-  assert.match(f.ui.state.error, /연결되면 자동으로 다시/); assert.match(f.ui.state.error, /출동 자료/);
+  assert.match(f.ui.state.error, /연결되면 자동으로 다시/); assert.match(f.ui.view(), /id="woPrepared"[^]*출동 자료/, 'the screen points to the field kit (v77 panel)');
   failing = false; f.fireWindow('online');
   await until(() => f.ui.state.loaded && !f.ui.state.error);
 });
