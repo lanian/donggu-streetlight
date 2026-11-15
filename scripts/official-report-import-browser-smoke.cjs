@@ -56,6 +56,9 @@ async function poll(page, fn, arg, label) {
         assert.equal(await page.evaluate(() => DGIntegration.whenReady()), true);
         assert.equal(await page.evaluate(() => FIREBASE_CONFIG), null); assert.equal(await page.evaluate(() => S.me), 'local');
         await page.evaluate(() => { S.demoRole = 'admin'; S.tab = 'admin'; render(); openAdminSection('officialreports'); });
+        // The admin tab starts the 30-day patrol coverage read; its completion re-renders the open section and replaces
+        // #oirApply. On a slow CI disk that landed mid-scenario ("Element is not attached to the DOM"), so wait it out.
+        await poll(page, () => typeof PT_COVER === 'undefined' || (!PT_COVER.loading && !!(PT_COVER.data || PT_COVER.error)), null, 'patrol coverage settled');
         await run({ page, context });
         results.push(name); console.log('PASS: ' + name);
       } finally { await context.close(); }
