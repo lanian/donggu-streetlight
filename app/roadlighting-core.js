@@ -286,5 +286,11 @@
     const bytes = zipStore(files, limit); check(deps); if (typeof deps.onProgress === 'function') deps.onProgress({ phase: 'package', done: files.length, total: files.length });
     return { batchId, contentHash, bytes, filename: 'Donggu_GJD_' + batchId + '.zip', manifest, entries, summary, missingPhotos, fallbackPhotos, photoCount: summary.photos };
   }
-  return { buildPackage, selectRecords };
+  // The range is filtered in Korean time (+09:00), so its default is this Korean month up to today in Korean time,
+  // whatever the device clock's time zone.
+  function defaultRange(now = Date.now()) {
+    const today = new Date(now + 9 * 3600000).toISOString().slice(0, 10);
+    return { from: today.slice(0, 8) + '01', to: today };
+  }
+  return { buildPackage, selectRecords, defaultRange };
 });
