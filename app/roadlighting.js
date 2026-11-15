@@ -4,8 +4,9 @@
   const KIND = 'roadlighting-batch', SECTION = 'roadlighting';
   const TYPES = [['inspections', '점검'], ['reports', '신고'], ['workOrders', '보수 작업'], ['patrols', '순찰']];
   const ENTITY_LABELS = { ...Object.fromEntries(TYPES), workEvents: '보수 처리 이력' };
-  const now = new Date(), date = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  const state = { from: date(new Date(now.getFullYear(), now.getMonth(), 1)), to: date(now), dong: '전체', types: Object.fromEntries(TYPES.map(([key]) => [key, true])), includePhotos: true, includeContacts: false, loading: false, preparing: false, downloading: false, progress: '', error: '', snapshot: null, package: null, history: [], historyRequested: false, historyLoading: false, historyError: '', selectedBatch: '', selectedEntry: '', receiptDraft: { status: 'registered', externalId: '', note: '' }, receiptSaving: false };
+  // index.html loads roadlighting-core.js first; a page without it still loads and only the range starts empty.
+  const range0 = root.DGRoadlightingCore?.defaultRange?.() || { from: '', to: '' };
+  const state = { from: range0.from, to: range0.to, dong: '전체', types: Object.fromEntries(TYPES.map(([key]) => [key, true])), includePhotos: true, includeContacts: false, loading: false, preparing: false, downloading: false, progress: '', error: '', snapshot: null, package: null, history: [], historyRequested: false, historyLoading: false, historyError: '', selectedBatch: '', selectedEntry: '', receiptDraft: { status: 'registered', externalId: '', note: '' }, receiptSaving: false };
   let api, attached = false, owner = null, sequence = 0, active = null, historySequence = 0, historyActive = null, historyContext = null, prepared = null;
   const receiptDrafts = new Map();
   const photoSources = new WeakMap(), noFirebase = {};
