@@ -28,6 +28,12 @@ const server=http.createServer((req,res)=>{const pathname=new URL(req.url,'http:
   await page.locator('#mapLoc').dblclick();await page.waitForTimeout(400);assert.equal(await zoom(),z,'double-clicking 내 위치 keeps the zoom');
   for(let k=0;k<2;k++){await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForTimeout(80);}
   await page.waitForTimeout(400);assert.equal(await zoom(),z,'double-tapping 내 위치 keeps the zoom');await cdp.detach();
+  // Leaflet also builds its own double tap from two touch clicks with detail 1 (browsers that do not count taps).
+  const simTap=sel=>page.evaluate(s=>{const el=document.querySelector(s);for(let k=0;k<2;k++)el.dispatchEvent(new PointerEvent('click',{bubbles:true,cancelable:true,detail:1,pointerType:'touch'}));},sel);
+  await simTap('#mapLoc');await page.waitForTimeout(400);assert.equal(await zoom(),z,'Leaflet-simulated double tap on 내 위치 keeps the zoom');
+  await page.evaluate(()=>{const c=document.querySelector('#mapCard');c.hidden=false;c.innerHTML='<button type="button" id="simTapProbe">probe</button>';});
+  await simTap('#simTapProbe');await page.waitForTimeout(400);assert.equal(await zoom(),z,'Leaflet-simulated double tap on the card keeps the zoom');
+  await page.evaluate(()=>{const c=document.querySelector('#mapCard');c.innerHTML='';c.hidden=true;});
   await page.evaluate(()=>{ME.follow=false;meStop();gmap.setView([markerDuplicate[0].lat,markerDuplicate[0].lng],19,{animate:false});});await page.waitForTimeout(300);
   if(!await page.locator('#mapCard [data-map-choice]').count()){await page.locator('#gmap .mapstack button').tap();}}
  await page.screenshot({path:path.join(artifacts,'overlap-list-390.png')});

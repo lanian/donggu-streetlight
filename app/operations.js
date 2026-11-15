@@ -167,6 +167,8 @@
   }
   // Weak signal: while the server list is slow (SLOW_MS) or failed for lack of connection, show the prepared
   // field-kit works as a separate, dated copy. They are never mixed into the server list.
+  // The server list is still loading or failed for lack of connection: only then is a prepared copy reused.
+  function listUnavailable() { return !!loading || (!!state.error && state.offlineError); }
   function preparedPanel() {
     const listShown = state.loaded && state.workQueryKey === filterKey();
     const slow = !!loading && state.slow && !listShown, failed = !!state.error && state.offlineError;
@@ -595,6 +597,11 @@
     await loadReports(order.lightId, prepared); if (!current()) return;
     const oldCompletion = root.DGOffline.ready && await root.DGOffline.get('workCompletion', resumeId || id);
     if (!current()) return;
+    // A prepared copy is a snapshot. Input saved against a newer revision must not be moved back onto it (or a
+    // submitted one replaced by a fresh form); that work waits for the server copy.
+    if (prepared && oldCompletion && (Number(oldCompletion.expectedRevision) || 0) > (Number(order.revision) || 0)) {
+      return api.toast('이 작업은 출동 자료보다 최신 내용으로 입력한 기록이 있어요. 입력은 저장 대기함·초안에 그대로 있으니, 연결된 뒤 다시 열어 주세요.');
+    }
     state.currentOrder = JSON.parse(JSON.stringify(order));
     state.lightVersion = (api.byId(order.lightId) || {}).updatedAt || null;
     state.reportVersions = Object.fromEntries((order.reportIds || []).map(reportId => { const r = state.reports.find(x => x.id === reportId); return [reportId, r && (r.updatedAt || r.createdAt || null)]; }));
@@ -631,7 +638,7 @@
       '<h3>사용 자재</h3><div class="grid2"><select class="f-in" id="woStockPart" aria-label="등록 자재"><option value="">직접 입력</option>' + state.inventory.map(p => '<option value="' + E(p.id) + '">' + E(p.name) + ' · 재고 ' + p.quantity + E(p.unit) + '</option>').join('') + '</select><input class="f-in" id="woPartName" placeholder="자재명" aria-label="자재명"></div><div class="grid2"><input class="f-in" id="woPartQty" type="number" min="0.001" step="0.001" value="1" aria-label="사용 수량"><input class="f-in" id="woPartCost" type="number" min="0" value="0" aria-label="단가(원)"></div><button class="btn ghost sm" data-dg="add-part">자재 추가</button><div class="dg-table"><table><thead><tr><th>자재</th><th>수량</th><th>단가</th><th>관리</th></tr></thead><tbody id="woParts">' + partRows(completion.parts) + '</tbody></table></div><p class="muted">재고 연동 자재는 관리자의 완료 검수 시 출고돼요.</p>' +
       '<h3>조도계 실측 (선택)</h3><div class="grid2"><input class="f-in" id="woLux" type="number" min="0" max="200000" step="0.1" placeholder="lux" aria-label="실측 조도"><input class="f-in" id="woLuxNote" maxlength="300" placeholder="측정 위치·기기·조건" aria-label="실측 조건"></div><button class="btn ghost sm" data-dg="add-lux">실측 추가</button><div id="woMeasurements">' + measureRows(completion.measurements) + '</div><p class="muted">조도계로 측정한 값을 입력해요. 지도 밝기 예측과 별도로 보관돼요.</p>' : '') +
       (admin() && order.status === 'completed' ? '<h3>완료 검수</h3><label class="f" for="woVerification">검수 의견 / 보완 사유</label><textarea class="f-in" id="woVerification" maxlength="2000"></textarea><label class="f" for="woFacilityStatus">검수 후 시설 상태</label><select class="f-in" id="woFacilityStatus"><option value="">현재 시설 상태 유지</option>' + options(['정상', '점검필요', '고장', '수리중'], '') + '</select><label class="f"><input type="checkbox" id="woCloseReports"> 연결된 신고도 완료 처리하고 연락처 삭제</label>' : '') +
-      '<div class="split">' + allowed.map(target => '<button class="btn' + (target === 'cancelled' ? ' ghost' : ' sodium') + '" data-dg="transition-work" data-id="' + E(id) + '" data-status="' + target + '">' + E({ assigned: '담당 배정', in_progress: order.status === 'completed' ? '보완 요청' : '작업 시작', completed: '완료 검수 요청', verified: '검수 승인', cancelled: '작업 취소', draft: '배정 대기로 복원' }[target]) + '</button>').join('') + '</div></fieldset></div><h3>처리 이력</h3><div id="woEvents" class="panel" aria-live="polite">불러오는 중…</div>', { key: 'work:' + id, reopen: () => openWork(id, resumeId, prepared ? { prepared } : undefined) });
+      '<div class="split">' + allowed.map(target => '<button class="btn' + (target === 'cancelled' ? ' ghost' : ' sodium') + '" data-dg="transition-work" data-id="' + E(id) + '" data-status="' + target + '">' + E({ assigned: '담당 배정', in_progress: order.status === 'completed' ? '보완 요청' : '작업 시작', completed: '완료 검수 요청', verified: '검수 승인', cancelled: '작업 취소', draft: '배정 대기로 복원' }[target]) + '</button>').join('') + '</div></fieldset></div><h3>처리 이력</h3><div id="woEvents" class="panel" aria-live="polite">불러오는 중…</div>', { key: 'work:' + id, reopen: () => openWork(id, resumeId, prepared && listUnavailable() ? { prepared } : undefined) });
     const detail = Q('#woDetail'), detailCurrent = () => request === editorRequest && token === detailToken && detail?.isConnected && Q('#woDetail') === detail;
     const evidence = [...(order.beforePhotos || []), ...(order.afterPhotos || [])];
     const results = await Promise.allSettled(evidence.map(async photoId => { const photo = await api.getPhoto(photoId), src = photo && root.DGSecurity.safeImageSrc(photo.data); return src ? '<figure><img src="' + E(src) + '" alt="' + E(photo.label || '작업 사진') + '"><figcaption>' + E(photo.label) + '</figcaption></figure>' : '<p class="notice">원본 사진을 확인할 수 없어요.</p>'; }));
@@ -831,11 +838,16 @@
   }
   function planMapView(plan) { const done = plan.stops.filter(s => stopDone(plan, s)).map(s => s.id), next = plan.stops.find(s => !done.includes(s.id)); return { order: plan.stops.map(s => s.id), done, next: next?.id || null }; }
   // Called by the plan map. Only the plan the map was opened for is changed; a replaced or cleared plan is left alone.
+  // The map shows a copy of the plan, so every outcome goes back to it: the current view when the move cannot
+  // apply (e.g. the stop was finished after the map opened), an error when the plan was replaced or not saved.
   async function reorderFromMap(plan, id, where) {
-    if (state.plan !== plan) return null;
-    const stops = C.moveOpenStop(plan.stops, id, where, stop => stopDone(plan, stop)); if (!stops) return null;
+    if (state.plan !== plan) throw new Error('방문 계획이 바뀌었어요. 계획 지도를 다시 열어 주세요.');
+    const stops = C.moveOpenStop(plan.stops, id, where, stop => stopDone(plan, stop)); if (!stops) return planMapView(plan);
+    const before = { stops: plan.stops, reorderedAt: plan.reorderedAt };
     plan.stops = stops; relegs(plan); plan.reorderedAt = Date.now();
-    await root.DGOffline.put('plan', 'current', plan); notify(); return planMapView(plan);
+    try { await root.DGOffline.put('plan', 'current', plan); }
+    catch (error) { Object.assign(plan, before); relegs(plan); notify(); throw new Error('방문 순서를 저장하지 못했어요. ' + (error.message || '')); }
+    notify(); return planMapView(plan);
   }
   async function refreshQueue() {
     if (!root.DGOffline.ready) return;
