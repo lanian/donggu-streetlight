@@ -11,7 +11,7 @@
   let editConflict = null;
   let drivingSession = null, drivingToken = 0;
   const clone = value => JSON.parse(JSON.stringify(value));
-  const state = { orders: [], inventory: [], reports: [], settings: { inspectionDays: 90, privacyDays: 90 }, loaded: false, error: '', at: 0, filter: 'open', mine: false, deadline: 'all', urgent: false, workDong: '전체', show: 40, cursor: null, hasMore: false, workQueryKey: '', queryAt: Date.now(), workMeta: null, draft: null, completion: null, edit: null, currentOrder: null, reportVersions: {}, lightVersion: null, plan: null, dueFilter: 'needed', dueDong: '전체', dueShow: 60, dueSort: 'priority', pos: null, planPick: new Set(), workPick: new Map(), bulk: null, jobs: [], drafts: [] };
+  const state = { orders: [], inventory: [], reports: [], settings: { inspectionDays: 90, privacyDays: 90 }, loaded: false, error: '', at: 0, filter: 'open', mine: false, deadline: 'all', urgent: false, workDong: '전체', show: 40, cursor: null, hasMore: false, workQueryKey: '', queryAt: Date.now(), workMeta: null, draft: null, completion: null, edit: null, currentOrder: null, reportVersions: {}, lightVersion: null, plan: null, planRevision: null, dueFilter: 'needed', dueDong: '전체', dueShow: 60, dueSort: 'priority', pos: null, planPick: new Set(), workPick: new Map(), bulk: null, jobs: [], drafts: [] };
   const uuid = prefix => prefix + '-' + (root.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
   const E = value => api.esc(value), Q = selector => document.querySelector(selector);
   const time = value => value ? api.fmtDT(value) : '미지정';
@@ -707,6 +707,40 @@
   // a stop counts as done when it was ticked, or when the light was inspected after the plan was made
   const stopDone = (plan, s) => !!s.visited || (Number(api.byId(s.id)?.lastInspected) || 0) >= (plan.createdAt || 0);
   function relegs(plan) { C.planLegs(plan); if (plan.origin && plan.stops[0]) plan.startDistance = Math.round(C.distance(plan.origin, plan.stops[0])); return plan; }
+  // Every tab on this phone shares the device copy of the visit plan. Each write names the revision this tab last
+  // read, so an older copy cannot replace a visit, order or plan another tab saved; the latest plan is shown instead
+  // and the person tries again. A plan saved before revisions existed counts as revision 0.
+  function adoptPlan(saved) {
+    state.planRevision = saved ? saved.draftRevision || 0 : null;
+    if (!saved) return null;
+    const plan = { ...saved }; delete plan.draftRevision; return plan;
+  }
+  async function planConflict(error) {
+    if (error?.code !== 'conflict') throw error;
+    const latest = adoptPlan(await root.DGOffline.get('plan', 'current'));
+    state.plan = latest ? C.reconcilePlan(latest, api.byId) : null; notify();
+    throw replacedPlan();
+  }
+  // Writes from this tab run one at a time, so a quick second tap names the revision the first one saved
+  // instead of being mistaken for another tab's change.
+  let planWrites = Promise.resolve();
+  function queuePlanWrite(write) { const run = planWrites.then(write); planWrites = run.catch(() => {}); return run; }
+  const replacedPlan = () => Object.assign(new Error('다른 탭에서 방문 계획이 바뀌어 최신 계획을 불러왔어요. 다시 해 주세요.'), { code: 'plan-reloaded' });
+  function savePlan(plan) {
+    return queuePlanWrite(async () => {
+      // Every caller saves the plan on screen. If an earlier write in the queue loaded the latest plan, this change
+      // was made on the older copy; saving it under the new revision would overwrite the other tab after all.
+      if (plan !== state.plan) throw replacedPlan();
+      let saved; try { saved = await root.DGOffline.putIfCurrent('plan', 'current', plan, state.planRevision); } catch (error) { return planConflict(error); }
+      state.planRevision = saved.draftRevision; return plan;
+    });
+  }
+  function clearPlan() {
+    return queuePlanWrite(async () => {
+      try { await root.DGOffline.removeIfCurrent('plan', 'current', state.planRevision); } catch (error) { return planConflict(error); }
+      state.plan = null; state.planRevision = null;
+    });
+  }
   const ROUTE_STOPS = 6; // stops handed to a map app at once (네이버 지도 and 카카오맵 each take 5 waypoints + the destination)
   /* the open stops still ahead, in plan order, and their straight-line length (from my position when known) */
   function remaining(plan, done) {
@@ -735,7 +769,7 @@
       : [{ value: google('driving'), label: '구글 지도 (웹) · 차량', hint: '경유지 ' + via.length + '곳 · 네이버·카카오 경유지 경로는 휴대폰 앱에서 열려요' }, { value: google('walking'), label: '구글 지도 (웹) · 도보' }];
     const url = root.DGDialog ? await root.DGDialog.choose(ahead.map(s => s.code).join(' → '), { title: '다음 ' + ahead.length + '곳을 한 경로로 열까요?', options }) : options.find(o => o.value.startsWith('https:')).value;
     if (url && ahead.some(stop => { const current = api.byId(stop.id); return !current || current.removed || current.posApprox || current.lat !== stop.lat || current.lng !== stop.lng; })) {
-      Object.assign(plan, C.reconcilePlan(plan, api.byId)); await root.DGOffline.put('plan', 'current', plan); notify(); return api.toast('시설 위치가 바뀌었어요. 좌표 확인 후 경로를 다시 열어 주세요.');
+      Object.assign(plan, C.reconcilePlan(plan, api.byId)); await savePlan(plan); notify(); return api.toast('시설 위치가 바뀌었어요. 좌표 확인 후 경로를 다시 열어 주세요.');
     }
     if (url) root.open(url, '_blank', 'noopener');
   }
@@ -845,7 +879,7 @@
     const stops = C.moveOpenStop(plan.stops, id, where, stop => stopDone(plan, stop)); if (!stops) return planMapView(plan);
     const before = { stops: plan.stops, reorderedAt: plan.reorderedAt };
     plan.stops = stops; relegs(plan); plan.reorderedAt = Date.now();
-    try { await root.DGOffline.put('plan', 'current', plan); }
+    try { await savePlan(plan); }
     catch (error) { Object.assign(plan, before); relegs(plan); notify(); throw new Error('방문 순서를 저장하지 못했어요. ' + (error.message || '')); }
     notify(); return planMapView(plan);
   }
@@ -910,11 +944,11 @@
       take.forEach(id => state.planPick.add(id)); return notify();
     }
     if (action === 'pick-none') { state.planPick.clear(); return notify(); }
-    if (action === 'make-plan') { const chosen = [...state.planPick].map(id => api.byId(id)).filter(Boolean).slice(0, 200); if (!chosen.length) throw new Error('방문할 시설을 선택해 주세요.'); state.plan = C.planVisits(chosen, state.pos || api.state().pos); state.planPick.clear(); await root.DGOffline.put('plan', 'current', state.plan); api.toast(state.plan.stops.length + '곳 방문 계획을 만들었어요.'); return notify(); }
+    if (action === 'make-plan') { const chosen = [...state.planPick].map(id => api.byId(id)).filter(Boolean).slice(0, 200); if (!chosen.length) throw new Error('방문할 시설을 선택해 주세요.'); state.plan = C.planVisits(chosen, state.pos || api.state().pos); await savePlan(state.plan); state.planPick.clear(); api.toast(state.plan.stops.length + '곳 방문 계획을 만들었어요.'); return notify(); }
     if (action === 'plan-map') { const plan = state.plan, view = planMapView(plan); return api.openMap('custom', { title: '방문 계획 · 직선 순서', pts: plan.stops.map(s => api.byId(s.id)).filter(Boolean), ordered: true, ...view, reorder: (id, where) => reorderFromMap(plan, id, where) }); }
     if (action === 'plan-route-ahead') return routeAhead(state.plan);
     if (action === 'plan-route') return api.route ? api.route(button.dataset.id) : api.toast('길찾기를 쓸 수 없어요.');
-    if (action === 'plan-visit') { const s = state.plan.stops[+button.dataset.index]; if (!s) return; s.visited = true; await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
+    if (action === 'plan-visit') { const s = state.plan.stops[+button.dataset.index]; if (!s) return; s.visited = true; await savePlan(state.plan); return notify(); }
     if (action === 'plan-reorder') {
       if (!state.pos && !await locate()) return;
       const done = state.plan.stops.filter(s => stopDone(state.plan, s)), left = state.plan.stops.filter(s => !stopDone(state.plan, s));
@@ -922,10 +956,10 @@
       const before = remaining(state.plan, state.plan.stops.map(s => stopDone(state.plan, s))).meters;
       const re = C.planVisits(left, state.pos); state.plan.stops = [...done, ...re.stops.map(s => ({ ...s, visited: false }))]; relegs(state.plan); state.plan.reorderedAt = Date.now();
       const after = remaining(state.plan, state.plan.stops.map(s => stopDone(state.plan, s))).meters, saved = before - after;
-      await root.DGOffline.put('plan', 'current', state.plan); api.toast('내 위치부터 남은 ' + left.length + '곳을 다시 정렬했어요' + (saved >= 50 ? ' · 직선 약 ' + fmtM(saved) + ' 단축' : '') + '.'); return notify();
+      await savePlan(state.plan); api.toast('내 위치부터 남은 ' + left.length + '곳을 다시 정렬했어요' + (saved >= 50 ? ' · 직선 약 ' + fmtM(saved) + ' 단축' : '') + '.'); return notify();
     }
-    if (action === 'plan-up' || action === 'plan-down') { const i = +button.dataset.index, j = action === 'plan-up' ? i - 1 : i + 1; if (j < 0 || j >= state.plan.stops.length) return; [state.plan.stops[i], state.plan.stops[j]] = [state.plan.stops[j], state.plan.stops[i]]; relegs(state.plan); await root.DGOffline.put('plan', 'current', state.plan); return notify(); }
-    if (action === 'clear-plan') { if (!await ask('현재 방문 계획을 지워요. 점검 기록은 유지돼요.', { title: '방문 계획을 지울까요?', ok: '지우기', danger: true })) return; state.plan = null; await root.DGOffline.remove('plan', 'current'); return notify(); }
+    if (action === 'plan-up' || action === 'plan-down') { const i = +button.dataset.index, j = action === 'plan-up' ? i - 1 : i + 1; if (j < 0 || j >= state.plan.stops.length) return; [state.plan.stops[i], state.plan.stops[j]] = [state.plan.stops[j], state.plan.stops[i]]; relegs(state.plan); await savePlan(state.plan); return notify(); }
+    if (action === 'clear-plan') { if (!await ask('현재 방문 계획을 지워요. 점검 기록은 유지돼요.', { title: '방문 계획을 지울까요?', ok: '지우기', danger: true })) return; await clearPlan(); return notify(); }
     if (action === 'plan-csv') return download('동구_방문계획', [['순서', '시설', '시설ID', '법정동', '위도', '경도', '앞 방문지에서 직선m', '방문', '연결 작업ID'], ...state.plan.stops.map((p, i) => [i + 1, p.code, p.id, p.dong, p.lat, p.lng, i ? p.distanceFromPrevious : '', stopDone(state.plan, p) ? (p.visited ? '방문' : '점검 완료') : '미방문', (p.workIds || []).join(' · ')])]);
     if (['work-csv', 'work-map', 'work-plan'].includes(action)) {
       const { rows, metadata } = await fullSelectedOrders();
@@ -934,7 +968,7 @@
       if (action === 'work-map') return api.openMap('custom', { title: '보수 작업 · 선택 조건 전체', pts: points });
       if (!points.length) throw new Error('조건에 맞는 방문 시설이 없어요.');
       state.plan = C.planVisits(points, api.state().pos); state.plan.filters = workFilters(); state.plan.sourceAt = metadata?.fetchedAt || Date.now();
-      await root.DGOffline.put('plan', 'current', state.plan); api.openSection?.('due'); return notify();
+      await savePlan(state.plan); api.openSection?.('due'); return notify();
     }
     if (action === 'queue-refresh') return refreshQueue();
     if (action === 'retry-all') { await root.DGOffline.flush({ retry: true }); return refreshQueue(); }
@@ -1004,7 +1038,7 @@
         if (e.target.id === 'dgDueDong') { state.dueDong = e.target.value; state.dueShow = 60; notify(); }
         if (e.target.id === 'dgDueFilter') { state.dueFilter = e.target.value; state.dueShow = 60; notify(); }
         if (e.target.dataset.planLight) { if (e.target.checked) state.planPick.add(e.target.dataset.planLight); else state.planPick.delete(e.target.dataset.planLight); const btn = Q('[data-dg="make-plan"]'); if (btn) { btn.disabled = !state.planPick.size; btn.textContent = state.planPick.size ? '선택한 ' + state.planPick.size + '곳 방문 계획' : '시설을 골라 방문 계획'; } e.target.closest('.dg-due-row')?.classList.toggle('picked', e.target.checked); }
-        if (e.target.dataset.planVisited !== undefined && state.plan) { state.plan.stops[+e.target.dataset.planVisited].visited = e.target.checked; await root.DGOffline.put('plan', 'current', state.plan); notify(); }
+        if (e.target.dataset.planVisited !== undefined && state.plan) { state.plan.stops[+e.target.dataset.planVisited].visited = e.target.checked; await savePlan(state.plan); notify(); }
       })().catch(error => api.toast(error.message));
     });
     root.DGOffline.subscribe(event => {
@@ -1036,8 +1070,9 @@
   async function ready() {
     if (!root.DGOffline.ready) return;
     const owner = captureOwner(), savedPlan = await owner.offline.get('plan', 'current'); if (!ownsContext(owner)) return;
-    state.plan = savedPlan ? C.reconcilePlan(savedPlan, api.byId) : null;
-    if (savedPlan && JSON.stringify(savedPlan) !== JSON.stringify(state.plan)) await owner.offline.put('plan', 'current', state.plan);
+    // Opening the app only reads the plan. Reconciling is repeated on every read, and the next change saves the
+    // reconciled copy; saving it here would make every other open tab's next change look like a conflict.
+    const loadedPlan = adoptPlan(savedPlan); state.plan = loadedPlan ? C.reconcilePlan(loadedPlan, api.byId) : null;
     if (!ownsContext(owner)) return;
     const jobs = new Map((await owner.offline.jobs()).map(job => [job.id, job])); if (!ownsContext(owner)) return;
     for (const kind of ['workDraft', 'workCompletion', 'workEdit']) for (const entry of await owner.offline.list(kind)) {

@@ -256,10 +256,72 @@ test('a map reorder that cannot apply refreshes the map, and a failed save or re
   f.ui.state.plan.stops[2].visited = true; // finished after the map opened
   const view = await opened.reorder('c', 'earlier');
   assert.ok(view, 'the map gets the current plan back'); assert.ok(view.done.includes('c'), 'and now sees the stop as finished');
-  const put = f.offline.put; f.offline.put = async () => { throw new Error('저장 공간 부족'); };
+  const put = f.offline.putIfCurrent; f.offline.putIfCurrent = async () => { throw new Error('저장 공간 부족'); };
   await assert.rejects(opened.reorder('b', 'next'));
   assert.equal(f.ui.state.plan.stops.map(s => s.id).join(), 'a,b,c', 'a failed save leaves the plan order as it was');
-  f.offline.put = put;
+  f.offline.putIfCurrent = put;
   f.ui.state.plan = C.planLegs({ createdAt: Date.now(), stops: [stop('x', 35.14), stop('y', 35.15)] });
   await assert.rejects(opened.reorder('b', 'next'), /계획 지도를 다시 열어/);
+});
+
+// Two tabs on one phone share the device copy of the visit plan. A tab must not save its older copy over a change the
+// other tab already saved (a visit mark, a new order, a new plan); it reloads the latest plan and asks to try again.
+async function twoTabsWithPlan() {
+  const located = id => ({ a: { id: 'a', code: 'A', dong: '동명동', lat: 35.14, lng: 126.92 }, b: { id: 'b', code: 'B', dong: '산수동', lat: 35.15, lng: 126.93 }, c: { id: 'c', code: 'C', dong: '동명동', lat: 35.16, lng: 126.94 } })[id];
+  const a = await fixture(); a.api.byId = located;
+  a.ui.state.plan = C.planLegs({ createdAt: Date.now(), stops: ['a', 'b', 'c'].map(located) });
+  a.click('plan-up', { index: '1' }); await until(async () => (await a.offline.get('plan', 'current'))?.stops[0].id === 'b');
+  const b = await fixture(a.adapter); b.api.byId = located; await b.ui.ready();
+  assert.equal((await a.offline.get('plan', 'current')).draftRevision, 1, 'opening another tab only reads the plan; it does not save it again');
+  assert.equal(b.ui.state.plan.stops.map(s => s.id).join(), 'b,a,c');
+  return { a, b };
+}
+test('a tab with an older copy of the visit plan cannot overwrite a visit marked in another tab', async () => {
+  const { a, b } = await twoTabsWithPlan();
+  a.click('plan-visit', { index: '0' }); await until(async () => (await a.offline.get('plan', 'current')).stops[0].visited === true);
+  b.click('plan-down', { index: '1' }); await until(() => b.messages.length);
+  assert.match(b.messages.at(-1), /다른 탭/);
+  const saved = await a.offline.get('plan', 'current');
+  assert.equal(saved.stops[0].visited, true, 'the visit marked in the other tab is kept');
+  assert.equal(saved.stops.map(s => s.id).join(), 'b,a,c', 'the older copy did not reorder the saved plan');
+  assert.equal(b.ui.state.plan.stops[0].visited, true, 'the refused tab now shows the latest plan');
+  b.click('plan-down', { index: '1' }); await until(async () => (await b.offline.get('plan', 'current')).stops.map(s => s.id).join() === 'b,c,a');
+  assert.equal((await b.offline.get('plan', 'current')).stops[0].visited, true, 'trying again on the latest plan keeps the visit');
+});
+test('a tab with an older copy cannot clear or replace a visit plan another tab changed', async () => {
+  const { a, b } = await twoTabsWithPlan();
+  a.click('plan-visit', { index: '0' }); await until(async () => (await a.offline.get('plan', 'current')).stops[0].visited === true);
+  b.click('clear-plan'); await until(() => b.messages.length);
+  assert.match(b.messages.at(-1), /다른 탭/); assert.ok(await a.offline.get('plan', 'current'), 'the changed plan is not deleted');
+  b.messages.length = 0; a.click('plan-visit', { index: '1' }); await until(async () => (await a.offline.get('plan', 'current')).stops[1].visited === true);
+  b.ui.state.planPick.add('c'); b.click('make-plan'); await until(() => b.messages.length);
+  assert.match(b.messages.at(-1), /다른 탭/);
+  assert.equal((await a.offline.get('plan', 'current')).stops[1].visited, true, 'a new plan from an older copy does not replace the changed one');
+});
+test('quick repeated changes in one tab are all saved and never reported as another tab', async () => {
+  const { a } = await twoTabsWithPlan();
+  a.click('plan-down', { index: '0' }); a.click('plan-visit', { index: '2' });
+  await until(async () => { const saved = await a.offline.get('plan', 'current'); return saved.stops.map(s => s.id).join() === 'a,b,c' && saved.stops[2].visited === true; });
+  assert.deepEqual(a.messages, [], 'the second change waits for the first save instead of looking like a conflict');
+  assert.equal(a.ui.state.planRevision, (await a.offline.get('plan', 'current')).draftRevision);
+});
+test('a change queued behind a refused save is dropped with the older copy instead of overwriting the other tab', async () => {
+  const { a, b } = await twoTabsWithPlan();
+  a.click('plan-visit', { index: '0' }); await until(async () => (await a.offline.get('plan', 'current')).stops[0].visited === true);
+  const revision = (await a.offline.get('plan', 'current')).draftRevision;
+  b.click('plan-down', { index: '1' }); b.click('plan-up', { index: '2' });
+  await until(() => b.messages.length >= 2);
+  const saved = await a.offline.get('plan', 'current');
+  assert.equal(saved.stops[0].visited, true, 'the visit marked in the other tab survives both quick taps');
+  assert.equal(saved.draftRevision, revision, 'neither change from the older copy was saved');
+  assert.ok(b.messages.every(m => /다른 탭/.test(m)), 'both taps say the plan changed in another tab');
+});
+test('a new plan refused because another tab changed the plan keeps the picked facilities for another try', async () => {
+  const { a, b } = await twoTabsWithPlan();
+  a.click('plan-visit', { index: '0' }); await until(async () => (await a.offline.get('plan', 'current')).stops[0].visited === true);
+  b.ui.state.planPick.add('c'); b.ui.state.planPick.add('a'); b.click('make-plan'); await until(() => b.messages.length);
+  assert.match(b.messages.at(-1), /다른 탭/);
+  assert.deepEqual([...b.ui.state.planPick].sort(), ['a', 'c'], 'the picks are not lost with the refused plan');
+  b.click('make-plan'); await until(async () => (await b.offline.get('plan', 'current')).stops.length === 2);
+  assert.equal(b.ui.state.planPick.size, 0, 'a saved plan consumes the picks');
 });
