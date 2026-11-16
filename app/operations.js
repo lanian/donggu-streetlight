@@ -710,7 +710,11 @@
   // Every tab on this phone shares the device copy of the visit plan. Each write names the revision this tab last
   // read, so an older copy cannot replace a visit, order or plan another tab saved; the latest plan is shown instead
   // and the person tries again. A plan saved before revisions existed counts as revision 0.
+  // The revision also belongs to the account storage it was read from: after the device storage switches accounts
+  // and before ready() reads the new account's plan, the plan on screen is the previous account's.
+  let planOwner = null;
   function adoptPlan(saved) {
+    planOwner = captureOwner();
     state.planRevision = saved ? saved.draftRevision || 0 : null;
     if (!saved) return null;
     const plan = { ...saved }; delete plan.draftRevision; return plan;
@@ -725,18 +729,21 @@
   // instead of being mistaken for another tab's change.
   let planWrites = Promise.resolve();
   function queuePlanWrite(write) { const run = planWrites.then(write); planWrites = run.catch(() => {}); return run; }
+  function ownPlanStorage() { if (planOwner) requireOwner(planOwner); else planOwner = captureOwner(); }
   const replacedPlan = () => Object.assign(new Error('다른 탭에서 방문 계획이 바뀌어 최신 계획을 불러왔어요. 다시 해 주세요.'), { code: 'plan-reloaded' });
   function savePlan(plan) {
     return queuePlanWrite(async () => {
       // Every caller saves the plan on screen. If an earlier write in the queue loaded the latest plan, this change
       // was made on the older copy; saving it under the new revision would overwrite the other tab after all.
       if (plan !== state.plan) throw replacedPlan();
+      ownPlanStorage();
       let saved; try { saved = await root.DGOffline.putIfCurrent('plan', 'current', plan, state.planRevision); } catch (error) { return planConflict(error); }
       state.planRevision = saved.draftRevision; return plan;
     });
   }
   function clearPlan() {
     return queuePlanWrite(async () => {
+      ownPlanStorage();
       try { await root.DGOffline.removeIfCurrent('plan', 'current', state.planRevision); } catch (error) { return planConflict(error); }
       state.plan = null; state.planRevision = null;
     });
