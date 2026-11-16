@@ -193,6 +193,37 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
     assert.doesNotMatch(await page.locator('.dg-plan').textContent(), /모든 방문지를 마쳤어요/);
     assert.match(await page.locator('.dg-plan').textContent(), /시설/);
 
+
+    // 8. Two tabs on one phone share the device copy of the plan. Opening a tab only reads it. A tab holding an older
+    //    copy cannot save it over a visit the other tab marked; it shows the latest plan and asks to try again.
+    checks.push('a second tab with an older copy cannot overwrite the visit plan');
+    await page.evaluate(ids => { DGOperations.state.planPick = new Set(ids); openAdminSection('due'); }, nearestIds.slice(0, 4));
+    await page.locator('[data-dg="make-plan"]').click(); await page.waitForFunction(() => DGOperations.state.plan?.stops.length === 4);
+    const storedPlan = () => page.evaluate(() => DGOffline.get('plan', 'current'));
+    const madeRevision = (await storedPlan()).draftRevision;
+    const tab = async () => {
+      const p = await context.newPage(); p.on('pageerror', e => errors.push(e.message)); p.on('dialog', d => { errors.push('native dialog: ' + d.message()); d.dismiss(); });
+      await p.goto(origin); await p.waitForFunction(() => S.live && DGOffline.ready && S.me === 'local' && DGIntegration.initialized && DGOperations.state.plan?.stops.length === 4);
+      await p.evaluate(() => { S.demoRole = 'admin'; S.tab = 'admin'; render(); openAdminSection('due'); }); await p.locator('.dg-plan').waitFor(); return p;
+    };
+    const first = await tab(), second = await tab();
+    assert.equal((await storedPlan()).draftRevision, madeRevision, 'opening two more tabs does not save the plan again');
+    const firstStop = (await storedPlan()).stops[0].id;
+    await first.locator('.dg-plan-next [data-dg="plan-visit"]').click();
+    await first.waitForFunction(id => DGOperations.state.plan.stops.find(s => s.id === id)?.visited, firstStop);
+    await second.locator('.dg-plan-stop [data-dg="plan-down"]').nth(1).click();
+    await second.waitForFunction(() => /다른 탭/.test(document.querySelector('#toast')?.textContent || ''));
+    const kept = await storedPlan();
+    assert.equal(kept.stops.find(s => s.id === firstStop).visited, true, 'the visit marked in the other tab is kept on the device');
+    assert.equal(kept.draftRevision, madeRevision + 1, 'the older copy was not saved');
+    assert.equal(await second.evaluate(id => DGOperations.state.plan.stops.find(s => s.id === id).visited, firstStop), true, 'the refused tab now shows the latest plan');
+    const order = kept.stops.map(s => s.id);
+    await second.locator('.dg-plan-stop [data-dg="plan-down"]').nth(1).click();
+    await second.waitForFunction(ids => DGOperations.state.plan.stops.map(s => s.id).join() === [ids[0], ids[2], ids[1], ids[3]].join(), order);
+    const retried = await storedPlan();
+    assert.deepEqual(retried.stops.map(s => s.id), [order[0], order[2], order[1], order[3]], 'trying again on the latest plan saves the new order');
+    assert.equal(retried.stops.find(s => s.id === firstStop).visited, true, 'and keeps the visit');
+    await first.close(); await second.close();
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ results: checks, browserErrors: errors }, null, 2));
   } finally { await context.close(); await browser.close(); server.close(); }
