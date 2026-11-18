@@ -38,13 +38,13 @@ test('the real photo appendix renders 100 selected photos for print at every siz
   assert.match(fallback, /원본 조회 실패 · 보관된 미리보기/);
 });
 
-function management() {
+function management(rows = {}) {
   const scheduled = [], listeners = {}, downloads = [], messages = [], reads = [], backend = {};
   let fail = false, section = 'dashboard';
   const fields = { '#dgDashFrom': { value: '2026-10-01' }, '#dgDashTo': { value: '2026-10-25' } };
   const context = vm.createContext({ console, Date, Promise, setTimeout: fn => scheduled.push(fn), navigator: { onLine: false }, document: { querySelector: key => fields[key], addEventListener: (event, handler) => listeners[event] = handler }, DGOperationsCore: require('../../app/operations-core.js'), DGOffline: { register() {} }, DGOperations: { download: async (...values) => downloads.push(values) } });
   vm.runInContext(source('app/management.js'), context);
-  const api = { esc: String, state: () => ({ me: 'staff', lights: [], names: {} }), firebase: () => backend, can: () => true, fmtDT: String, toast: message => messages.push(message), render: () => { if (section === 'audit') context.DGManagement.auditView(); }, readAll: async (collection, options) => { reads.push(collection); if (fail) throw new Error('permission-denied'); options.onMetadata?.({ source: context.navigator.onLine ? 'server' : 'cache', complete: !!context.navigator.onLine }); return []; } };
+  const api = { esc: String, state: () => ({ me: 'staff', lights: [], names: {} }), firebase: () => backend, can: () => true, fmtDT: String, toast: message => messages.push(message), render: () => { if (section === 'audit') context.DGManagement.auditView(); }, readAll: async (collection, options) => { reads.push(collection); if (fail) throw new Error('permission-denied'); options.onMetadata?.({ source: context.navigator.onLine ? 'server' : 'cache', complete: !!context.navigator.onLine }); return rows[collection] || []; } };
   context.DGManagement.attach(api);
   const click = action => { listeners.click({ target: { closest: () => ({ dataset: { mgmt: action } }) } }); return settle(); };
   return { context, manager: context.DGManagement, scheduled, reads, downloads, messages, click, setFail: value => { fail = value; }, section: value => { section = value; } };
@@ -62,6 +62,21 @@ test('offline report provenance survives reconnection and a failed refresh preve
   assert.match(m.dashboard(), /data-mgmt="dashboard-csv" disabled/);
   await f.click('dashboard-csv'); assert.equal(f.downloads.length, 1);
   assert.ok(f.messages.some(message => message.includes('다시 조회')));
+});
+
+test('dashboard CSV labels physical circuits the same way as the dashboard', async () => {
+  const f = management({
+    inspections: [{ lightId: 'lamp', date: Date.parse('2026-10-15T12:00:00+09:00'), result: '고장' }],
+    assetLinks: [{ lightId: 'lamp', circuitId: 'north' }],
+    circuits: [{ id: 'north', label: '북측 회로' }]
+  });
+  await f.click('dashboard-load');
+  assert.match(f.manager.dashboard(), /<th>확인된 회로<\/th>/);
+  await f.click('dashboard-csv');
+  const rows = f.downloads[0][1], circuit = rows.findIndex(row => row[0] === '북측 회로');
+  assert.ok(circuit > 0);
+  assert.equal(rows[circuit][1], 1);
+  assert.equal(rows[circuit - 1][0], '확인된 회로');
 });
 
 test('audit permission failure makes one request and only an explicit retry starts another', async () => {

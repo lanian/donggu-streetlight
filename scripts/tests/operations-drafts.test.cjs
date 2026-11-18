@@ -298,6 +298,22 @@ test('a tab with an older copy cannot clear or replace a visit plan another tab 
   assert.match(b.messages.at(-1), /다른 탭/);
   assert.equal((await a.offline.get('plan', 'current')).stops[1].visited, true, 'a new plan from an older copy does not replace the changed one');
 });
+for (const action of ['plan-visit', 'clear-plan']) {
+  test(`a tab cannot ${action === 'plan-visit' ? 'mark a visit in' : 'clear'} a plan that was deleted and recreated in another tab`, async () => {
+    const { a, b } = await twoTabsWithPlan();
+    a.click('clear-plan'); await until(() => a.ui.state.plan === null);
+    await a.ui.ready();
+    assert.equal(a.ui.state.plan, null, 'reopening after a deletion does not show a visit plan');
+    a.ui.state.planPick.add('c'); a.click('make-plan');
+    await until(async () => (await a.offline.get('plan', 'current'))?.stops.map(s => s.id).join() === 'c');
+    const replacement = await a.offline.get('plan', 'current');
+    b.click(action, { index: '0' });
+    await until(async () => b.messages.length || (await a.offline.get('plan', 'current'))?.draftRevision !== replacement.draftRevision);
+    assert.deepEqual(await a.offline.get('plan', 'current'), replacement, 'the replacement plan survives the stale action');
+    assert.match(b.messages.at(-1), /다른 탭/);
+    assert.equal(b.ui.state.plan.stops.map(s => s.id).join(), 'c');
+  });
+}
 test('quick repeated changes in one tab are all saved and never reported as another tab', async () => {
   const { a } = await twoTabsWithPlan();
   a.click('plan-down', { index: '0' }); a.click('plan-visit', { index: '2' });

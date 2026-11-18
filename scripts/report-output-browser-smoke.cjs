@@ -39,17 +39,34 @@ async function sourceSnapshot(page) {
   const origin = 'http://127.0.0.1:' + server.address().port;
   const browser = await chromium.launch({ headless: true, ...(process.env.DONGGU_CHROMIUM ? { executablePath: process.env.DONGGU_CHROMIUM } : {}), args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] });
   const checks = [], errors = [];
-  async function scenario(name, run) {
-    const context = await browser.newContext({ viewport: { width: 1100, height: 850 }, serviceWorkers: 'block' });
+  async function scenario(name, run, { timezoneId, now } = {}) {
+    const context = await browser.newContext({ viewport: { width: 1100, height: 850 }, serviceWorkers: 'block', timezoneId });
     await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.fulfill({ status: 200, contentType: route.request().url().endsWith('.js') ? 'text/javascript' : 'text/css', body: '' }));
     const page = await context.newPage(); page.on('pageerror', error => errors.push(name + ': ' + error.message));
     try {
+      if (now) await page.clock.setFixedTime(now);
       await page.goto(origin); await page.waitForFunction(() => typeof S !== 'undefined' && S.live && DGIntegration.initialized);
       assert.equal(await page.evaluate(() => FIREBASE_CONFIG), null);
       await run(page); checks.push(name); console.log('PASS: ' + name);
     } finally { await context.close(); }
   }
   try {
+    await scenario('dashboard defaults and date boundaries use Korean time on a UTC device', async page => {
+      await page.evaluate(async () => {
+        const light = S.lights[0];
+        const dates = ['2026-10-31T23:59:59.999+09:00', '2026-11-01T00:00:00+09:00', '2026-11-01T23:59:59.999+09:00'];
+        await Promise.all(dates.map((date, i) => db.doc('inspections/dashboard-date-' + i).set({ lightId: light.id, date: Date.parse(date), result: '고장' })));
+        S.tab = 'admin'; render(); openAdminSection('dashboard');
+      });
+      await page.waitForFunction(() => DGManagement.state.loadedRange);
+      const from = page.locator('#dgDashFrom'), to = page.locator('#dgDashTo');
+      const defaults = [await from.inputValue(), await to.inputValue()];
+      await from.fill('2026-11-01'); await to.fill('2026-11-01');
+      await page.locator('[data-mgmt="dashboard-load"]').click();
+      await page.waitForFunction(() => DGManagement.state.loadedRange === '2026-11-01/2026-11-01');
+      const count = await page.evaluate(() => DGManagement.state.analytics.inspectionCount);
+      assert.deepEqual({ defaults, count }, { defaults: ['2026-11-01', '2026-11-01'], count: 2 });
+    }, { timezoneId: 'UTC', now: '2026-11-01T00:30:00+09:00' });
     await scenario('period output includes normal inspections, every paginated row/photo and the complete long memo', async page => {
       await seedReport(page, 121);
       assert.equal(await page.locator('#sheet [data-report-inspection]').count(), 100);
