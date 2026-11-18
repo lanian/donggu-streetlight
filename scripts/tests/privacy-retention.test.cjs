@@ -14,6 +14,7 @@ async function fixture(records, options = {}) {
   const messages = [], queries = [], completed = Promise.withResolvers();
   const sandbox = {
     console, Date, setTimeout, clearTimeout,
+    DGOperationsCore: require('../../app/operations-core.js'),
     DGOperations: { state: { settings: { privacyDays: 90 } }, uuid: () => 'privacy-test' },
     DGDialog: { confirm: async () => { if (options.beforeConfirm) await options.beforeConfirm(database); return true; } },
     DGOffline: {

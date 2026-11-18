@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v83-plan-account-switch";
+const APP_VER="v84-plan-dashboard-fixes";
 const RELEASE_NOTES=[
+  {v:"v84-plan-dashboard-fixes",d:"2026-11-18",t:"방문 계획 삭제 후에도 탭 간 덮어쓰기 방지 · 업무 현황 한국 시간 집계와 CSV 회로 제목 정정"},
   {v:"v83-plan-account-switch",d:"2026-11-16",t:"계정이 바뀌는 사이에 누른 방문 계획 변경을 새 계정 계획에 쓰지 않음"},
   {v:"v82-visit-plan-tabs",d:"2026-11-16",t:"같은 기기 다른 탭에서 바꾼 방문 계획을 옛 화면이 덮어쓰지 않음 · 최신 계획을 불러온 뒤 다시 하도록 안내"},
   {v:"v81-review-fixes",d:"2026-11-15",t:"시설 분전함·회로 조회 실패 시 다시 열면 재조회, 새로고침·전송 뒤 최신 반영 · 계획 지도 순서 변경 실패를 알리고 화면 갱신 · 출동 자료가 내 입력보다 오래되면 덮어쓰지 않음"},

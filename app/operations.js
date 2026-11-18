@@ -716,7 +716,7 @@
   function adoptPlan(saved) {
     planOwner = captureOwner();
     state.planRevision = saved ? saved.draftRevision || 0 : null;
-    if (!saved) return null;
+    if (!saved || saved.cleared) return null;
     const plan = { ...saved }; delete plan.draftRevision; return plan;
   }
   async function planConflict(error) {
@@ -741,11 +741,13 @@
       state.planRevision = saved.draftRevision; return plan;
     });
   }
-  function clearPlan() {
+  function clearPlan(plan) {
     return queuePlanWrite(async () => {
+      if (plan !== state.plan) throw replacedPlan();
       ownPlanStorage();
-      try { await root.DGOffline.removeIfCurrent('plan', 'current', state.planRevision); } catch (error) { return planConflict(error); }
-      state.plan = null; state.planRevision = null;
+      // Retain the revision after clearing so a replacement cannot reuse an older tab's revision.
+      let saved; try { saved = await root.DGOffline.putIfCurrent('plan', 'current', { cleared: true, stops: [] }, state.planRevision); } catch (error) { return planConflict(error); }
+      state.plan = null; state.planRevision = saved.draftRevision;
     });
   }
   const ROUTE_STOPS = 6; // stops handed to a map app at once (네이버 지도 and 카카오맵 each take 5 waypoints + the destination)
@@ -966,7 +968,7 @@
       await savePlan(state.plan); api.toast('내 위치부터 남은 ' + left.length + '곳을 다시 정렬했어요' + (saved >= 50 ? ' · 직선 약 ' + fmtM(saved) + ' 단축' : '') + '.'); return notify();
     }
     if (action === 'plan-up' || action === 'plan-down') { const i = +button.dataset.index, j = action === 'plan-up' ? i - 1 : i + 1; if (j < 0 || j >= state.plan.stops.length) return; [state.plan.stops[i], state.plan.stops[j]] = [state.plan.stops[j], state.plan.stops[i]]; relegs(state.plan); await savePlan(state.plan); return notify(); }
-    if (action === 'clear-plan') { if (!await ask('현재 방문 계획을 지워요. 점검 기록은 유지돼요.', { title: '방문 계획을 지울까요?', ok: '지우기', danger: true })) return; await clearPlan(); return notify(); }
+    if (action === 'clear-plan') { const plan = state.plan; if (!await ask('현재 방문 계획을 지워요. 점검 기록은 유지돼요.', { title: '방문 계획을 지울까요?', ok: '지우기', danger: true })) return; await clearPlan(plan); return notify(); }
     if (action === 'plan-csv') return download('동구_방문계획', [['순서', '시설', '시설ID', '법정동', '위도', '경도', '앞 방문지에서 직선m', '방문', '연결 작업ID'], ...state.plan.stops.map((p, i) => [i + 1, p.code, p.id, p.dong, p.lat, p.lng, i ? p.distanceFromPrevious : '', stopDone(state.plan, p) ? (p.visited ? '방문' : '점검 완료') : '미방문', (p.workIds || []).join(' · ')])]);
     if (['work-csv', 'work-map', 'work-plan'].includes(action)) {
       const { rows, metadata } = await fullSelectedOrders();

@@ -223,6 +223,35 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
     const retried = await storedPlan();
     assert.deepEqual(retried.stops.map(s => s.id), [order[0], order[2], order[1], order[3]], 'trying again on the latest plan saves the new order');
     assert.equal(retried.stops.find(s => s.id === firstStop).visited, true, 'and keeps the visit');
+
+    checks.push('clearing and recreating a saved plan does not let an older tab overwrite it');
+    const clearPlan = async p => {
+      await p.locator('[data-dg="clear-plan"]').click();
+      await p.locator('#dgDialog [data-dgdlg="ok"]').click();
+      await p.locator('.dg-plan').waitFor({ state: 'detached' });
+    };
+    const createPlan = async (p, ids) => {
+      await p.evaluate(ids => { DGOperations.state.planPick = new Set(ids); openAdminSection('due'); }, ids);
+      await p.locator('[data-dg="make-plan"]').click();
+      await p.waitForFunction(length => document.querySelectorAll('.dg-plan-stop').length === length, ids.length);
+    };
+    await clearPlan(second);
+    await createPlan(second, nearestIds.slice(0, 4));
+    const stale = await tab();
+    await clearPlan(second);
+    await second.reload();
+    await second.waitForFunction(() => S.live && DGOffline.ready && DGIntegration.initialized);
+    await second.evaluate(() => { S.demoRole = 'admin'; S.tab = 'admin'; render(); openAdminSection('due'); });
+    assert.equal(await second.locator('.dg-plan').count(), 0, 'the cleared plan stays hidden after reload');
+    await createPlan(second, nearestIds.slice(4, 6));
+    const replacement = await storedPlan();
+    await stale.locator('.dg-plan-next [data-dg="plan-visit"]').click();
+    // waitForFunction resolves on the first truthy return, and an async predicate returns a Promise, so wait for the
+    // toast synchronously (as step 8 does) and then check the device copy.
+    await stale.waitForFunction(() => /다른 탭/.test(document.querySelector('#toast')?.textContent || ''));
+    assert.deepEqual(await storedPlan(), replacement, 'the new plan is preserved in IndexedDB');
+    assert.deepEqual(await stale.evaluate(() => DGOperations.state.plan.stops.map(s => s.id)), replacement.stops.map(s => s.id));
+    await stale.close();
     await first.close(); await second.close();
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ results: checks, browserErrors: errors }, null, 2));
