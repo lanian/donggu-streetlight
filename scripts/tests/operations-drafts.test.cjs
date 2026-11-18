@@ -325,3 +325,15 @@ test('a new plan refused because another tab changed the plan keeps the picked f
   b.click('make-plan'); await until(async () => (await b.offline.get('plan', 'current')).stops.length === 2);
   assert.equal(b.ui.state.planPick.size, 0, 'a saved plan consumes the picks');
 });
+test('a plan change made after the device storage switched accounts is not written into the new account', async () => {
+  const { a } = await twoTabsWithPlan();
+  // Each account has its own device storage. The new account already has a plan at the same revision number.
+  const other = a.offline.memoryStore();
+  await a.offline.configure({ namespace: 'local/other-account', durable: true, networkRequired: false, adapter: other });
+  const theirs = await a.offline.putIfCurrent('plan', 'current', { createdAt: 1, stops: [{ id: 'c', code: 'C', dong: '동명동', lat: 35.16, lng: 126.94 }] });
+  assert.equal(theirs.draftRevision, a.ui.state.planRevision, 'both accounts hold a plan at the same revision');
+  a.click('plan-visit', { index: '0' }); await until(() => a.messages.length);
+  assert.match(a.messages.at(-1), /계정이나 저장소가 바뀌어/);
+  assert.deepEqual((await a.offline.get('plan', 'current')).stops.map(s => s.id), ['c'], 'the new account plan was not replaced by the previous account plan');
+  await a.ui.ready(); assert.deepEqual(a.ui.state.plan.stops.map(s => s.id), ['c'], 'once the new account is ready its own plan is shown');
+});
