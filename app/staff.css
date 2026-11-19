@@ -431,6 +431,8 @@ nav.tabs button:focus-visible{outline:3px solid var(--fix);outline-offset:-3px}
 .locbtn{position:absolute;right:10px;top:10px;z-index:500}
 .maplegend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--ink-2);margin-top:8px;align-items:center}
 .maplegend button{font:inherit;font-size:12px;color:var(--ink-2);background:none;border:0;padding:4px 2px;min-height:32px;display:inline-flex;align-items:center}.maplegend button[aria-pressed="false"]{opacity:.4;text-decoration:line-through}
+#mapCluster{padding:4px 8px;border:1px solid var(--line);border-radius:var(--r-ctl);opacity:1;text-decoration:none;cursor:pointer}
+#mapCluster[aria-pressed="true"]{color:var(--fix);background:var(--fix-soft);border-color:var(--fix);font-weight:700}
 /* map view: filter rows scroll sideways, search with a hit list, groups when zoomed out, plate labels when close, a card instead of a popup */
 .mapfilters .seg{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}.mapfilters .seg::-webkit-scrollbar{display:none}.mapfilters .seg button{white-space:nowrap;flex:none}.mapfilters .mapstat{margin-top:-4px}
 .mapsearch{display:flex;gap:8px;margin:0 0 8px}.mapsearch input{flex:1;min-width:0;font:inherit;font-size:15px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);min-height:44px}.mapsearch button{flex:none;min-height:44px}.mapsearch button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
