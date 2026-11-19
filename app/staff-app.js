@@ -1294,6 +1294,14 @@ document.addEventListener("click",async e=>{
   if(t.dataset.kind&&t.closest("#mapKind")){gmapKind=t.dataset.kind;document.querySelectorAll("#mapKind button").forEach(b=>b.setAttribute("aria-pressed",b===t));mapApplyFilters();return}
   if(t.dataset.mstat&&t.closest("#mapStat")){GM.status=t.dataset.mstat;document.querySelectorAll("#mapStat button").forEach(b=>b.setAttribute("aria-pressed",b===t));mapApplyFilters();return}
   if(t.dataset.legend&&t.closest("#mapLegend")){if(GM.hidden.has(t.dataset.legend))GM.hidden.delete(t.dataset.legend);else GM.hidden.add(t.dataset.legend);t.setAttribute("aria-pressed",String(!GM.hidden.has(t.dataset.legend)));t.title=GM.hidden.has(t.dataset.legend)?"다시 보이기":"잠시 숨기기";mapApplyFilters();return}
+  if(t.id==="mapCluster"){
+    GM.cluster=!GM.cluster;
+    try{localStorage.setItem("dg_mapCluster",GM.cluster?"1":"0")}catch(e){}
+    t.setAttribute("aria-pressed",String(GM.cluster));
+    $("#mapMarkerHint").textContent=mapMarkerHint();
+    toast(GM.cluster?"묶어 보기를 켰어요.":"묶어 보기를 껐어요. 모든 시설을 실제 위치에 점으로 보여 줘요.");
+    drawMapMarkers();return;
+  }
   if(t.dataset.maphit){mapFocus(t.dataset.maphit);return}
   if(t.id==="mapNear"){mapNear();return}
   if(t.dataset.mapCardclose!==undefined){hideMapCard(true);return}
@@ -2675,7 +2683,7 @@ function roadAreas(G){
 /* ---------- street map (Leaflet + OpenStreetMap) ---------- */
 let gmap=null,gmapLayer=null,gmapMe=null,gmapPts=[],gmapKind="전체";
 /* map view state: status chip, statuses hidden through the legend, search text, selected light, the "내 주변" list */
-const GM={status:"전체",hidden:new Set(),q:"",sel:null,group:null,groups:new Map(),targets:[],focusSeq:0,focusTimer:null,near:false,bound:false,route:null,labelMax:300,cellPx:72,clusterBelow:16,labelFrom:18};
+const GM={status:"전체",hidden:new Set(),q:"",sel:null,group:null,groups:new Map(),targets:[],focusSeq:0,focusTimer:null,near:false,bound:false,route:null,cluster:true,labelMax:300,cellPx:72,clusterBelow:16,labelFrom:18};
 const MAP_STATUS=["전체","고장","점검필요","수리중","정상","주기 경과"];
 // marker fill = status, marker ring = kind (plate colour); the kind chips above the map filter it
 /* Leaflet's canvas renderer schedules its redraw on the next frame; when a map is removed in that same frame (closing a
@@ -2688,6 +2696,7 @@ function mapVisiblePts(){return gmapPts.filter(l=>(gmapKind==="전체"||(l.kind|
 function mapStatusCounts(arr){const c={"전체":arr.length};arr.forEach(l=>{c[l.status]=(c[l.status]||0)+1;if(isDue(l))c["주기 경과"]=(c["주기 경과"]||0)+1});return c}
 function statusChips(cur,id,counts){return `<div class="seg kindseg mapstat" id="${id}">${MAP_STATUS.filter(s=>s==="전체"||counts[s]).map(s=>`<button type="button" data-mstat="${s}" aria-pressed="${s===cur}">${s==="전체"?"":`<i style="background:${s==="주기 경과"?"#B86E00":STAT_COL[s]};border-radius:50%"></i>`}${s}${s!=="전체"?` <span class="muted" style="font-size:11px">${counts[s]}</span>`:""}</button>`).join("")}</div>`}
 function mapLegend(){return LSTAT.map(s=>`<button type="button" class="st-${s}" data-legend="${s}" aria-pressed="${!GM.hidden.has(s)}" title="${GM.hidden.has(s)?"다시 보이기":"잠시 숨기기"}"><i></i>${s}</button>`).join("")}
+function mapMarkerHint(){return "마커 속은 상태, 테두리는 종류예요. "+(GM.cluster||GM.route?"확대 후 겹친 숫자를 누르면 시설 목록이 열려요.":"겹친 점을 누르면 가까운 시설 목록이 열려요.")}
 function mapFilterState(){return {kind:gmapKind,status:GM.status,hidden:[...GM.hidden],q:GM.q,sel:GM.sel,group:GM.group?GM.group.slice():null}}
 /* A count marker stays at an actual member coordinate. Circular 44 px targets have separated anchors. */
 function mapMarkerGroups(lights,z,exact=false){
@@ -2719,7 +2728,12 @@ function drawMapMarkers(){
     GM.targets.push({pts:[l],lat:l.lat,lng:l.lng});
     const sel=GM.sel===l.id,many=inView.length>800;
     const m=L.circleMarker([l.lat,l.lng],{radius:sel?11:l.reg?9:l.status==="정상"?(many?4:6):8,color:sel?"#FFCE67":l.reg?"#E89A0C":KIND_COL[l.kind]||"#fff",weight:sel?4:l.reg?3:many&&l.status==="정상"?1.5:2.5,dashArray:l.reg||l.posApprox?"3 3":null,fillColor:STAT_COL[l.status]||"#888",fillOpacity:.95,bubblingMouseEvents:false});
-    m.on("click",()=>showMapCard(l.id));m.addTo(gmapLayer);
+    m.on("click",e=>{
+      if(GM.cluster){showMapCard(l.id);return}
+      // Leaflet snaps the event point of small markers to their centers. Use the actual tap for the radius check.
+      const point=e.originalEvent?gmap.mouseEventToContainerPoint(e.originalEvent):e.containerPoint||gmap.latLngToContainerPoint(m.getLatLng());
+      mapPickTarget(point);
+    });m.addTo(gmapLayer);
     if(sel)selectedLayer=m;
     if(z>=GM.labelFrom&&(inView.length<=80||z>=GM.labelFrom+1)&&inView.length<=GM.labelMax)m.bindTooltip(esc(l.code),{permanent:true,direction:"right",offset:[8,0],className:"maplbl",interactive:false});
   };
@@ -2730,7 +2744,8 @@ function drawMapMarkers(){
     for(const group of mapMarkerGroups(stops,z,true)){if(group.pts.length>1){stack(group);continue}const l=group.pts[0];GM.targets.push(group);const n=GM.route.order.indexOf(l.id)+1,done=GM.route.done.has(l.id),sel=GM.sel===l.id,next=GM.route.next===l.id;const m=L.marker([l.lat,l.lng],{icon:L.divIcon({className:"maprt"+(done?" done":"")+(sel?" sel":"")+(next?" next":""),html:`<div style="background:${done?"#8A98B3":STAT_COL[l.status]||"#2F3B52"}">${n}</div>`,iconSize:[28,28],iconAnchor:[14,14]}),zIndexOffset:sel?900:next?800:500,keyboard:false});m.bindTooltip(`${n}. ${esc(l.code)}${done?" · 완료":next?" · 다음 방문지":""}`,{direction:"top",offset:[0,-14]});m.on("click",()=>showMapCard(l.id));m.addTo(gmapLayer)}
     return;
   }
-  if(z<GM.clusterBelow&&inView.length>60){
+  if(!GM.cluster){inView.forEach(single)}
+  else if(z<GM.clusterBelow&&inView.length>60){
     const cells=new Map();
     for(const l of inView){const p=gmap.project([l.lat,l.lng],z);const k=Math.floor(p.x/GM.cellPx)+":"+Math.floor(p.y/GM.cellPx);let cell=cells.get(k);if(!cell){cell={pts:[],issues:0,lat:0,lng:0};cells.set(k,cell)}cell.pts.push(l);if(l.status!=="정상")cell.issues++;cell.lat+=l.lat;cell.lng+=l.lng}
     for(const cell of cells.values()){
@@ -2788,8 +2803,22 @@ function showMapCard(id,focus=false){
 }
 /* A tap near a small marker resolves to the current anchor, including its facility chooser. */
 const MAP_TAP_PX=24;
+function mapNearbyIds(point){
+  const nearby=[];
+  for(const l of GM.singles){
+    const distance=gmap.latLngToContainerPoint([l.lat,l.lng]).distanceTo(point);
+    if(distance<=MAP_TAP_PX)nearby.push({id:l.id,distance});
+  }
+  return nearby.sort((a,b)=>a.distance-b.distance).map(l=>l.id);
+}
 function mapPickTarget(point){
-  if(!gmap||!point)return;let best=null,distance=MAP_TAP_PX;
+  if(!gmap||!point)return;
+  if(!GM.cluster&&!GM.route){
+    const ids=mapNearbyIds(point);
+    if(ids.length>1)showMapGroup(ids);else if(ids.length)showMapCard(ids[0]);
+    return;
+  }
+  let best=null,distance=MAP_TAP_PX;
   for(const target of GM.targets||[]){const p=gmap.latLngToContainerPoint([target.lat,target.lng]),d=p.distanceTo(point);if(d<distance){best=target;distance=d}}
   if(best?.pts.length>1)showMapGroup(best.pts.map(l=>l.id));else if(best)showMapCard(best.pts[0].id);
 }
@@ -2846,14 +2875,15 @@ function openMap(scope,one){
   // the saved view of this level (coming back) is only handed over inside openSheet, so peek at it first for the chips
   const pre=(NAV.restoring&&NAV.restoring.gen===NAV.gen&&NAV.restoring.e&&NAV.restoring.e.map)||NAV.mapView||null;const f=pre&&pre.filters;
   gmapKind=f?f.kind:"전체";GM.status=f?f.status:"전체";GM.hidden=new Set(f?f.hidden:[]);GM.q=f?f.q||"":"";GM.sel=f?f.sel:null;GM.group=Array.isArray(f?.group)?f.group.slice():null;GM.near=false;
+  try{GM.cluster=localStorage.getItem("dg_mapCluster")!=="0"}catch(e){GM.cluster=true}
   GM.route=scope==="custom"&&one&&one.ordered?{ids:pts.map(l=>l.id),order:one.order||pts.map(l=>l.id),done:new Set(one.done||[]),next:one.next||null,reorder:typeof one.reorder==="function"?one.reorder:null,source:one}:null;
   navRoute("map:"+scope+(scope==="one"&&one?":"+one.id:scope==="custom"&&one?":"+(one.title||""):""),()=>openMap(scope,one));
-  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted" id="mapCount">${pts.length.toLocaleString()}개</span></h3><div class="muted">마커 속은 상태, 테두리는 종류예요. 확대 후 겹친 숫자를 누르면 시설 목록이 열려요.</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
+  openSheet(`<div class="sheet-head"><div><h3 style="font-size:19px">${title} <span class="muted" id="mapCount">${pts.length.toLocaleString()}개</span></h3><div class="muted" id="mapMarkerHint">${mapMarkerHint()}</div></div><button class="x" aria-label="닫기" data-close>×</button></div>
     <div class="mapfilters">${kindChips(gmapKind,"mapKind",kindCounts(pts))}${statusChips(GM.status,"mapStat",mapStatusCounts(pts))}</div>
     <div class="mapsearch"><input id="mapQ" type="search" placeholder="표찰 번호·주소로 찾기" enterkeyhint="search" autocomplete="off" value="${esc(GM.q)}" aria-label="지도에서 등 찾기"><button type="button" class="btn sm ghost" id="mapNear" aria-pressed="false">내 주변</button></div>
     <div class="maphits" id="mapHits" hidden></div>
     <div class="gmap" id="gmap"><button class="btn sm locbtn" id="mapLoc" aria-pressed="false">내 위치</button><div class="mapcard" id="mapCard" hidden></div></div>
-    <div class="maplegend" id="mapLegend">${mapLegend()}<span style="margin-left:6px;border-left:1px solid var(--line);padding-left:8px">${KINDS.slice(0,2).map(k=>`<i style="background:transparent;border-color:${KIND_COL[k]}"></i>${k}`).join(" ")}</span><span id="mapNote" style="margin-left:auto"></span></div>
+    <div class="maplegend" id="mapLegend">${mapLegend()}<span style="margin-left:6px;border-left:1px solid var(--line);padding-left:8px">${KINDS.slice(0,2).map(k=>`<i style="background:transparent;border-color:${KIND_COL[k]}"></i>${k}`).join(" ")}</span>${GM.route?"":`<button type="button" id="mapCluster" aria-pressed="${GM.cluster}">묶어 보기</button>`}<span id="mapNote" style="margin-left:auto"></span></div>
     ${pts.length?"":`<div class="empty" style="margin-top:10px">위치 정보가 있는 등이 없어요.</div>`}`);
   if(!window.L){$("#mapNote").textContent="지도 라이브러리를 불러오지 못했어요.";return}
   if(gmap){gmap.remove();gmap=null}

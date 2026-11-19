@@ -46,6 +46,7 @@ const server = http.createServer((req, res) => {
     assert.equal(sum, seeded.total, 'group counts plus single markers cover every light');
     assert.equal(await count(), seeded.total);
     assert.ok(await page.locator('#gmap .mapcl small').count() >= 1, 'a group shows how many of its lights need attention');
+    const overview = await page.evaluate(() => ({ c: gmap.getCenter(), z: gmap.getZoom() }));
     const z0 = await page.evaluate(() => gmap.getZoom());
     await page.locator('#gmap .mapcl').first().click(); await page.waitForTimeout(900);
     assert.ok(await page.evaluate(() => gmap.getZoom()) > z0, 'tapping a group zooms in');
@@ -92,6 +93,136 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => GM.sel), null, 'a tap 40 px away selects nothing');
     await page.evaluate(v => { gmap.setView(v.c, v.z, { animate: false }); drawMapMarkers(); }, view);
 
+    // 3c. show every facility at its coordinates and still offer a picker for nearby points.
+    checks.push('묶어 보기 off shows every light at its coordinates');
+    const clusterToggle = page.locator('#mapLegend #mapCluster');
+    await clusterToggle.waitFor({ timeout: 5000 });
+    assert.equal(await clusterToggle.textContent(), '묶어 보기');
+    assert.equal(await clusterToggle.getAttribute('aria-pressed'), 'true');
+    await page.evaluate(v => { gmap.setView(v.c, v.z, { animate: false }); drawMapMarkers(); }, overview);
+    const assertDots = async () => {
+      assert.equal(await page.locator('#gmap .mapcl, #gmap .mapstack').count(), 0);
+      const { expected, drawn } = await page.evaluate(() => {
+        const bounds = gmap.getBounds().pad(.25);
+        const expected = mapVisiblePts().filter(l => bounds.contains([l.lat, l.lng])).map(l => [l.lat, l.lng].join(',')).sort();
+        const drawn = gmapLayer.getLayers().filter(l => l instanceof L.CircleMarker).map(m => {
+          const { lat, lng } = m.getLatLng(); return [lat, lng].join(',');
+        }).sort();
+        return { expected, drawn };
+      });
+      assert.equal(drawn.length, expected.length);
+      assert.deepEqual(drawn, expected);
+      return drawn.length;
+    };
+    await clusterToggle.click();
+    assert.equal(await clusterToggle.getAttribute('aria-pressed'), 'false');
+    assert.equal(await page.evaluate(() => localStorage.getItem('dg_mapCluster')), '0');
+    assert.equal(await assertDots(), seeded.total, 'the district overview draws a dot for every facility');
+
+    const overlap = await page.evaluate(() => {
+      const [a, b] = gmapPts, bounds = gmap.getContainer().getBoundingClientRect();
+      const prior = { lat: b.lat, lng: b.lng };
+      Object.assign(b, { lat: a.lat, lng: a.lng });
+      gmap.setView([a.lat, a.lng], 19, { animate: false }); drawMapMarkers();
+      const point = gmap.latLngToContainerPoint([a.lat, a.lng]);
+      return { a: a.id, b: b.id, prior, x: bounds.left + point.x, y: bounds.top + point.y };
+    });
+    try {
+      assert.ok(await assertDots() >= 2, 'the overlapping facilities each have a dot');
+      await page.mouse.click(overlap.x, overlap.y);
+      assert.match(await page.locator('#mapCard .mapgroup-title').textContent(), /가까운 시설/);
+      const group = await page.evaluate(() => GM.group);
+      assert.ok(group.includes(overlap.a) && group.includes(overlap.b));
+      await clusterToggle.click();
+      assert.deepEqual(await page.evaluate(() => GM.group), group, 'toggling keeps the open facility list');
+      await clusterToggle.click();
+      await page.locator(`#mapCard [data-map-choice="${overlap.b}"]`).click();
+      assert.equal(await page.evaluate(() => GM.sel), overlap.b);
+      await clusterToggle.click();
+      assert.equal(await clusterToggle.getAttribute('aria-pressed'), 'true');
+      assert.equal(await page.evaluate(() => localStorage.getItem('dg_mapCluster')), '1');
+      assert.equal(await page.evaluate(() => GM.sel), overlap.b, 'toggling keeps the selected card');
+      assert.equal(await page.locator('#mapCard:not([hidden])').count(), 1);
+    } finally {
+      await page.evaluate(({ b, prior }) => { Object.assign(byId(b), prior); hideMapCard(); drawMapMarkers(); }, overlap);
+    }
+
+    await clusterToggle.click();
+    await page.evaluate(v => { gmap.setView(v.c, v.z, { animate: false }); drawMapMarkers(); }, overview);
+    await page.locator('#mapLegend [data-legend="정상"]').click();
+    assert.equal(await assertDots(), 40, 'the hidden status leaves only flagged lights');
+    await page.locator('#mapLegend [data-legend="정상"]').click();
+    await page.locator('#mapStat [data-mstat="고장"]').click();
+    assert.equal(await assertDots(), 30, 'the status chip still filters dots');
+    await page.locator('#mapStat [data-mstat="전체"]').click();
+    await page.locator('#mapKind [data-kind="보안등"]').click();
+    const securityLights = await assertDots();
+    assert.ok(securityLights > 0 && securityLights < seeded.total && securityLights === await count(), 'the kind chip still filters dots');
+    await page.locator('#mapKind [data-kind="전체"]').click();
+
+    await page.evaluate(() => openMap('all'));
+    assert.equal(await clusterToggle.getAttribute('aria-pressed'), 'false', 'the preference survives opening another map');
+    assert.equal(await assertDots(), seeded.total);
+    await page.evaluate(() => {
+      const pts = gmapPts.slice(0, 3), order = pts.map(l => l.id);
+      openMap('custom', { title: '계획', pts, ordered: true, order, done: [], next: order[0] });
+    });
+    assert.equal(await clusterToggle.count(), 0, 'visit-plan maps have no toggle');
+    assert.equal(await page.evaluate(() => gmapLayer.getLayers().some(l => l instanceof L.Polyline)), true, 'visit-plan maps retain their route');
+    await page.evaluate(() => openMap('custom', { title: '시설 3개', pts: gmapPts.map(l => ({ ...l, status: '정상' })) }));
+    assert.equal(await clusterToggle.getAttribute('aria-pressed'), 'false', 'the regular custom map has the saved toggle');
+    const tap = await page.evaluate(() => {
+      gmap.setView([35.15, 126.92], 19, { animate: false });
+      const point = gmap.getSize().divideBy(2), box = gmap.getContainer().getBoundingClientRect();
+      [0, 28, 70].forEach((offset, i) => {
+        const { lat, lng } = gmap.containerPointToLatLng(point.add([offset, 0]));
+        Object.assign(gmapPts[i], { lat, lng });
+      });
+      drawMapMarkers();
+      return { x: box.left + point.x, y: box.top + point.y, ids: gmapPts.slice(0, 2).map(l => l.id) };
+    });
+    await page.mouse.click(tap.x, tap.y);
+    assert.equal(await page.evaluate(() => GM.sel), tap.ids[0], 'a lone dot within 24 px opens its card');
+    await page.evaluate(() => hideMapCard());
+    for (const offset of [6, 14]) {
+      await page.mouse.click(tap.x + offset, tap.y);
+      const ids = await page.evaluate(() => GM.group);
+      assert.deepEqual(ids?.sort(), tap.ids.slice().sort(), 'both direct and background taps use the actual tap coordinates');
+      await page.evaluate(() => hideMapCard());
+    }
+    await page.evaluate(() => openMap('all'));
+    await clusterToggle.click();
+    assert.ok(await page.locator('#gmap .mapcl').count() >= 3, 'turning grouping back on restores overview bubbles');
+
+    checks.push('storage failure defaults to grouping and still allows toggling');
+    const blocked = await context.newPage();
+    blocked.on('pageerror', e => errors.push(e.message));
+    try {
+      await blocked.addInitScript(() => {
+        const get = Storage.prototype.getItem, set = Storage.prototype.setItem;
+        Storage.prototype.getItem = function (key) {
+          if (key === 'dg_mapCluster') throw new Error('test storage read failed');
+          return get.call(this, key);
+        };
+        Storage.prototype.setItem = function (key, value) {
+          if (key === 'dg_mapCluster') throw new Error('test storage write failed');
+          return set.call(this, key, value);
+        };
+      });
+      await blocked.goto(origin);
+      await blocked.waitForFunction(() => S.live && DGIntegration.initialized);
+      await blocked.evaluate(() => openMap('all'));
+      const blockedToggle = blocked.locator('#mapCluster');
+      assert.equal(await blockedToggle.getAttribute('aria-pressed'), 'true');
+      await blockedToggle.click();
+      assert.equal(await blockedToggle.getAttribute('aria-pressed'), 'false');
+      assert.equal(await blocked.locator('#gmap .mapcl, #gmap .mapstack').count(), 0);
+      assert.ok(await blocked.evaluate(() => gmapLayer.getLayers().some(l => l instanceof L.CircleMarker)));
+      await blocked.evaluate(() => openMap('all'));
+      assert.equal(await blockedToggle.getAttribute('aria-pressed'), 'true', 'the failed write is not remembered next time');
+    } finally { await blocked.close(); }
+
+    await page.evaluate(v => { gmap.setView(v.c, v.z, { animate: false }); drawMapMarkers(); }, view);
     // 4. the card: tap a marker → card with the code, 점검하기 and 길찾기; 길찾기 offers map apps with the coordinates
     checks.push('info card and 길찾기');
     const grouped = await page.evaluate(id => { const group = GM.groups.get(id); if (group) { showMapGroup(group); return true; } gmapLayer.getLayers().find(l => l instanceof L.CircleMarker && l.getLatLng().lat === byId(id).lat && l.getLatLng().lng === byId(id).lng).fire('click'); return false; }, seeded.first.id);
