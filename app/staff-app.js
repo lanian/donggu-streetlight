@@ -449,8 +449,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v85-map-cluster-toggle";
+const APP_VER="v86-lighting-area-lines";
 const RELEASE_NOTES=[
+  {v:"v86-lighting-area-lines",d:"2026-11-21",t:"밝기 검토 제외 구역 · 도로 중심선을 따라 점을 찍고 전체 폭으로 범위 지정"},
   {v:"v85-map-cluster-toggle",d:"2026-11-19",t:"지도보기 묶어 보기 켜기·끄기 · 끄면 모든 시설을 실제 위치에 점으로 표시"},
   {v:"v84-plan-dashboard-fixes",d:"2026-11-18",t:"방문 계획 삭제 후에도 탭 간 덮어쓰기 방지 · 업무 현황 한국 시간 집계와 CSV 회로 제목 정정"},
   {v:"v83-plan-account-switch",d:"2026-11-16",t:"계정이 바뀌는 사이에 누른 방문 계획 변경을 새 계정 계획에 쓰지 않음"},

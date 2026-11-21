@@ -48,6 +48,16 @@ async function poll(page, predicate, argument, label) {
     const section = async () => { await close(); await page.locator('[data-tab="admin"]').click(); await page.locator('[data-asec="lightingareas"]').first().click(); await page.locator('#laList').waitFor(); };
     const save = async (id, revision = 1) => { await page.locator('#laSave').click(); await poll(page, ({ id, revision }) => DGLightingAreas.state.records.find(r => r.id === id)?.revision === revision, { id, revision }, 'area commit'); await page.locator('#laForm').waitFor({ state: 'hidden' }); };
     const currentId = () => page.evaluate(() => DGLightingAreas.state.draft.recordId);
+    const clickMap = async position => {
+      const map = page.locator('#laMap');
+      await map.scrollIntoViewIfNeeded();
+      const onControl = await map.evaluate((element, point) => {
+        const frame = element.getBoundingClientRect(), x = frame.left + point.x, y = frame.top + point.y;
+        return [...element.querySelectorAll('.leaflet-control')].some(control => { const r = control.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; });
+      }, position);
+      assert.equal(onControl, false, 'Fixture click must hit the map canvas');
+      await map.click({ position });
+    };
 
     await section(); await page.locator('[data-la="new"]').click(); await page.locator('#laForm').waitFor();
     await page.locator('#laLabel').fill('합성 산림 제외 구역');
@@ -89,13 +99,7 @@ async function poll(page, predicate, argument, label) {
     await page.locator('#laMap.leaflet-container').waitFor();
     // Click the editable canvas, keeping the map's background selector out of
     // the fixture. A control click must never create a polygon vertex.
-    for (const position of [{ x: 60, y: 70 }, { x: 60, y: 170 }, { x: 120, y: 170 }]) {
-      assert.equal(await page.locator('#laMap').evaluate((map, point) => {
-        const frame = map.getBoundingClientRect(), x = frame.left + point.x, y = frame.top + point.y;
-        return [...map.querySelectorAll('.leaflet-control')].some(control => { const r = control.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; });
-      }, position), false, 'polygon fixture must click the map rather than a map control');
-      await page.locator('#laMap').click({ position });
-    }
+    for (const position of [{ x: 60, y: 70 }, { x: 60, y: 170 }, { x: 120, y: 170 }]) await clickMap(position);
     assert.equal((await page.locator('#laVertices').inputValue()).split('\n').length, 3);
     await page.locator('#laUndo').click(); assert.equal((await page.locator('#laVertices').inputValue()).split('\n').length, 2);
     const vertices = [{ lat: latitude - .0002, lng: lngAt(100) }, { lat: latitude + .0002, lng: lngAt(100) }, { lat: latitude + .0002, lng: lngAt(150) }, { lat: latitude - .0002, lng: lngAt(150) }];
@@ -188,6 +192,79 @@ async function poll(page, predicate, argument, label) {
     assert.equal(await page.locator('#laNote').inputValue(), '현재 탭에서 작성한 내용');
     assert.equal(await page.evaluate(async id => (await DGOffline.get('lightingAreaDraft', id)).data.note, conflictId), '다른 탭의 최신 기록');
     record('draft revision conflicts preserve both tabs and allow an explicit copy into a new area');
+
+    const observeEditorMap = () => page.evaluate(() => {
+      const createMap = L.map;
+      L.map = function (element, ...args) {
+        const map = createMap.call(this, element, ...args);
+        if (element?.id === 'laMap') window.__lineAreaMap = map;
+        return map;
+      };
+    });
+    const pathsOnMap = () => page.evaluate(() => {
+      const paths = [];
+      __lineAreaMap.eachLayer(layer => {
+        if (!(layer instanceof L.Polyline)) return;
+        const polygon = layer instanceof L.Polygon;
+        const coordinates = polygon ? layer.getLatLngs()[0] : layer.getLatLngs();
+        paths.push({ polygon, interactive: layer.options.interactive, points: coordinates.map(({ lat, lng }) => ({ lat, lng })) });
+      });
+      return paths;
+    });
+    const linePoints = () => page.evaluate(() => DGLightingAreas.state.draft.linePoints);
+    const filledArea = (paths, existing) => {
+      const polygonPaths = paths.filter(p => p.polygon && !existing.some(other => JSON.stringify(other.points) === JSON.stringify(p.points)));
+      assert.equal(polygonPaths.length, 1, 'The centerline generates exactly one filled area');
+      assert.equal(polygonPaths[0].interactive, false, 'The area preview lets taps reach the map');
+      return polygonPaths[0].points;
+    };
+
+    await observeEditorMap(); await section(); await page.locator('[data-la="new"]').click();
+    const lineShape = page.locator('#laShape'), lineWidth = page.locator('#laLineWidth'), geometry = page.locator('#laGeometryHint');
+    assert.equal(await lineShape.locator('option[value="line"]').textContent({ timeout: 2000 }), '도로 따라 선 그리기');
+    await page.locator('#laLabel').fill('합성 도로 선형 제외 구역'); await lineShape.selectOption('line');
+    await page.locator('#laMap.leaflet-container').waitFor();
+    const existingPaths = await pathsOnMap();
+    assert.equal(await lineWidth.inputValue(), '20');
+    const [start, turn, end] = [{ x: 85, y: 120 }, { x: 185, y: 120 }, { x: 185, y: 215 }];
+    await clickMap(start);
+    assert.equal((await linePoints()).length, 1); assert.equal(await page.locator('#laSave').isDisabled(), true);
+    await clickMap(turn);
+    assert.equal(await geometry.getAttribute('data-valid'), 'true');
+    const straight = await linePoints(); assert.equal(straight.length, 2);
+    const centerlines = (await pathsOnMap()).filter(p => !p.polygon);
+    assert.deepEqual(centerlines, [{ polygon: false, interactive: false, points: straight }]);
+    await clickMap(end);
+    const route = await linePoints(); assert.equal(route.length, 3);
+    const originalArea = filledArea(await pathsOnMap(), existingPaths);
+    await lineWidth.fill(''); assert.equal(await page.locator('#laSave').isDisabled(), true);
+    await lineWidth.fill('32');
+    assert.equal(await geometry.getAttribute('data-valid'), 'true');
+    const widerArea = filledArea(await pathsOnMap(), existingPaths);
+    assert.notDeepEqual(widerArea, originalArea, 'The preview follows the full width input');
+    await page.locator('[data-la="undo-line-point"]').click();
+    assert.deepEqual(await linePoints(), straight); assert.equal(await lineWidth.inputValue(), '32');
+    await clickMap(end); assert.deepEqual(await linePoints(), route);
+    record('line map taps draw endpoints and bends with a live width preview and reversible edits');
+
+    const lineId = await currentId(); await page.evaluate(() => DGLightingAreas.persistActive());
+    await page.reload(); await ready(); await observeEditorMap(); await section();
+    await page.locator('#laList details > summary').click();
+    await page.locator('[data-la="resume"][data-id="' + lineId + '"]').click();
+    await page.locator('#laMap.leaflet-container').waitFor();
+    assert.equal(await lineShape.inputValue(), 'line'); assert.equal(await lineWidth.inputValue(), '32');
+    assert.deepEqual(await linePoints(), route);
+    const preview = filledArea(await pathsOnMap(), existingPaths);
+    assert.deepEqual(preview, widerArea);
+    await save(lineId);
+    const savedLine = await page.evaluate(id => DGLightingAreas.state.records.find(r => r.id === id), lineId);
+    assert.equal(savedLine.shape, 'polygon'); assert.equal(savedLine.radius, 0); assert.deepEqual(savedLine.vertices, preview);
+    for (const key of ['linePoints', 'lineWidth']) assert.equal(Object.hasOwn(savedLine, key), false);
+    const center = { lat: (route[0].lat + route[1].lat) / 2, lng: (route[0].lng + route[1].lng) / 2 };
+    const isInLineArea = point => page.evaluate(({ id, locate }) => DGLightingAreaCore.decision(DGLightingAreas.context(), locate).excludeIds.includes(id), { id: lineId, locate: point });
+    assert.equal(await isInLineArea({ ...center, lat: center.lat + 12 / 111320 }), true);
+    assert.equal(await isInLineArea({ ...center, lat: center.lat + 24 / 111320 }), false);
+    record('a resumed line draft saves its exact preview as a normal review polygon');
 
     assert.deepEqual(errors, []); console.log(JSON.stringify({ results, browserErrors: errors }, null, 2)); await context.close();
   } finally { if (browser) await browser.close(); await new Promise(resolve => server.close(resolve)); }
