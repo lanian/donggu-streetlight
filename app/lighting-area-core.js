@@ -6,9 +6,11 @@
 })(typeof globalThis === 'object' ? globalThis : this, function () {
   'use strict';
   const EARTH = 6371000, RAD = Math.PI / 180, EPS = 1e-6, FRACTION_EPS = 1e-11;
+  const LATITUDE_SCALE = EARTH * RAD, MIN_POINT_DISTANCE = .01;
   const REASONS = Object.freeze({ mountain: '산·숲', private: '사유지·단지 내부', non_walkway: '통행로가 아닌 곳', water: '하천·수면', other: '기타', public_path: '실제 보행로·검토 필요 구역' });
   const EFFECTS = Object.freeze({ exclude: '검토 제외', include: '예외 포함' });
   const MAX_VERTICES = 32, MAX_RADIUS = 1000, MAX_EXTENT = 5000;
+  const DEFAULT_LINE_WIDTH = 20, MIN_LINE_WIDTH = 2, MAX_LINE_WIDTH = 100, MAX_LINE_POINTS = MAX_VERTICES / 2;
   const internals = new WeakMap();
   const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
   const fail = (message, code = 'invalid-argument') => { throw Object.assign(new Error(message), { code }); };
@@ -30,13 +32,51 @@
     if (!plain(value)) fail('구역의 좌표를 확인해 주세요.');
     return { lat: number(value.lat, -85, 85, '위도'), lng: number(value.lng, -180, 180, '경도') };
   }
+  const longitudeScale = lat => LATITUDE_SCALE * Math.cos(lat * RAD);
   function projector(anchor) {
-    const scaleX = EARTH * RAD * Math.cos(anchor.lat * RAD), scaleY = EARTH * RAD;
-    return p => ({ x: (p.lng - anchor.lng) * scaleX, y: (p.lat - anchor.lat) * scaleY });
+    const scaleX = longitudeScale(anchor.lat);
+    return p => ({ x: (p.lng - anchor.lng) * scaleX, y: (p.lat - anchor.lat) * LATITUDE_SCALE });
   }
   const cross = (a, b) => a.x * b.y - a.y * b.x;
   const minus = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
   const dot = (a, b) => a.x * b.x + a.y * b.y;
+  function pointsTooClose(points) {
+    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+      if (Math.hypot(points[i].x - points[j].x, points[i].y - points[j].y) < MIN_POINT_DISTANCE) return true;
+    }
+    return false;
+  }
+  function lineVertices(points, width) {
+    if (!Array.isArray(points) || points.length < 2 || points.length > MAX_LINE_POINTS) fail('중심선을 따라 2–' + MAX_LINE_POINTS + '점을 찍어 주세요. 점이 더 필요하면 구간을 나누어 주세요.');
+    const halfWidth = number(width, MIN_LINE_WIDTH, MAX_LINE_WIDTH, '구역 폭 (전체 2–100m)') / 2;
+    const line = Array.from(points, point), anchor = line[0], longitudes = line.map(p => p.lng);
+    if (Math.max(...longitudes) - Math.min(...longitudes) > 180) fail('날짜 변경선을 넘는 구역은 나누어 등록해 주세요.');
+    const xy = line.map(projector(anchor));
+    if (pointsTooClose(xy)) fail('같은 위치에 겹친 중심선 지점을 제거해 주세요.');
+    const directions = xy.slice(1).map((p, i) => {
+      const delta = minus(p, xy[i]), length = Math.hypot(delta.x, delta.y);
+      return { x: delta.x / length, y: delta.y / length };
+    });
+    const left = [], right = [];
+    for (let i = 0; i < xy.length; i++) {
+      // Repeating the adjacent direction at each end gives a flat cap.
+      const before = directions[Math.max(0, i - 1)], after = directions[Math.min(i, directions.length - 1)];
+      const join = 1 + dot(before, after);
+      // A smaller denominator would extend the corner past twice the half-width.
+      if (join < .5) fail('중심선이 너무 급하게 꺾이거나 되돌아가요. 구간을 나누어 지정해 주세요.');
+      const dx = -(before.y + after.y) * halfWidth / join, dy = (before.x + after.x) * halfWidth / join;
+      const { x, y } = xy[i];
+      left.push({ x: x + dx, y: y + dy });
+      right.push({ x: x - dx, y: y - dy });
+    }
+    for (let i = 0; i < directions.length; i++) {
+      if (dot(minus(left[i + 1], left[i]), directions[i]) < MIN_POINT_DISTANCE || dot(minus(right[i + 1], right[i]), directions[i]) < MIN_POINT_DISTANCE) fail('구역 폭에 비해 중심선 구간이 짧아요. 폭을 줄이거나 지점 간격을 늘려 주세요.');
+    }
+    const scaleX = longitudeScale(anchor.lat);
+    const vertices = left.concat(right.reverse()).map(({ x, y }) => ({ lat: anchor.lat + y / LATITUDE_SCALE, lng: anchor.lng + x / scaleX }));
+    if (vertices.some(p => Math.abs(p.lng) > 180)) fail('날짜 변경선을 넘는 구역은 나누어 등록해 주세요.');
+    return vertices;
+  }
   function onSegment(p, a, b) {
     const d = minus(b, a), q = minus(p, a), length = Math.hypot(d.x, d.y);
     if (length <= EPS) return Math.hypot(q.x, q.y) <= EPS;
@@ -77,7 +117,7 @@
       if (input.vertices.length) fail('원형 구역에는 다각형 경계를 함께 저장할 수 없어요.');
       Object.assign(out, point(input), { radius: number(input.radius, 5, MAX_RADIUS, '반경') });
       // A circle crossing the date line cannot be represented by this local map.
-      const margin = out.radius / (EARTH * RAD * Math.cos(out.lat * RAD));
+      const margin = out.radius / longitudeScale(out.lat);
       if (out.lng - margin < -180 || out.lng + margin > 180) fail('날짜 변경선을 넘는 구역은 나누어 등록해 주세요.');
       return out;
     }
@@ -90,9 +130,7 @@
     out.vertices = vertices;
     const project = projector(out), xy = vertices.map(project);
     if (xy.some(p => Math.hypot(p.x, p.y) > MAX_EXTENT)) fail('한 다각형은 중심에서 5km 이내로 나누어 지정해 주세요.');
-    for (let i = 0; i < xy.length; i++) for (let j = i + 1; j < xy.length; j++) {
-      if (Math.hypot(xy[i].x - xy[j].x, xy[i].y - xy[j].y) < .01) fail('겹치는 경계 지점을 제거해 주세요. 마지막 지점에 첫 지점을 반복하지 않아요.');
-    }
+    if (pointsTooClose(xy)) fail('겹치는 경계 지점을 제거해 주세요. 마지막 지점에 첫 지점을 반복하지 않아요.');
     for (let i = 0; i < xy.length; i++) {
       const j = (i + 1) % xy.length;
       const previous = xy[(i + xy.length - 1) % xy.length], next = xy[j];
@@ -194,5 +232,5 @@
     }
     return out;
   }
-  return Object.freeze({ normalize, compile, decision, splitSegment, reasons: REASONS, effects: EFFECTS, MAX_VERTICES, MAX_RADIUS, MAX_EXTENT, fail, id });
+  return Object.freeze({ normalize, compile, decision, splitSegment, lineVertices, reasons: REASONS, effects: EFFECTS, MAX_VERTICES, MAX_RADIUS, MAX_EXTENT, DEFAULT_LINE_WIDTH, MIN_LINE_WIDTH, MAX_LINE_WIDTH, MAX_LINE_POINTS, fail, id });
 });

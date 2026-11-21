@@ -50,6 +50,67 @@ test('polygon boundaries split road segments precisely and count boundary points
   near(excluded(alongEdge), .5); near(total(alongEdge), 1);
 });
 
+test('a straight centerline excludes the chosen full width only between its endpoints', () => {
+  assert.equal(Core.DEFAULT_LINE_WIDTH, 20);
+  const vertices = Core.lineVertices([xy(0), xy(80)], Core.DEFAULT_LINE_WIDTH);
+  const ctx = Core.compile([named('road', area({ shape: 'polygon', radius: 0, vertices }))]);
+  assert.equal(vertices.length, 4);
+  assert.equal(Core.decision(ctx, xy(40, 10)).excluded, true);
+  assert.equal(Core.decision(ctx, xy(40, -10)).excluded, true);
+  assert.equal(Core.decision(ctx, xy(40, 10.1)).excluded, false);
+  assert.equal(Core.decision(ctx, xy(40, -10.1)).excluded, false);
+  assert.equal(Core.decision(ctx, xy(-.1)).excluded, false);
+  assert.equal(Core.decision(ctx, xy(80.1)).excluded, false);
+  const across = Core.splitSegment(ctx, xy(40, -30), xy(40, 30));
+  assert.deepEqual(across.map(piece => piece.excluded), [false, true, false]);
+  near(excluded(across), 1 / 3);
+});
+
+test('a centerline follows both legs through a bend without covering the inside corner', () => {
+  const points = [xy(0), xy(80), xy(80, 70)];
+  for (const ordered of [points, [...points].reverse()]) {
+    const vertices = Core.lineVertices(ordered, 20);
+    const ctx = Core.compile([named('bend', area({ shape: 'polygon', radius: 0, vertices }))]);
+    assert.equal(Core.decision(ctx, xy(40, 9)).excluded, true);
+    assert.equal(Core.decision(ctx, xy(89, 40)).excluded, true);
+    assert.equal(Core.decision(ctx, xy(78, 8)).excluded, true);
+    assert.equal(Core.decision(ctx, xy(55, 30)).excluded, false);
+  }
+});
+
+test('a centerline rejects missing, duplicate or invalid points and widths outside its limits', () => {
+  const valid = [xy(0), xy(80)];
+  assert.equal(Core.MIN_LINE_WIDTH, 2);
+  assert.equal(Core.MAX_LINE_WIDTH, 100);
+  for (const points of [null, [], [valid[0]], [valid[0], null], [valid[0], { lat: Infinity, lng: 0 }], [valid[0], valid[0]], [valid[0], valid[1], valid[0]]]) {
+    assert.throws(() => Core.lineVertices(points, 20), { code: 'invalid-argument' });
+  }
+  for (const width of [undefined, '', false, 1.9, 100.1, Infinity]) {
+    assert.throws(() => Core.lineVertices(valid, width), { code: 'invalid-argument' });
+  }
+  assert.equal(Core.lineVertices(valid, 2).length, 4);
+  assert.equal(Core.lineVertices(valid, '100').length, 4);
+});
+
+test('a centerline rejects reversals, tight turns, inverted sides and date-line crossings', () => {
+  assert.throws(() => Core.lineVertices([xy(0), xy(80), xy(20)], 20), /급하게|되돌아/);
+  assert.throws(() => Core.lineVertices([xy(0), xy(80), xy(20, 5)], 20), /급하게/);
+  assert.throws(() => Core.lineVertices([xy(0), xy(6), xy(6, 50)], 20), /폭/);
+  assert.throws(() => Core.lineVertices([{ lat: 35, lng: 179.99 }, { lat: 35, lng: -179.99 }], 20), /날짜 변경선/);
+  assert.throws(() => Core.lineVertices([{ lat: 35, lng: 180 }, { lat: 35.001, lng: 180 }], 20), /날짜 변경선/);
+});
+
+test('a centerline fits the existing polygon capacity and uses its final topology checks', () => {
+  assert.equal(Core.MAX_LINE_POINTS, 16);
+  const points = Array.from({ length: 16 }, (_, index) => xy(index * 20));
+  const vertices = Core.lineVertices(points, 20);
+  const normalized = Core.normalize(area({ shape: 'polygon', radius: 0, vertices }));
+  assert.equal(normalized.vertices.length, Core.MAX_VERTICES);
+  assert.throws(() => Core.lineVertices([...points, xy(320)], 20), /16/);
+  const crossing = Core.lineVertices([xy(-60), xy(60), xy(60, -60), xy(0, -60), xy(0, 60)], 20);
+  assert.throws(() => Core.normalize(area({ shape: 'polygon', radius: 0, vertices: crossing })), /교차/);
+});
+
 test('a concave mountain polygon preserves its indentation and reverses without changing scope', () => {
   const vertices = [[-30, -30], [30, -30], [30, 30], [10, 30], [10, -10], [-10, -10], [-10, 30], [-30, 30]];
   const ctx = Core.compile([named('hill', polygon(vertices))]);
