@@ -232,3 +232,19 @@ test('brightness GPS returning after a manual coordinate change does not overwri
   assert.equal(f.ui.state.draft.data.lat, 35.142);
   assert.equal(f.ui.state.draft.data.positionAccuracy, 0);
 });
+
+test('locking the account stops late brightness records and queued draft writes', async () => {
+  const records = deferred();
+  let reads = 0;
+  const f = await fixture({ readAll: () => ++reads === 1 ? [] : records.promise });
+  const draft = await f.open('기존 계정에서 저장한 내용');
+  await f.ui.persistDraft();
+  f.field('#lcLabel').value = '계정 전환 도중 늦게 도착한 내용';
+  const pending = f.ui.persistDraft(), loading = f.ui.load();
+  f.ui.suspend();
+  records.resolve([{ id: 'old-account-record' }]);
+  await Promise.all([pending, loading]);
+  assert.equal(f.ui.state.draft, null);
+  assert.equal(f.ui.state.records.length, 0);
+  assert.equal((await f.offline.get('lightingDraft', draft.recordId)).data.label, '기존 계정에서 저장한 내용');
+});

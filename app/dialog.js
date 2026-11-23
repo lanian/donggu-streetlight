@@ -73,6 +73,7 @@
     isOpen: () => !!active,
     /* Back key or a screen change while a dialog is up: answer "no" so the flow that asked simply stops. */
     cancel: () => { if (active) settle(none(active.kind)); },
+    cancelAll() { for (const item of queue.splice(0)) item.resolve(none(item.kind)); if (active) settle(none(active.kind)); },
     ok
   });
 })(typeof window !== 'undefined' ? window : globalThis);

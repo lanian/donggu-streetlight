@@ -115,7 +115,7 @@ test('Firebase patrol status is read and recomputed inside a transaction before 
   const fs = { doc: path => ({ path }), batch: () => ({ set: (ref, data) => writes.push([ref.path, data]), commit: async () => {} }), runTransaction: async callback => {
     transactions++; await callback({ get: async ref => { assert.equal(writes.length, 0); read = true; return { exists: true, data: () => current }; }, set: (ref, data) => writes.push([ref.path, data]) });
   } };
-  const c = scope(['patrolLightPatch', 'commitPatrolJob'], { lightState: async () => ({ status: '정상', statusAt: 1000 }), FB: { fs } });
+  const c = scope(['patrolLightPatch', 'commitPatrolJob'], { lightState: async () => ({ status: '정상', statusAt: 1000 }), db: fs, FB: { fs, auth: { currentUser: { uid: 'local' } } } });
   await c.commitPatrolJob({ id: 'old-patrol', rec: { marks: [mark('고장')] }, inspections: [] });
   assert.equal(transactions, 1); assert.equal(read, true); assert.equal(writes.some(([p]) => p === 'lights/a'), false); assert.equal(writes.some(([p]) => p === 'patrols/old-patrol'), true);
 });
@@ -192,4 +192,23 @@ test('saved-patrol preflight cannot remove or reopen an old patrol after account
   h.c.DGDialog = { choose: () => { asked = true; return gate.promise; } };
   const pending = h.c.patrolStartOk(); await until(() => asked); h.c.S.me = 'new-user'; h.offline.namespace = 'new:user'; gate.resolve('new');
   assert.equal(await pending, false); assert.deepEqual(h.events, []);
+});
+
+test('a locked Firebase account cannot send a later chunk of its patrol', async () => {
+  let transactions = 0;
+  const writes = [], auth = { currentUser: { uid: 'staff-a' } };
+  const fs = {
+    doc: path => ({ path }),
+    async runTransaction(callback) {
+      transactions++;
+      await callback({ set: ref => writes.push(ref.path) });
+      c.S.me = null; c.db = null; auth.currentUser = { uid: 'staff-b' };
+    }
+  };
+  const c = scope(['patrolLightPatch', 'commitPatrolJob'], { db: fs, FB: { fs, auth }, S: { me: 'staff-a', canWrite: true } });
+  const inspections = Array.from({ length: 400 }, (_, i) => ({ id: 'i' + i, data: { patrol: true } }));
+  await assert.rejects(c.commitPatrolJob({ id: 'former', rec: { by: 'staff-a', marks: [] }, inspections }), { code: 'permission-denied' });
+  assert.equal(transactions, 1);
+  assert.equal(writes.length, 400);
+  assert.ok(!writes.includes('patrols/former'));
 });

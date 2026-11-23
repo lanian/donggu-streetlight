@@ -1064,16 +1064,21 @@ function sheetHide(){
   NAV.stack.length=0;NAV.restoring=null;NAV.replaceNext=false;NAV.leaving=0;sheetHist=false;NAV.gen++;
 }
 function clearFirebaseView(){
+  DGIntegration.suspend?.();
+  window.DGLighting?.suspend();
   DGOffline.configure({namespace:"firebase:locked",durable:false,networkRequired:true});
+  window.DongguPrint?.cancel();
+  window.DGDialog?.cancelAll();
   RAW_OV={};OV={};LIGHT_FIELDS=[];ALL_LIGHTS=[];ALL_FROM=null;LIDX=null;LG=null;GAL={};
-  S.allLights=[];S.pos=null;
+  S.pos=null;
   if(S.posWatch!=null){navigator.geolocation?.clearWatch(S.posWatch);S.posWatch=null}
   if(pt.watch!=null){navigator.geolocation?.clearWatch(pt.watch);pt.watch=null}
   pt.on=false;pt.hist=false;ptListen(false);ptStopCam();ptWakeRelease();ptHide();
   if(pt.map){pt.map.remove();pt.map=null}
   sheetLeave();sheetHide();NAV.pending=null;NAV.forward.length=0;
   $("#sheetIn").replaceChildren();
-  document.getElementById("reportPrintRoot")?.replaceChildren();
+  const overlay=$("#ovl");
+  overlay.hidden=true;overlay.replaceChildren();
 }
 // A route that found nothing to show (deleted item, lost permission) calls this instead of opening: drop the level.
 function navAbandon(){if(!NAV.restoring)return false;NAV.restoring=null;NAV.stack.pop();if(!NAV.stack.length){sheetHide();try{history.go(-1)}catch(e){}return true}NAV.forceRender=true;try{history.go(-1)}catch(e){sheetHide()}return true}
@@ -1330,7 +1335,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.fclear){const k=t.dataset.fclear;if(k==="dong")S.dong="전체";else if(k==="kind")S.kind="전체";else if(k==="mine"){S.mine=false;try{localStorage.setItem("dg-mine","0")}catch(e){}}else S.stat=null;S.limit=60;render();return}
   if(t.id==="rvRun"){runLightingReview();return}
   if(t.dataset.rvmode){S.rvMode=t.dataset.rvmode;invalidateLightingReview("검토 방식이 바뀌었어요.");render();return}
-  if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");invalidateLightingReview("도로망을 갱신하고 있어요.");roadsLoad(m=>{if(st)st.textContent=m},{refresh:!!t.dataset.refetch}).then(r=>{S.rvMode="roads";invalidateLightingReview("도로망이 바뀌었어요.");S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{if(e.message==="road-load-superseded")return;S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
+  if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");invalidateLightingReview("도로망을 갱신하고 있어요.");roadsLoad(m=>{if(st)st.textContent=m},{refresh:!!t.dataset.refetch}).then(r=>{S.rvMode="roads";invalidateLightingReview("도로망이 바뀌었어요.");S.rvRoadsStat="";toast(r.shareFailed?"이 기기에서 도로망을 갱신했어요. 다른 기기와의 공유는 실패했어요.":`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{if(e.message==="road-load-superseded")return;S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
   if(t.id==="rvMore"){S.review.show+=30;render();return}
   if(t.hasAttribute("data-rvback")){if(navDepth()>1&&navTop().key==="rvmap")closeSheet();else returnLightingReview();return}
   if(t.dataset.rvpage!==undefined){openReviewMap("all",+t.dataset.rvpage);return}
@@ -2432,8 +2437,8 @@ function refreshRepBox(id){const b=$("#repBox"),l=byId(id);if(!b||!l||b.dataset.
 async function openPhotoViewer(id){
   const g=navGen();const r=await getPhoto(id);if(!navAlive(g))return;if(!r){toast("사진을 불러오지 못했어요.");return}
   const sib=Object.values(GAL).filter(x=>x.lightId===r.lightId).sort((a,b)=>b.at-a.at);let i=Math.max(0,sib.findIndex(x=>x.id===id));
-  const ov=$("#ovl");ov.hidden=false;NAV.gen++;
-  const show=()=>{const x=sib[i]||r;ov.innerHTML=`<div class="bar"><b>${esc(x.code||"")}</b><span style="color:#A9B6CC">${esc(x.label||"")} · ${fmtDT(x.at)} · ${esc(S.names[x.by]||"점검자")}</span><button class="x" id="pvX" aria-label="닫기">×</button></div>
+  const ov=$("#ovl");ov.hidden=false;const viewGen=++NAV.gen;
+  const show=()=>{if(!navAlive(viewGen)||ov.hidden)return;const x=sib[i]||r;ov.innerHTML=`<div class="bar"><b>${esc(x.code||"")}</b><span style="color:#A9B6CC">${esc(x.label||"")} · ${fmtDT(x.at)} · ${esc(S.names[x.by]||"점검자")}</span><button class="x" id="pvX" aria-label="닫기">×</button></div>
     <div class="stage"><img class="full" src="${esc(safeImageSrc(x.data))}" alt="${esc(x.label||"")}"></div>
     ${x.note?`<div class="cap">${esc(x.note)}</div>`:""}
     <div class="tools"><button type="button" id="pvPrev" ${i<=0?"disabled":""}>‹ 이전</button><span style="color:#A9B6CC">${i+1} / ${sib.length||1}</span><button type="button" id="pvNext" ${i>=sib.length-1?"disabled":""}>다음 ›</button>${S.canWrite&&can("inspect")&&x.lightId&&byId(x.lightId)?(()=>{const rs=repSlots(byId(x.lightId));const cur=REP_SLOTS.find(k=>rs[k]&&rs[k].id===x.id);return cur?`<span style="color:#FFB347">대표 · ${esc(cur)}</span>`:`<button type="button" id="pvRep">대표 사진으로</button><span id="pvSlots" hidden>${REP_SLOTS.map(k=>`<button type="button" data-pvslot="${k}">${k}${rs[k]?" 바꾸기":""}</button>`).join("")}</span>`})():""}${dl?`<button type="button" id="pvDl" style="margin-left:auto">내려받기</button>`:""}</div>`;
@@ -2441,7 +2446,7 @@ async function openPhotoViewer(id){
     const rp=ov.querySelector("#pvRep");if(rp)rp.onclick=()=>{rp.hidden=true;ov.querySelector("#pvSlots").hidden=false};
     ov.querySelectorAll("[data-pvslot]").forEach(b=>b.onclick=async()=>{b.disabled=true;const ok=await setRepFromPhoto(x.lightId,x.id,b.dataset.pvslot);if(ok){setTimeout(()=>{refreshRepBox(x.lightId);show()},60)}else b.disabled=false});
     ov.querySelector("#pvPrev").onclick=()=>{if(i>0){i--;show()}};ov.querySelector("#pvNext").onclick=()=>{if(i<sib.length-1){i++;show()}};
-    const d=ov.querySelector("#pvDl");if(d)d.onclick=async()=>{try{const b=await (await fetch(x.data)).blob();await dl.save({filename:`${(x.code||"사진").replace(/\s+/g,"_")}_${fmtD(x.at).replace(/\./g,"")}_${x.label||""}.jpg`,data:b})}catch(e){}}};
+    const d=ov.querySelector("#pvDl");if(d)d.onclick=async()=>{try{const b=await (await fetch(x.data)).blob();if(!navAlive(viewGen)||ov.hidden)return;await dl.save({filename:`${(x.code||"사진").replace(/\s+/g,"_")}_${fmtD(x.at).replace(/\./g,"")}_${x.label||""}.jpg`,data:b})}catch(e){}}};
   show();
 }
 function openPhotoCompare(lightId){
@@ -2737,21 +2742,52 @@ function sharedRoadPackage(snap){
   const documents=new Map(snap.docs.map(d=>[d.id,d]));
   const meta=documents.get("meta")?.data();
   if(meta?.ver!==ROADS_VER||!Number.isInteger(meta.parts)||meta.parts<1||meta.parts>=documents.size)return null;
-  const ways=[],areas=[],pois=[];let bounds=[],gu=null;
+  const parts=[];
   for(let i=0;i<meta.parts;i++){
     const part=documents.get("part-"+i)?.data();
-    if(!part||part.generation!==meta.generation||!Array.isArray(part.ways)||!Array.isArray(part.areas)||
-      (meta.pois!=null&&!Array.isArray(part.pois)))return null;
-    for(const way of part.ways)ways.push(way);
-    for(const area of part.areas)areas.push(area);
-    for(const poi of part.pois||[])pois.push(poi);
-    if(part.bounds)bounds=part.bounds;
-    if(part.gu)gu=part.gu;
+    if(!part||part.generation!==meta.generation)return null;
+    parts.push(part);
   }
-  if(!ways.length||ways.length!==meta.count||areas.length!==meta.areas||
-    (meta.pois!=null&&pois.length!==meta.pois))return null;
-  return {ver:ROADS_VER,ways,areas,bounds,gu,pois:meta.pois!=null?pois:undefined,
-    at:meta.at||0,src:"db",verified:true};
+  let pack;
+  if(meta.encoding==="json"){
+    if(!parts.every(part=>typeof part.payload==="string"))return null;
+    try{pack=JSON.parse(parts.map(part=>part.payload).join(""))}catch(e){return null}
+  }else if(meta.encoding==null){
+    const ways=[],areas=[],pois=[];let bounds=[],gu=null;
+    for(const part of parts){
+      if(!Array.isArray(part.ways)||!Array.isArray(part.areas)||
+        (part.pois!=null&&!Array.isArray(part.pois))||(meta.pois!=null&&part.pois==null))return null;
+      for(const way of part.ways)ways.push(way);
+      for(const area of part.areas)areas.push(area);
+      for(const poi of part.pois||[])pois.push(poi);
+      if(part.bounds)bounds=part.bounds;
+      if(part.gu)gu=part.gu;
+    }
+    pack={ways,areas,pois:meta.pois!=null?pois:undefined,bounds,gu};
+  }
+  if(!pack||!Array.isArray(pack.ways)||!pack.ways.length||pack.ways.length!==meta.count||
+    !Array.isArray(pack.areas)||pack.areas.length!==meta.areas||!Array.isArray(pack.bounds)||
+    (meta.pois!=null&&(!Array.isArray(pack.pois)||pack.pois.length!==meta.pois)))return null;
+  return {...pack,ver:ROADS_VER,at:meta.at||0,src:"db",verified:true};
+}
+
+async function publishRoadPackage(store,pack){
+  const {ways,areas,pois,bounds,gu,geometryWarnings,at}=pack;
+  const payload=JSON.stringify({ways,areas,pois,bounds,gu,geometryWarnings});
+  const generation=DGData.newId("roads"),batch=store.batch();
+  let offset=0,parts=0;
+  while(offset<payload.length){
+    let end=Math.min(offset+190000,payload.length);
+    // Avoid cutting a Unicode surrogate pair between Firestore strings.
+    if(end<payload.length&&/[\uD800-\uDBFF]/.test(payload[end-1]))end--;
+    batch.set(store.doc("roads/part-"+parts++),{generation,payload:payload.slice(offset,end)});
+    offset=end;
+  }
+  // Coordinates contain nested arrays, so encode the chunks as strings and replace the whole snapshot atomically.
+  batch.set(store.doc("roads/meta"),{ver:ROADS_VER,at,generation,encoding:"json",parts,
+    count:ways.length,areas:areas.length,pois:pois.length,attribution:"© OpenStreetMap contributors (ODbL)"});
+  await batch.commit();
+
 }
 async function roadsLoad(onStatus,{refresh=false}={}){
   if(!refresh&&roadCacheUsable(ROADS))return ROADS;
@@ -2813,17 +2849,11 @@ async function roadsLoad(onStatus,{refresh=false}={}){
   if(!ways.length)throw new Error("empty");
   const fresh=install({ver:ROADS_VER,ways,areas,bounds,gu,pois,geometryWarnings,at:Date.now(),src:"osm"});
   idbSet("roads",fresh);
-  if(store&&actor!=="local"&&S.canWrite&&can("admin")){say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");try{const chunks=[];let cur={ways:[],areas:[],pois:[]},size=0;const push=(key,x)=>{const s=JSON.stringify(x).length+1;if(size+s>190000){chunks.push(cur);cur={ways:[],areas:[],pois:[]};size=0}cur[key].push(x);size+=s};
-    for(const w of ways)push("ways",w);for(const a of areas)push("areas",a);for(const p of pois)push("pois",p);if(cur.ways.length||cur.areas.length||cur.pois.length)chunks.push(cur);chunks[0].bounds=bounds;chunks[0].gu=gu;
-    const generation=DGData.newId("roads");
-    for(let i=0;i<chunks.length;i++){
-      requireCurrent();
-      await store.doc("roads/part-"+i).set({...chunks[i],generation});
-    }
+  if(store&&actor!=="local"&&S.canWrite&&can("admin")&&typeof store.batch==="function"){
+    say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");
     requireCurrent();
-    await store.doc("roads/meta").set({ver:ROADS_VER,at:fresh.at,generation,parts:chunks.length,
-      count:ways.length,areas:areas.length,pois:pois.length,attribution:"© OpenStreetMap contributors (ODbL)"});
-  }catch(e){}}
+    try{await publishRoadPackage(store,fresh)}catch(e){fresh.shareFailed=true}
+  }
   requireCurrent();
   return fresh;
 }
@@ -3519,36 +3549,47 @@ function patrolLightPatch(current,mark){
   return Object.prototype.hasOwnProperty.call(patch,"status")?patch:{};
 }
 async function commitPatrolJob(job){
+  const database=db,firebaseBackend=FB,actor=S.me;
+  const ensure=()=>{
+    if(!database||!actor||db!==database||FB!==firebaseBackend||S.me!==actor||S.canWrite===false||
+      (firebaseBackend&&firebaseBackend.auth.currentUser?.uid!==actor)||
+      (Object.hasOwn(job.rec,"by")&&job.rec.by!==actor))
+      throw Object.assign(new Error("계정 또는 저장소가 바뀌어 이전 순찰을 저장하지 않았어요."),{code:"permission-denied"});
+  };
+  ensure();
   // Rebuild from observations at send time, including old jobs which carried unsafe normal-clearing patches.
   const candidates=[...(job.inspections||[]).map(i=>({path:"inspections/"+i.id,data:i.data})),...(job.rec.marks||[]).filter(m=>["고장","점검필요"].includes(m.result)).map(mark=>({path:"lights/"+mark.id,mark})),{path:"patrols/"+job.id,data:job.rec}];
   async function stage(rows,read){
     const ops=[],expected={};
     for(const row of rows){
       if(!row.mark){ops.push({...row,merge:true});continue}
-      const current=await read(row.path),patch=patrolLightPatch(current||{},row.mark);
+      const current=await read(row.path);ensure();
+      const patch=patrolLightPatch(current||{},row.mark);
       if(Object.keys(patch).length){ops.push({path:row.path,data:patch,merge:true});expected[row.path]=current?{document:current}:null}
     }
     return{ops,expected};
   }
   const value=snap=>snap&&snap.exists!==false&&typeof snap.data==="function"?snap.data()||null:null;
-  if(FB){
+  if(firebaseBackend){
     // Reads and status decisions share a transaction, including administrators who can bypass staff rules.
     // Large sessions retain immutable IDs and write their patrol document last, so a partial retry is safe.
     for(let at=0;at<candidates.length;at+=400){const rows=candidates.slice(at,at+400);
-      await FB.fs.runTransaction(async transaction=>{
-        const prepared=await stage(rows,async path=>value(await transaction.get(FB.fs.doc(path))));
-        for(const op of prepared.ops)transaction.set(FB.fs.doc(op.path),op.data,{mergeFields:Object.keys(op.data)});
+      ensure();await firebaseBackend.fs.runTransaction(async transaction=>{
+        ensure();
+        const prepared=await stage(rows,async path=>value(await transaction.get(firebaseBackend.fs.doc(path))));
+        ensure();
+        for(const op of prepared.ops)transaction.set(firebaseBackend.fs.doc(op.path),op.data,{mergeFields:Object.keys(op.data)});
       });
     }
-  }else if(typeof db.commitMany==="function"){
+  }else if(typeof database.commitMany==="function"){
     for(let attempt=0;;attempt++){
-      const prepared=await stage(candidates,async path=>value(await db.doc(path).get()));
-      try{await db.commitMany(prepared.ops,{expected:prepared.expected});break}catch(error){if(error.code!=="conflict"||attempt>=3)throw error}
+      ensure();const prepared=await stage(candidates,async path=>value(await database.doc(path).get()));
+      ensure();try{await database.commitMany(prepared.ops,{expected:prepared.expected});break}catch(error){if(error.code!=="conflict"||attempt>=3)throw error}
     }
   }else{
     // The artifact backend reduces immutable light-field operations by timestamp when reading them.
     const prepared=await stage(candidates,async path=>await lightState(path.slice(7)));
-    for(const op of prepared.ops){if(op.path.startsWith("lights/"))await patchLight(op.path.slice(7),op.data,job.id+"-"+op.path.slice(7));else{const ref=db.doc(op.path),snap=await ref.get(),current=value(snap);if(current)await ref.update(op.data);else await ref.set(op.data)}}
+    for(const op of prepared.ops){ensure();if(op.path.startsWith("lights/"))await patchLight(op.path.slice(7),op.data,job.id+"-"+op.path.slice(7));else{const ref=database.doc(op.path),snap=await ref.get(),current=value(snap);ensure();if(current)await ref.update(op.data);else await ref.set(op.data)}}
   }
   return job.id;
 }

@@ -4,6 +4,7 @@
   /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
   const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   let api, attached = false, loading = null, reloadRequested = false, signature = '', unsubscribe, draftWrites = Promise.resolve(), editorMap;
+  let suspended = false;
   const state = { records: [], loaded: false, error: '', revision: 0, draft: null, filter: 'all', show: 40 };
   const Q = selector => document.querySelector(selector), E = value => api.esc(value == null ? '' : value);
   const CATEGORIES = { other_public: '다른 공공기관', private: '민간·공동주택', shop: '상가', building: '건물', unknown: '관리 주체 미확인', field: '현장 관찰', construction: '공사 가림막·비계', tree: '가로수·수목', sign: '간판·차양·현수막', structure: '기타 구조물·가설물' };
@@ -17,23 +18,25 @@
   const kstInput = time => Number.isFinite(time) && time > 0 ? new Date(time + 9 * 3600000).toISOString().slice(0, 16) : '';
   const kstTime = time => Number.isFinite(time) ? kstInput(time).replace('T', ' ') + ' KST' : '시각 미입력';
   const uuid = prefix => root.DGData.newId(prefix);
-  function canWrite() { return api.can('inspect') && api.state().canWrite && (!!api.firebase() || typeof api.database()?.commitMany === 'function'); }
+  function canWrite() { return !suspended && api.can('inspect') && api.state().canWrite && (!!api.firebase() || typeof api.database()?.commitMany === 'function'); }
   function canEdit(record) { return canWrite() && (api.can('admin') || record.createdBy === api.state().me); }
   function notify() { api.render(); }
   function invalidate(reason) { state.revision++; api.invalidateLighting(reason || '추가 광원·현장 관찰이 바뀌었어요.'); }
   async function load() {
+    if (suspended) return [];
     if (loading) { reloadRequested = true; return loading; }
     loading = Promise.resolve().then(async () => {
       try {
         do {
           reloadRequested = false;
           const records = await api.readAll('lightingContext');
+          if (suspended) return [];
           records.sort((a, b) => a.id.localeCompare(b.id));
           const next = JSON.stringify(records);
           if (next !== signature) { signature = next; state.records = records; invalidate(); }
           state.loaded = true; state.error = '';
         } while (reloadRequested);
-      } catch (error) { state.error = error.message || '추가 광원·관찰을 읽지 못했어요.'; invalidate('추가 광원·관찰 자료의 최신 상태를 읽지 못했어요.'); }
+      } catch (error) { if (suspended) return []; state.error = error.message || '추가 광원·관찰을 읽지 못했어요.'; invalidate('추가 광원·관찰 자료의 최신 상태를 읽지 못했어요.'); }
       finally { loading = null; }
       notify(); return state.records;
     });
@@ -92,16 +95,27 @@
     readForm(); const hint = Q('#lcTimeWarning'); if (hint) hint.textContent = observationTimeWarning(draft.data);
   }
   async function openEditor(kind, point, id, resume = false, prefill = null) {
+    if (suspended) return;
     const gen = api.navGen ? api.navGen() : null;
     if (!state.loaded) await load();
     await persistDraft();
-    if (gen !== null && !api.navAlive(gen)) return; // the user left this screen while records were loading
-    if (resume) { if (id) state.draft = await root.DGOffline.get('lightingDraft', id); else if (!state.draft) state.draft = (await root.DGOffline.list('lightingDraft')).sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value; if (!state.draft) return api.toast('이어 쓸 기록이 없어요.'); }
-    else {
+    if (suspended || gen !== null && !api.navAlive(gen)) return; // the user left this screen while records were loading
+    if (resume) {
+      const saved = id ? await root.DGOffline.get('lightingDraft', id) : state.draft ??
+        (await root.DGOffline.list('lightingDraft')).sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value;
+      if (suspended) return;
+      if (!saved) return api.toast('이어 쓸 기록이 없어요.');
+      state.draft = saved;
+    } else {
       const record = id && state.records.find(r => r.id === id);
       if (id && !record) return api.toast('기록을 찾을 수 없어요. 새로고침해 주세요.');
       const saved = id && root.DGOffline.ready ? await root.DGOffline.get('lightingDraft', id) : null;
-      if (saved && await ask('이 기록의 작성 중인 초안을 이어 쓸까요?', { ok: '이어 쓰기', cancel: '새로 시작' })) { state.draft = saved; renderEditor(); return; }
+      if (suspended) return;
+      if (saved) {
+        const resumeSaved = await ask('이 기록의 작성 중인 초안을 이어 쓸까요?', { ok: '이어 쓰기', cancel: '새로 시작' });
+        if (suspended) return;
+        if (resumeSaved) { state.draft = saved; renderEditor(); return; }
+      }
       state.draft = { recordId: record ? record.id : uuid('lighting'), expectedRevision: record ? record.revision : 0, data: record ? root.DGLightingCommands.normalize(record) : prefill || defaults(kind, point), readonly: record ? !canEdit(record) : !canWrite(), pending: null, timeWindowManual: !!record };
       if (!state.draft.readonly) await persistDraft(false);
     }
@@ -135,6 +149,7 @@
   }
   function renderEditor() {
     if (editorMap) { editorMap.remove(); editorMap = null; }
+    if (suspended || !state.draft) return;
     const draft = state.draft, d = draft.data, source = d.kind === 'source', disabled = draft.readonly || !!draft.pending;
     if (d.kind === 'obstruction') return renderObstruction(draft, d, disabled);
     api.navigate(heading(source ? '외부 광원 기록' : '현장 밝기 관찰') + '<form id="lcForm" data-record-id="' + E(draft.recordId) + '" class="panel" novalidate><fieldset ' + (disabled ? 'disabled' : '') + ' style="border:0;padding:0;margin:0;min-width:0">' +
@@ -179,9 +194,9 @@
     return writeDraft(d);
   }
   function writeDraft(d) {
-    if (!d || d.readonly || !root.DGOffline.ready) return draftWrites;
+    if (suspended || !d || d.readonly || !root.DGOffline.ready) return draftWrites;
     const value = JSON.parse(JSON.stringify(d));
-    draftWrites = draftWrites.catch(() => {}).then(() => root.DGOffline.put('lightingDraft', value.recordId, value));
+    draftWrites = draftWrites.catch(() => {}).then(() => { if (!suspended) return root.DGOffline.put('lightingDraft', value.recordId, value); });
     return draftWrites;
   }
   function clearDraft(owner = state.draft) {
@@ -189,9 +204,9 @@
     const recordId = owner.recordId, pending = owner.pending;
     if (state.draft === owner) state.draft = null;
     draftWrites = draftWrites.catch(() => {}).then(async () => {
-      if (!root.DGOffline.ready) return;
+      if (suspended || !root.DGOffline.ready) return;
       const stored = await root.DGOffline.get('lightingDraft', recordId);
-      if (stored?.recordId === recordId && stored.pending === pending) await root.DGOffline.remove('lightingDraft', recordId);
+      if (!suspended && stored?.recordId === recordId && stored.pending === pending) await root.DGOffline.remove('lightingDraft', recordId);
     });
     return draftWrites;
   }
@@ -199,6 +214,7 @@
     const d = readForm(); if (!d || d.readonly || d.pending || !canWrite()) return;
     const timeWarning = observationTimeWarning(d.data);
     if (timeWarning && !await ask(timeWarning, { title: '입력한 적용 시간대를 유지하고 저장할까요?', ok: '유지하고 저장', cancel: '고치기' })) return;
+    if (!canWrite() || state.draft !== d) return;
     if (remove !== undefined) d.data.removed = remove;
     if (d.data.lat === '' || d.data.lng === '') throw new Error('실제 확인 지점의 위도와 경도를 입력해 주세요.');
     const data = root.DGLightingCommands.normalize(d.data), job = { id: uuid('lighting-op'), recordId: d.recordId, actor: api.state().me, at: Date.now(), expectedRevision: d.expectedRevision, data };
@@ -207,8 +223,10 @@
     if (form) { form.querySelector('fieldset').disabled = true; Q('#lcSaveState').textContent = '저장 요청을 확인하는 중이에요. 입력한 내용은 전송 완료까지 잠시 잠겨요.'; }
     try {
       await writeDraft(d);
+      if (!canWrite()) return;
       const result = await root.DGOffline.submit('lighting', job, { id: job.id, summary: ({ source: '추가 광원 · ', obstruction: '가림·가설물 · ' }[data.kind] || '현장 밝기 · ') + data.label });
-      if (result.state === 'synced') { await clearDraft(d); await load(); if (form?.isConnected && Q('#lcForm') === form) api.closeSheet(); api.toast('기록했어요. 밝기 검토를 다시 실행하면 반영돼요.'); }
+      if (suspended) return;
+      if (result.state === 'synced') { await clearDraft(d); await load(); if (suspended) return; if (form?.isConnected && Q('#lcForm') === form) api.closeSheet(); api.toast('기록했어요. 밝기 검토를 다시 실행하면 반영돼요.'); }
       else { api.toast(result.error || '기기에 보관했어요. 전송 완료 후 검토에 반영돼요.'); if (state.draft === d) renderEditor(); }
     } catch (error) { d.pending = null; await writeDraft(d).catch(() => {}); throw error; }
     finally { if (button?.isConnected) button.disabled = !!d.pending; if (form?.isConnected && !d.pending) { form.querySelector('fieldset').disabled = false; form.querySelector('#lcSaveState').textContent = '입력 내용이 남아 있어요. 오류를 확인한 뒤 다시 저장해 주세요.'; } }
@@ -262,17 +280,30 @@
     const job = { id: uuid('lighting-restore'), recordId: row.id, actor: api.state().me, at: Date.now(), expectedRevision: current?.revision || 0, data: root.DGLightingCommands.normalize(row) };
     await root.DGLightingCommands.execute(job, { db: api.database(), fb: api.firebase(), user: api.state().me, admin: api.can('admin') }); return { skipped: false };
   }
+  function suspend() {
+    suspended = true;
+    unsubscribe?.(); unsubscribe = null;
+    if (editorMap) { editorMap.remove(); editorMap = null; }
+    state.records = []; state.draft = null;
+  }
   async function ready() {
+    if (suspended) return;
     const jobs = new Map((await root.DGOffline.jobs()).map(job => [job.id, job]));
     for (const entry of await root.DGOffline.list('lightingDraft')) {
+      if (suspended) return;
       const d = entry.value; if (!d?.pending) continue;
       const job = jobs.get(d.pending);
       if (job?.kind === 'lighting' && job.state === 'synced') await clearDraft(d);
       else if (!job) { d.pending = null; await writeDraft(d); }
     }
-    state.draft = (await root.DGOffline.list('lightingDraft')).sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value || null; await load();
+    const saved = await root.DGOffline.list('lightingDraft');
+    if (suspended) return;
+    state.draft = saved.sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value || null; await load();
+    if (suspended) return;
     if (root.DGLightingWorkflows) await root.DGLightingWorkflows.ready();
+    if (suspended) return;
     if (root.DGLightingAreas) await root.DGLightingAreas.ready();
+    if (suspended) return;
     if (unsubscribe) unsubscribe();
     if (api.state().me === 'local' || api.firebase()) {
       try { unsubscribe = api.database().collection('lightingContext').onSnapshot(() => load(), error => { state.error = error.message || '실시간 갱신 실패'; notify(); }); } catch (_) { /* The refresh button remains available. */ }
@@ -288,6 +319,7 @@
     for (const event of ['input', 'change']) document.addEventListener(event, e => { if (e.target.closest('#lcForm')) { syncObservationTime(e.target); persistDraft().catch(error => api.toast(error.message)); } });
     document.addEventListener('change', e => { if (e.target.id === 'lcFilter') { state.filter = e.target.value; state.show = 40; notify(); } });
     root.DGOffline.subscribe(event => {
+      if (suspended) return;
       if (event.type === 'synced' && event.job.kind === 'lighting') {
         const owner = state.draft?.pending === event.job.id ? state.draft : { recordId: event.job.payload.recordId, pending: event.job.id };
         if (state.draft === owner && Q('#lcForm')?.dataset.recordId === owner.recordId) api.closeSheet();
@@ -297,10 +329,10 @@
       if (event.type === 'discarded' && event.job?.kind === 'lighting' && event.job.payload) {
         const id = event.job.payload.recordId;
         if (state.draft?.pending === event.job.id) { state.draft.pending = null; persistDraft(false).catch(() => {}); }
-        else { draftWrites = draftWrites.catch(() => {}).then(async () => { const d = await root.DGOffline.get('lightingDraft', id); if (d?.pending === event.job.id) { d.pending = null; await root.DGOffline.put('lightingDraft', id, d); } }); }
+        else { draftWrites = draftWrites.catch(() => {}).then(async () => { if (suspended) return; const d = await root.DGOffline.get('lightingDraft', id); if (!suspended && d?.pending === event.job.id) { d.pending = null; await root.DGOffline.put('lightingDraft', id, d); } }); }
       }
     });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') persistDraft().catch(() => {}); });
   }
-  root.DGLighting = { attach, ready, load, context, view, openEditor, openObservation, state, restoreRecord, persistDraft, clearDraft, minuteText, parseMinute, kstTime, recordSummary, reason: key => REASONS[key] || key, classification: key => CLASSIFICATIONS[key] || key, categories: CATEGORIES, levels: LEVELS, obstructionLevels: OBSTRUCTION_LEVELS };
+  root.DGLighting = { attach, ready, suspend, load, context, view, openEditor, openObservation, state, restoreRecord, persistDraft, clearDraft, minuteText, parseMinute, kstTime, recordSummary, reason: key => REASONS[key] || key, classification: key => CLASSIFICATIONS[key] || key, categories: CATEGORIES, levels: LEVELS, obstructionLevels: OBSTRUCTION_LEVELS };
 })(globalThis);
