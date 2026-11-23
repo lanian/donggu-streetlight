@@ -301,3 +301,12 @@ test('update blocks failed draft inventory reads', async () => {
   assert.ok(result.lose.some(row => row.go === 'outbox'));
   assert.equal(result.keep.length, 0);
 });
+
+test('a brightness draft conflict still blocks reload after closing the editor', async () => {
+  const h = fixture({ startEmpty: true });
+  await h.offline.put('lightingDraft', 'observation', { recordId: 'observation', label: '기기에 보관된 메모' });
+  h.context.DGLighting = { persistDraft: async () => { throw Object.assign(new Error('다른 탭 초안 변경'), { code: 'conflict' }); } };
+  const result = await checkUpdate(h);
+  assert.ok(result.lose.some(row => /밝기 기록/.test(row.t)));
+  assert.equal(result.keep.length, 0);
+});

@@ -486,7 +486,7 @@ async function updateItems(){
     catch(e){for(const kind of kinds)uncertain.add(kind);
       lose.push({t:`${DRAFT_KIND[kinds[0]]} 초안을 보관하지 못했어요`,how:e?.message||"입력과 저장 공간을 확인해 주세요.",go:"close"})}
   }
-  if($("#lcForm"))try{await window.DGLighting?.persistDraft?.()}catch(e){uncertain.add("lightingDraft");lose.push({t:"최신 밝기 기록을 보관하지 못했어요",how:"입력과 저장 공간을 확인해 주세요.",go:"close"})}
+  try{await window.DGLighting?.persistDraft?.()}catch(e){uncertain.add("lightingDraft");lose.push({t:"최신 밝기 기록을 보관하지 못했어요",how:"입력과 저장 공간을 확인해 주세요.",go:"close"})}
   const top=navTop(),fk=top&&fdKind(top.key);
   if(fk)await fdPersist(top.key);
   const durable=!!(DGOffline.ready&&DGOffline.durable);

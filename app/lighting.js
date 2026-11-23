@@ -255,7 +255,13 @@
         if (error.code !== 'conflict') throw error;
         if (!completed) { showDraftConflict(owner); throw error; }
       }
-      if (state.draft === owner) state.draft = null;
+      const active = state.draft;
+      if (active === owner) state.draft = null;
+      else if (!completed && base && active?.recordId === owner.recordId) {
+        const { draftRevision: savedRevision, ...saved } = base;
+        const { draftRevision: visibleRevision, ...visible } = active;
+        if (root.DGData.equal(visible, saved)) state.draft = null;
+      }
     });
   }
   async function reloadDraft() {

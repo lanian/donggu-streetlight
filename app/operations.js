@@ -1029,11 +1029,16 @@
     if (action === 'recover-draft') { if (button.dataset.kind === 'assetDraft') return root.DGAssetMaintenance.resumeDraft(button.dataset.id); if (button.dataset.kind === 'preventiveDraft') return root.DGPreventive.resumeDraft(button.dataset.id); if (button.dataset.kind === 'inventoryDraft') return root.DGManagement.resumeInventoryDraft(button.dataset.id); if (button.dataset.kind === 'lightingAreaDraft') return root.DGLightingAreas.openEditor(null, button.dataset.id, true); if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return root.DGIntegration.restoreInspectionDraft(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workEdit') { const saved = await root.DGOffline.get('workEdit', button.dataset.id); return saved ? openEdit(saved.workId, button.dataset.id) : refreshQueue(); } if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
     if (action === 'discard-draft') {
       const owner = captureOwner(), { kind, id } = button.dataset;
-      const displayed = kind === 'draft' ? state.drafts.find(row => row.kind === kind && row.id === id)?.value : undefined;
+      const displayed = ['draft', 'lightingDraft'].includes(kind) ? state.drafts.find(row => row.kind === kind && row.id === id)?.value : undefined;
       if (!await ask('작성 중인 이 초안을 폐기할까요?', { ok: '폐기', danger: true })) return;
       if (!ownsContext(owner)) return;
       if (kind === 'draft') {
         try { await api.removeDraft(id, displayed); }
+        finally { if (ownsContext(owner)) await refreshQueue(); }
+        return;
+      }
+      if (kind === 'lightingDraft') {
+        try { if (displayed) await root.DGLighting.clearDraft(displayed); }
         finally { if (ownsContext(owner)) await refreshQueue(); }
         return;
       }
@@ -1044,7 +1049,6 @@
       if (kind === 'preventiveDraft') { await root.DGPreventive.discardDraft(id, { confirmed: true }); return refreshQueue(); }
       if (kind === 'lightingAreaDraft') { await root.DGLightingAreas.discardDraft(id); return refreshQueue(); }
       if (kind === 'lightingTaskDraft') { await root.DGLightingWorkflows.discardDraft(id); return refreshQueue(); }
-      if (kind === 'lightingDraft') { const active = root.DGLighting.state.draft; await root.DGLighting.clearDraft(active?.recordId === id ? active : saved); return refreshQueue(); }
       if (kind === 'patrol' && saved) api.removePatrolDraft(saved.sessionId);
       if (['workDraft', 'workCompletion', 'workEdit'].includes(kind)) { const active = kind === 'workDraft' ? state.draft : kind === 'workEdit' ? state.edit : state.completion; const owner = active?.storageId === id ? active : saved; if (owner) { owner.storageId = id; await clearWorkDraft(owner, kind); } return refreshQueue(); }
       await root.DGOffline.remove(kind, id); return refreshQueue();
