@@ -4,7 +4,7 @@
   /* in-app confirmation when app/dialog.js is present; the plain confirm() keeps bare test sandboxes working */
   const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   let api, attached = false, loading = null, reloadRequested = false, signature = '', unsubscribe, draftWrites = Promise.resolve(), editorMap;
-  let suspended = false;
+  let suspended = false, discardRequest = null;
   const draftBases = new WeakMap(), conflictingDrafts = new WeakSet();
   const copyDraft = draft => JSON.parse(JSON.stringify(draft));
   const adoptDraft = (draft, base = draft) => { draftBases.set(draft, base ? copyDraft(base) : null); return draft; };
@@ -106,6 +106,10 @@
     readForm(); const hint = Q('#lcTimeWarning'); if (hint) hint.textContent = observationTimeWarning(draft.data);
   }
   async function openEditor(kind, point, id, resume = false, prefill = null) {
+    if (discardRequest) {
+      discardRequest.replacing = true;
+      await discardRequest.done.catch(() => {});
+    }
     if (suspended) return;
     const gen = api.navGen ? api.navGen() : null;
     if (!state.loaded) await load();
@@ -325,11 +329,19 @@
     if (action === 'reload-draft') return reloadDraft();
     if (action === 'more') { state.show += 40; return notify(); }
     if (action === 'discard') {
+      if (discardRequest) return discardRequest.done;
       const d = state.draft, form = Q('#lcForm');
-      if (!d || !await ask('작성 중인 보완 기록을 버릴까요?', { ok: '버리기', danger: true }) || state.draft !== d) return;
-      await clearDraft(d);
-      if (!state.draft && Q('#lcForm') === form) api.closeSheet();
-      notify(); return;
+      if (!d) return;
+      const request = discardRequest = { replacing: false };
+      request.done = (async () => {
+        if (!await ask('작성 중인 보완 기록을 버릴까요?', { ok: '버리기', danger: true }) || state.draft !== d) return;
+        await clearDraft(d);
+        if (!suspended && !state.draft && Q('#lcForm') === form) api.closeSheet(request.replacing ? true : undefined);
+        if (!suspended) notify();
+      })();
+      try { await request.done; }
+      finally { discardRequest = null; }
+      return;
     }
     if (action === 'remove') { if (await ask(state.draft.data.removed ? '이 기록을 다시 검토에 사용할까요?' : '이 기록을 검토에서 제외해요. 기록은 남아 있어요.', state.draft.data.removed ? { ok: '다시 사용' } : { title: '검토에서 제외할까요?', ok: '제외' })) return save(button, !state.draft.data.removed); return; }
     if (action === 'pick-map') return pickMap();
