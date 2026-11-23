@@ -1669,8 +1669,8 @@ async function inspLoadMore(){
 /* ---------- citizen reports come in by phone, SMS, e-mail or the public QR page; staff log them here ---------- */
 const IB={show:30,only:true};
 function inboxSection(){
-  const rs=S.reports.filter(r=>!IB.only||r.status!=="완료");
-  return `<details class="help"><summary>신고 접수는</summary><p>주민은 표찰의 QR로 여는 신고 페이지(앱과 분리)나 전화·문자로 신고해요. 여기서는 담당자가 받은 신고를 기록하고 처리 상태(접수→처리중→완료)를 관리해요. 접수 시 등 번호를 넣으면 그 등과 연결되고, 등 상세에서도 보여요.</p></details>
+  const rs=S.reports.filter(r=>!IB.only||r.status!=="완료"), official=window.REPORT_CONFIG?.backend==="official";
+  return `<details class="help"><summary>신고 접수는</summary><p>주민은 표찰의 QR로 여는 신고 페이지(앱과 분리)나 전화·문자로 신고해요. 여기서는 담당자가 받은 신고를 기록하고 처리 상태(접수→처리중→완료)를 관리해요.${official?" 공식 운영서비스에서 접수한 신고는 확인 후 여기에 직접 등록해 주세요.":""} 접수 시 등 번호를 넣으면 그 등과 연결되고, 등 상세에서도 보여요.</p></details>
   <div class="panel">
     <div class="grid2"><div><label class="f" for="ibVia">접수 경로</label><select class="f-in" id="ibVia">${INBOX_VIA.map(v=>`<option>${v}</option>`).join("")}</select></div><div><label class="f" for="ibRc">접수번호 (QR 신고면)</label><input class="f-in" id="ibRc" placeholder="R251013-AB12"></div></div>
     <label class="f" for="ibNum">등 번호 <span class="muted">(표찰 번호, 모르면 비움)</span></label><div class="row" style="display:flex;gap:8px"><input class="f-in" id="ibNum" placeholder="산수동 642 / 지호로 65-5" autocomplete="off"><button type="button" class="btn ghost sm" data-scan="inbox" style="flex:none">스캔</button></div>
@@ -1682,7 +1682,7 @@ function inboxSection(){
   </div>
   <h2 style="display:flex;align-items:center;gap:8px">신고 목록 <span class="muted">${rs.length}</span><label class="muted" style="margin-left:auto;font-weight:400;display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="ibOnly" ${IB.only?"checked":""}> 미완료만</label></h2>
   ${rs.length?`<div class="list">${rs.slice(0,IB.show).map(r=>reportCard(r,can("admin"))).join("")}${rs.length>IB.show?`<button class="btn ghost block" id="ibMore">더 보기 · ${rs.length-IB.show}건 남음</button>`:""}</div>`:`<div class="empty">${IB.only?"미완료 신고가 없어요.":"접수된 신고가 없어요."}</div>`}
-  <div class="split">${dl&&S.reports.length?`<button class="btn ghost sm" id="csv8">신고 CSV</button>`:""}${fsReady()?`<button class="btn ghost sm" id="ibImport" ${IB.importing?"disabled":""}>${IB.importing?"가져오는 중…":"QR 신고 가져오기"}</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${IB.importMsg||(fsReady()?"신고 페이지로 들어온 건을 서버에서 받아요 (Google 로그인)":"자동 접수(Firestore)는 report/config.js에 설정하면 켜져요")}</span></div>`;
+  <div class="split">${dl&&S.reports.length?`<button class="btn ghost sm" id="csv8">신고 CSV</button>`:""}${fsReady()?`<button class="btn ghost sm" id="ibImport" ${IB.importing?"disabled":""}>${IB.importing?"가져오는 중…":official?"기존 QR 신고 가져오기":"QR 신고 가져오기"}</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${IB.importMsg||(official?(fsReady()?"기존 자체 신고 서버의 미이관 기록을 받아요 (Google 로그인).":"공식 운영서비스 접수 건은 확인 후 직접 등록해 주세요."):(fsReady()?"신고 페이지로 들어온 건을 서버에서 받아요 (Google 로그인)":"자동 접수(Firestore)는 report/config.js에 설정하면 켜져요"))}</span></div>`;
 }
 /* ---------- stage 2: pull citizen reports from Firestore (staff Google sign-in), file them in the inbox ---------- */
 // The resident delivery choice must not hide earlier reports from authorized staff.
@@ -1883,9 +1883,21 @@ const REPORTER_FIELDS=["contact","photo","lat","lng","acc","ua"];
 function withoutReporter(r){const out={...r};for(const k of REPORTER_FIELDS)delete out[k];if(out.ext&&out.location)out.location="";return out}
 /* ---------- period report: one printable page the office can file ---------- */
 const REP={period:"month",from:"",to:"",dong:"전체",photos:true,inlinePh:true,detail:"issues",data:null,loading:false,err:""};
-function repRange(){const now=new Date();let a,b=now.getTime();
-  if(REP.period==="month"){a=new Date(now.getFullYear(),now.getMonth(),1).getTime()}
-  else if(REP.period==="last"){a=new Date(now.getFullYear(),now.getMonth()-1,1).getTime();b=new Date(now.getFullYear(),now.getMonth(),1).getTime()-1}
+const REPORT_KST_OFFSET=9*3600000;
+function repMonthStart(at, offset=0){
+  const [year,month]=DGOperationsCore.kstDateKey(at).split("-").map(Number);
+  return Date.UTC(year,month-1+offset,1)-REPORT_KST_OFFSET;
+}
+function repDate(at,withTime=false){
+  if(!at||!Number.isFinite(at))return withTime?"":"기록 없음";
+  const shifted=new Date(at+REPORT_KST_OFFSET);
+  if(!Number.isFinite(shifted.getTime()))return withTime?"":"기록 없음";
+  const iso=shifted.toISOString(),date=iso.slice(0,10).replace(/-/g,".");
+  return withTime?date+" "+iso.slice(11,16):date;
+}
+function repRange(now=Date.now()){let a,b=now;
+  if(REP.period==="month"){a=repMonthStart(now)}
+  else if(REP.period==="last"){a=repMonthStart(now,-1);b=repMonthStart(now)-1}
   else if(REP.period==="7"){a=b-7*86400000}
   else if(REP.period==="30"){a=b-30*86400000}
   else{
@@ -1903,11 +1915,11 @@ function reportSourceText(){
 }
 async function repLoad(){
   if(REP.loading||!db)return;
-  const range=repRange();if(range.error){REP.err=range.error;REP.data=null;render();return}
+  const now=Date.now(),range=repRange(now);if(range.error){REP.err=range.error;REP.data=null;render();return}
   REP.loading=true;REP.err="";const key=reportQueryKey(),revision=REP.revision||0,actor=S.me,database=db,firebase=FB,metadata=[];render();
-  const now=new Date(),trendStart=new Date(now.getFullYear(),now.getMonth()-5,1).getTime();
+  const trendStart=repMonthStart(now,-5);
   try{const [insp,patrols]=await Promise.all([
-    listAllRecords("inspections",{where:[["date",">=",Math.min(range.a,trendStart)],["date","<=",Math.max(range.b,Date.now())]],orderBy:[["date","desc"]],onMetadata:m=>metadata.push(m)}),
+    listAllRecords("inspections",{where:[["date",">=",Math.min(range.a,trendStart)],["date","<=",Math.max(range.b,now)]],orderBy:[["date","desc"]],onMetadata:m=>metadata.push(m)}),
     listAllRecords("patrols",{where:[["start",">=",range.a],["start","<=",range.b]],orderBy:[["start","desc"]],onMetadata:m=>metadata.push(m)})
   ]);if(key===reportQueryKey()&&revision===(REP.revision||0)&&S.me===actor&&db===database&&FB===firebase){
     const sources=[...new Set(metadata.map(m=>m.source))];
@@ -1917,7 +1929,7 @@ async function repLoad(){
   REP.loading=false;render();resolveNames();
 }
 
-function repMonthKey(t){const d=new Date(t);return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}`}
+function repMonthKey(at){return repDate(at).slice(0,7)}
 // One selection drives the on-screen report, shared summary and CSV.
 function reportData(){
   const {a,b}=repRange();const inD=l=>!!l&&inDong(l,REP.dong);
@@ -1944,7 +1956,7 @@ function reportControls(){
     <div style="margin-top:8px"><span class="muted small">점검 내역 범위</span>${seg("detail",[["issues","이상 발견만"],["all","전체 점검"]],REP.detail||"issues")}</div>
     <label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="repInline" ${REP.inlinePh?"checked":""}> 점검 내역 표에 사진 칸</label>
     <p class="muted small">A4 세로·배율 100%를 권장해요. 브라우저의 머리글·바닥글을 끄면 제목·주소 중복을 줄일 수 있어요. 미리보기의 표시 한도와 관계없이 선택한 내역·사진 전체를 출력해요.</p>
-    <div class="split"><button class="btn sm" id="repPrint" ${ready?"":"disabled"}>인쇄 / PDF 저장</button>${dl?`<button class="btn ghost sm" id="csv7" ${ready?"":"disabled"}>표 CSV</button>`:""}${navigator.share?`<button class="btn ghost sm" id="repShare" ${ready?"":"disabled"}>요약 공유</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${REP.loading?"기간 기록 불러오는 중…":ready?`기간 조회 완료 · ${fmtDT(REP.data.at)}`:esc(REP.err||"")}</span></div></div>`;
+    <div class="split"><button class="btn sm" id="repPrint" ${ready?"":"disabled"}>인쇄 / PDF 저장</button>${dl?`<button class="btn ghost sm" id="csv7" ${ready?"":"disabled"}>표 CSV</button>`:""}${navigator.share?`<button class="btn ghost sm" id="repShare" ${ready?"":"disabled"}>요약 공유</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${REP.loading?"기간 기록 불러오는 중…":ready?`기간 조회 완료 · ${repDate(REP.data.at,true)}`:esc(REP.err||"")}</span></div></div>`;
 }
 function reportSection(forPrint=false){
   if(REP.data&&REP.data.key!==reportQueryKey())REP.data=null;
@@ -1957,16 +1969,16 @@ function reportSection(forPrint=false){
   const cnt=r=>ins.filter(i=>i.result===r).length;
   const faults={};ins.forEach(i=>inspectionFaults(i).forEach(f=>faults[f]=(faults[f]||0)+1));const faultTop=Object.entries(faults).sort((x,y)=>y[1]-x[1]);
   // 6-month trend from everything loaded (not just the period)
-  const months=[];for(let k=5;k>=0;k--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-k);months.push(repMonthKey(d.getTime()))}
+  const trendAt=Date.now(),months=Array.from({length:6},(_,index)=>repMonthKey(repMonthStart(trendAt,index-5)));
   const trend=months.map(m=>{const ii=all.filter(i=>repMonthKey(i.date)===m);return{m,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length}});const tmax=Math.max(1,...trend.map(t=>t.ok+t.warn+t.bad));
   const detailRows=REP.detail==="all"?ins:ins.filter(i=>i.result!=="정상"),found=detailRows.slice(0,forPrint?undefined:100);
   const longNotes=forPrint?found.filter(i=>String(i.memo||"").length>600||String(i.memo||"").split("\n").length>10):[],noteNumbers=new Map(longNotes.map((i,n)=>[i,n+1]));
   const memoHTML=i=>!i.memo?"":noteNumbers.has(i)?`<br><span class="muted">${esc(String(i.memo).slice(0,180))}…</span><br><strong>전체 내용: 상세 메모 ${noteNumbers.get(i)}번</strong>`:`<br><span class="muted" style="white-space:pre-wrap">${esc(i.memo)}</span>`;
   const title=`${dongLabel(REP.dong)} 가로등·보안등 점검 보고서`;
-  const periodTxt=`${fmtD(a)} ~ ${fmtD(b)}`;
+  const periodTxt=`${repDate(a)} ~ ${repDate(b)}`;
   const photoAppendix=REP.photos?repPhotoAppendix(ins,{all:forPrint,load:!forPrint}):"";
   return controls+`<div class="rep" id="repBody">
-    <div class="cover"><h2>${esc(title)}</h2><div class="muted">기간 ${periodTxt} · 작성 ${fmtDT(Date.now())} · ${esc(S.names[S.me]||"담당자")}</div><div class="report-meta"><span>선택 범위: ${esc(dongLabel(REP.dong))}</span><span>기간 자료 조회: ${fmtDT(REP.data.at)}</span><span>자료 출처: ${esc(reportSourceText())}</span><span>내역 범위: ${REP.detail==="all"?"전체 점검":"이상 발견만"} · 사진 부록 ${REP.photos?"포함":"제외"}</span></div></div>
+    <div class="cover"><h2>${esc(title)}</h2><div class="muted">기간 ${periodTxt} · 작성 ${repDate(Date.now(),true)} · ${esc(S.names[S.me]||"담당자")}</div><div class="report-meta"><span>선택 범위: ${esc(dongLabel(REP.dong))}</span><span>기간 자료 조회: ${repDate(REP.data.at,true)}</span><span>자료 출처: ${esc(reportSourceText())}</span><span>내역 범위: ${REP.detail==="all"?"전체 점검":"이상 발견만"} · 사진 부록 ${REP.photos?"포함":"제외"}</span></div></div>
     <div class="kpi"><div><b>${lights.length.toLocaleString()}</b><span>현재 대상 시설</span></div><div><b>${ins.length}</b><span>기간 점검 기록 건수</span></div><div><b>${open.length}</b><span>현재 조치 필요</span></div>
       <div><b style="color:var(--ok)">${cnt("정상")}</b><span>정상</span></div><div><b style="color:var(--warn)">${cnt("점검필요")}</b><span>점검필요</span></div><div><b style="color:var(--bad)">${cnt("고장")}</b><span>고장</span></div></div>
     <div class="report-reading-notes"><p>점검은 기록 건수이며, 같은 시설의 반복 점검을 포함해요. 현재 대상 시설·현재 조치 필요는 작성 시점의 현황으로 기간 실적과 달라요.</p><p>행정동은 현재 시설 정보를 우선 사용해요. 현재 시설이 없는 동의 과거 기록도 포함하고, 확인되지 않은 동은 별도로 집계해요.</p><p>${REP.dong==="전체"?"순찰은 선택 기간의 전체 세션이에요.":"순찰은 선택한 동이 포함된 전체 세션의 거리·통과·표시예요. 해당 동 안의 구간만 계산한 값은 아니에요."} 누적 통과 기록은 같은 시설의 중복을 포함하며 점등 확인 건수가 아니에요.</p></div>
@@ -1978,13 +1990,13 @@ function reportSection(forPrint=false){
     ${faultTop.length?`<h3>불량 항목</h3><table><tbody>${faultTop.map(([f,n])=>`<tr><td>${esc(f)}</td><td class="n">${n}</td></tr>`).join("")}</tbody></table>`:""}
     <h3>순찰·등록·수정</h3><table><tbody><tr><td>야간 순찰</td><td class="report-summary-value">${pats.length}회 · ${(pats.reduce((s,p)=>s+(p.dist||0),0)/1000).toFixed(1)}km · 누적 통과 ${pats.reduce((s,p)=>s+(p.passed||[]).length,0)}개 · 표시 ${pats.reduce((s,p)=>s+(p.marks||[]).length,0)}건</td></tr><tr><td>현장 등록(미등록)</td><td class="n">${pend.length}건 (대장반영 ${pend.filter(l=>l.reg==="대장반영").length} · 반려 ${pend.filter(l=>l.reg==="반려").length})</td></tr><tr><td>등 정보 수정</td><td class="n">${edits.length}건</td></tr></tbody></table>
     <h3>${REP.detail==="all"?"점검 내역":"이상 발견 내역"} <span class="muted">${found.length}${detailRows.length>found.length?" / "+detailRows.length:""}건</span></h3>
-    ${found.length?`<table class="report-findings-table"><colgroup><col class="col-date"><col class="col-light"><col class="col-result"><col>${REP.inlinePh?'<col class="col-photo">':""}</colgroup><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th>${REP.inlinePh?`<th>사진</th>`:""}</tr></thead><tbody>${found.map(i=>`<tr data-report-inspection="${esc(i.id||"")}"><td>${fmtDT(i.date)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${inspectionFaults(i).map(esc).join(", ")}${memoHTML(i)}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td>${REP.inlinePh?`<td class="phcell">${inspectionThumbs(i).slice(0,2).map(t=>`<img src="${esc(safeImageSrc(t.t))}" alt="${esc(t.label||"")}" title="${esc(t.label||"")}">`).join("")||(i.photo?`<img src="${esc(safeImageSrc(i.photo))}" alt="">`:"")}</td>`:""}</tr>`).join("")}</tbody></table>`:`<p class="muted">${REP.detail==="all"?"기간 내 점검 기록이 없어요.":"기간 내 이상 발견이 없어요."}</p>`}
+    ${found.length?`<table class="report-findings-table"><colgroup><col class="col-date"><col class="col-light"><col class="col-result"><col>${REP.inlinePh?'<col class="col-photo">':""}</colgroup><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th>${REP.inlinePh?`<th>사진</th>`:""}</tr></thead><tbody>${found.map(i=>`<tr data-report-inspection="${esc(i.id||"")}"><td>${repDate(i.date,true)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${inspectionFaults(i).map(esc).join(", ")}${memoHTML(i)}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td>${REP.inlinePh?`<td class="phcell">${inspectionThumbs(i).slice(0,2).map(t=>`<img src="${esc(safeImageSrc(t.t))}" alt="${esc(t.label||"")}" title="${esc(t.label||"")}">`).join("")||(i.photo?`<img src="${esc(safeImageSrc(i.photo))}" alt="">`:"")}</td>`:""}</tr>`).join("")}</tbody></table>`:`<p class="muted">${REP.detail==="all"?"기간 내 점검 기록이 없어요.":"기간 내 이상 발견이 없어요."}</p>`}
     ${!forPrint&&detailRows.length>found.length?'<p class="report-preview-note">화면은 일부 내역만 표시하며 인쇄 / PDF에는 선택한 전체 내역이 포함돼요.</p>':""}
     <h3>현재 조치 필요 등 <span class="muted">${open.length}</span></h3>
-    ${open.length?`<table><thead><tr><th>등</th><th>상태</th><th>마지막 점검</th><th>위치</th></tr></thead><tbody>${open.slice(0,forPrint?undefined:150).map(l=>`<tr><td><b>${esc(l.code)}</b><br><span class="muted">${esc(l.dong)}</span></td><td><span class="chip st-${esc(l.status)}">${esc(l.status)}</span></td><td style="white-space:nowrap">${fmtD(l.lastInspected)}</td><td class="muted">${esc(l.address||"")}</td></tr>`).join("")}</tbody></table>${!forPrint&&open.length>150?`<p class="muted">외 ${open.length-150}개</p>`:""}`:`<p class="muted">모든 등이 정상이에요.</p>`}
-    ${longNotes.length?`<section class="report-long-notes"><h3>상세 메모 · 긴 점검 내용</h3>${longNotes.map((i,n)=>`<article class="report-long-note"><h4>${n+1}. ${esc(i.code)} · ${fmtDT(i.date)} · ${esc(i.result)}</h4><p>${esc(i.memo)}</p></article>`).join("")}</section>`:""}
+    ${open.length?`<table><thead><tr><th>등</th><th>상태</th><th>마지막 점검</th><th>위치</th></tr></thead><tbody>${open.slice(0,forPrint?undefined:150).map(l=>`<tr><td><b>${esc(l.code)}</b><br><span class="muted">${esc(l.dong)}</span></td><td><span class="chip st-${esc(l.status)}">${esc(l.status)}</span></td><td style="white-space:nowrap">${repDate(l.lastInspected)}</td><td class="muted">${esc(l.address||"")}</td></tr>`).join("")}</tbody></table>${!forPrint&&open.length>150?`<p class="muted">외 ${open.length-150}개</p>`:""}`:`<p class="muted">모든 등이 정상이에요.</p>`}
+    ${longNotes.length?`<section class="report-long-notes"><h3>상세 메모 · 긴 점검 내용</h3>${longNotes.map((i,n)=>`<article class="report-long-note"><h4>${n+1}. ${esc(i.code)} · ${repDate(i.date,true)} · ${esc(i.result)}</h4><p>${esc(i.memo)}</p></article>`).join("")}</section>`:""}
     ${photoAppendix}
-    <p class="muted" style="margin-top:16px;font-size:11px">${REP.data?`조회한 기간 기록으로 집계했어요. 자료 기준 ${fmtDT(REP.data.at)} · ${esc(reportSourceText())}.`:""} 밝기·조명 범위는 모델 추정이며 실측값이 아니에요.</p>
+    <p class="muted" style="margin-top:16px;font-size:11px">${REP.data?`조회한 기간 기록으로 집계했어요. 자료 기준 ${repDate(REP.data.at,true)} · ${esc(reportSourceText())}.`:""} 밝기·조명 범위는 모델 추정이며 실측값이 아니에요.</p>
   </div>`;
 }
 /* photo appendix: full-size photos of the period's inspections, before/after pairs side by side, loaded on demand */
@@ -2012,7 +2024,7 @@ function repPhotoAppendix(ins,options={}){
   const fig=x=>{
     const d=x.id?REP_PH.docs[x.id]:null,src=safeImageSrc(x.full||(d&&d.data)||x.t);
     const fallback=x.id&&!(d&&d.data),note=fallback?(d?.missing?'원본 조회 실패 · 보관된 미리보기':'원본 확인 전 · 미리보기'):"";
-    return '<figure>'+(src?'<img src="'+esc(src)+'" alt="'+esc(x.label)+'" loading="eager">':'<div class="notice">사진을 불러올 수 없어요.</div>')+'<figcaption><b>'+esc(x.code)+'</b> · '+esc(x.label)+(x.result!=="정상"?' · '+esc(x.result):"")+'<br>'+fmtDT(x.date)+' · '+esc(names[x.by]||"점검자")+(d?.note?' · '+esc(d.note):"")+(note?'<br><strong>'+note+'</strong>':"")+'</figcaption></figure>';
+    return '<figure>'+(src?'<img src="'+esc(src)+'" alt="'+esc(x.label)+'" loading="eager">':'<div class="notice">사진을 불러올 수 없어요.</div>')+'<figcaption><b>'+esc(x.code)+'</b> · '+esc(x.label)+(x.result!=="정상"?' · '+esc(x.result):"")+'<br>'+repDate(x.date,true)+' · '+esc(names[x.by]||"점검자")+(d?.note?' · '+esc(d.note):"")+(note?'<br><strong>'+note+'</strong>':"")+'</figcaption></figure>';
   };
   const blocks=DGReporting.photoGroups(items,REP_PH.docs).map(({before,after,rest})=>(before&&after?'<div class="pair-ba"><div class="pl">동일 작업·점검의 조치 전 · 후</div>'+fig(before)+fig(after)+'</div>':"")+rest.map(fig).join("")+(before&&!after?fig(before):"")+(after&&!before?fig(after):"")).join("");
   const missing=items.filter(x=>x.id&&REP_PH.docs[x.id]?.missing).length;
@@ -2045,7 +2057,7 @@ async function printSheet(btn){
   const signatureAt=signature(),scope=REP_PH.scope,size=REP_PH.size,names={...S.names};
   const isCurrent=()=>navAlive(generation)&&S.me===actor&&db===database&&FB===firebase&&myRole()===role&&sheet.classList.contains("open")&&(report?!!sheet.querySelector("#repBody")&&REP.data===data&&!REP.loading&&!REP.err&&signature()===signatureAt:source?.isConnected);
   const html=report?reportSection(true):sheet.innerHTML;
-  const title=report?`동구가로등_기간보고서_${fmtD(repRange().a)}-${fmtD(repRange().b)}`:(sheet.querySelector("h2,h3")?.textContent||"동구 가로등 출력");
+  const title=report?`동구가로등_기간보고서_${repDate(repRange().a)}-${repDate(repRange().b)}`:(sheet.querySelector("h2,h3")?.textContent||"동구 가로등 출력");
   const items=report&&REP.photos?DGReporting.photoItems(reportData().ins,inspectionThumbs,scope):null;
   try{
     await DongguPrint.run({html,title,button:btn,isCurrent,kind:sheet.querySelector(".qrgrid")?"labels":"report",prepare:async target=>{
@@ -2057,7 +2069,7 @@ async function printSheet(btn){
   }catch(error){toast(error.message||"인쇄 자료를 준비하지 못했어요.")}
 }
 function repSummaryText(){const {a,b,ins,open,pats}=reportData();
-  return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${fmtD(a)}~${fmtD(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${pats.length}회`}
+  return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${repDate(a)}~${repDate(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${pats.length}회`}
 async function exportReportCSV(){
   const range=repRange();if(range.error){REP.err=range.error;REP.data=null;toast(range.error);render();return}
   if(REP.data&&REP.data.key!==reportQueryKey())REP.data=null;
@@ -2067,7 +2079,7 @@ async function exportReportCSV(){
   for(const r of byDong)rows.push(["행정동",r.d,r.n,r.insp,r.ok,r.warn,r.bad,r.open]);
   for(const r of byWho)rows.push(["점검자",S.names[r.w]||r.w,"",r.n,r.ok,r.warn,r.fault,""]);
   const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
-  try{await dl.save({filename:`동구가로등_보고서_${fmtD(a).replace(/\./g,"")}-${fmtD(b).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
+  try{await dl.save({filename:`동구가로등_보고서_${repDate(a).replace(/\./g,"")}-${repDate(b).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
 }
 /* per-light dossier: registry, status, inspections, photos — for a complaint file or a repair order */
 async function openLightDossier(id){

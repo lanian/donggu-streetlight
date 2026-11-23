@@ -37,7 +37,7 @@
   }
   function scopedWorks(rows) { return rows.filter(work => ACTIVE.includes(work.status) && work.assignedTo === api.state().me && (state.scope === 'all' || !work.dueAt || work.dueAt <= todayEnd())); }
   async function loadWorks() {
-    const current = reset(); if (state.downloading) return false;
+    const current = reset(); if (state.loading || state.downloading) return false;
     const token = ++request; state.loading = true; state.error = ''; notify(current);
     try {
       if (current.fb && root.navigator?.onLine === false) throw new Error('출동 전 자료 준비는 연결된 상태에서 실행해 주세요. 이미 받은 자료는 아래에서 확인할 수 있어요.');
@@ -49,7 +49,7 @@
     finally { if (owned(current) && token === request) { state.loading = false; notify(current); } }
   }
   async function prepare(ids) {
-    const current = reset(); if (state.downloading) return false;
+    const current = reset(); if (state.loading || state.downloading) return false;
     const workIds = [...new Set(ids || [...state.selected])], token = ++request;
     const active = () => owned(current) && token === request;
     state.downloading = true; state.error = ''; state.progress = ''; state.attempt = { complete: false, missing: [], workIds }; notify(current);
@@ -160,10 +160,10 @@
   function cancel() { const current = reset(); if (state.committing) return false; request++; state.downloading = false; state.loading = false; state.error = '준비를 중단했어요. 이전에 완료한 자료는 유지돼요.'; notify(current); return true; }
   function view() {
     const current = reset(); if (!state.loaded && !loadPromise && current.offline.ready) ready().then(() => notify(current)).catch(error => { if (owned(current)) state.error = error.message; });
-    const packet = state.packet;
-    return '<div class="panel"><h3>출동 자료 준비</h3><p>선택한 내 작업과 시설 정보, 미완료 신고 내용, 시설별 최근 점검 3건, 관련 원본 사진을 받아요. 배경지도는 내려받지 않아요.</p><p class="muted">' + (root.DGOffline.durable ? '전용 기기 보관 · 같은 계정에서 다시 열 수 있어요.' : '공유 기기 임시 보관 · 새로고침하거나 창을 닫으면 자료가 사라져요.') + '</p><label class="f" for="fieldKitScope">대상</label><select class="f-in" id="fieldKitScope"' + (state.downloading ? ' disabled' : '') + '><option value="today"' + (state.scope === 'today' ? ' selected' : '') + '>오늘·기한 초과·기한 미정 내 작업</option><option value="all"' + (state.scope === 'all' ? ' selected' : '') + '>내 미완료 작업 전체</option></select><button class="btn ghost" data-fk="load"' + (state.loading || state.downloading ? ' disabled' : '') + '>준비할 작업 조회</button>' +
+    const packet = state.packet, busy = state.loading || state.downloading;
+    return '<div class="panel"><h3>출동 자료 준비</h3><p>선택한 내 작업과 시설 정보, 미완료 신고 내용, 시설별 최근 점검 3건, 관련 원본 사진을 받아요. 배경지도는 내려받지 않아요.</p><p class="muted">' + (root.DGOffline.durable ? '전용 기기 보관 · 같은 계정에서 다시 열 수 있어요.' : '공유 기기 임시 보관 · 새로고침하거나 창을 닫으면 자료가 사라져요.') + '</p><label class="f" for="fieldKitScope">대상</label><select class="f-in" id="fieldKitScope"' + (busy ? ' disabled' : '') + '><option value="today"' + (state.scope === 'today' ? ' selected' : '') + '>오늘·기한 초과·기한 미정 내 작업</option><option value="all"' + (state.scope === 'all' ? ' selected' : '') + '>내 미완료 작업 전체</option></select><button class="btn ghost" data-fk="load"' + (busy ? ' disabled' : '') + '>준비할 작업 조회</button>' +
       (state.loading ? '<p role="status">배정 작업 조회 중…</p>' : '') + (state.error ? '<p class="notice" role="alert">' + E(state.error) + '</p>' : '') +
-      (state.works.length ? '<p>조회 ' + state.works.length + '건 · 선택 ' + state.selected.size + '건 (한 번에 최대 50건)</p><p class="muted">50건을 넘으면 위 50건이 먼저 선택돼요. 이번에 가져갈 작업을 확인해 주세요.</p><fieldset style="border:0;padding:0"' + (state.downloading ? ' disabled' : '') + '>' + state.works.map(work => '<label style="display:flex;gap:8px;padding:8px"><input type="checkbox" data-field-kit-work="' + E(work.id) + '"' + (state.selected.has(work.id) ? ' checked' : '') + '>' + E(work.title) + ' · ' + E(work.code || work.lightId) + '</label>').join('') + '<button class="btn sodium" data-fk="prepare">선택 작업 자료 받기</button></fieldset>' : '') +
+      (state.works.length ? '<p>조회 ' + state.works.length + '건 · 선택 ' + state.selected.size + '건 (한 번에 최대 50건)</p><p class="muted">50건을 넘으면 위 50건이 먼저 선택돼요. 이번에 가져갈 작업을 확인해 주세요.</p><fieldset style="border:0;padding:0"' + (busy ? ' disabled' : '') + '>' + state.works.map(work => '<label style="display:flex;gap:8px;padding:8px"><input type="checkbox" data-field-kit-work="' + E(work.id) + '"' + (state.selected.has(work.id) ? ' checked' : '') + '>' + E(work.title) + ' · ' + E(work.code || work.lightId) + '</label>').join('') + '<button class="btn sodium" data-fk="prepare">선택 작업 자료 받기</button></fieldset>' : '') +
       (state.downloading ? '<p role="status">' + E(state.progress) + '</p>' + (state.committing ? '' : '<button class="btn ghost" data-fk="cancel">준비 중단</button>') : '') + '</div>' +
       (packet ? '<div class="panel"><h3>보관한 자료 · 준비 완료</h3><p>' + api.fmtDT(packet.preparedAt) + ' · ' + (packet.source === 'server' ? '서버에서 받은 자료' : '이 기기 자료') + '</p><p>선택 작업 ' + packet.scope.workIds.length + '건 · 시설 ' + packet.scope.lightIds.length + '곳 · 원본 사진 ' + Object.keys(packet.records.photos).length + '장</p><p class="muted">받은 시각의 사본이에요. 이후 다른 직원이 바꾼 내용은 다시 준비해야 반영돼요. 저장 명령은 기존 충돌 확인과 전송 대기 절차를 사용해요.</p>' + packet.scope.workIds.map(id => '<button class="btn ghost sm" data-dg="open-work" data-id="' + E(id) + '">' + E(packet.records.workOrders[id].title) + '</button>').join('') + '<button class="btn ghost block" data-fk="discard">보관 자료 지우기</button></div>' : '<p class="empty">아직 완료한 출동 자료가 없어요.</p>');
   }
@@ -179,8 +179,13 @@
     api = context; reset(); if (attached) return; attached = true;
     root.DGOffline.subscribe?.(event => { if (event.type === 'ready') { reset(); ready().then(() => notify(owner)).catch(() => {}); } });
     document.addEventListener('change', event => {
-      if (event.target.id === 'fieldKitScope') { state.scope = event.target.value; state.works = []; state.selected.clear(); notify(reset()); }
-      if (event.target.dataset?.fieldKitWork) { const id = event.target.dataset.fieldKitWork; if (event.target.checked) state.selected.add(id); else state.selected.delete(id); }
+      const target = event.target;
+      if (target.id !== 'fieldKitScope' && !target.dataset?.fieldKitWork) return;
+      const current = reset();
+      if (state.loading || state.downloading) return;
+      if (target.id === 'fieldKitScope') { state.scope = target.value; state.works = []; state.selected.clear(); notify(current); }
+      else if (target.checked) state.selected.add(target.dataset.fieldKitWork);
+      else state.selected.delete(target.dataset.fieldKitWork);
     });
     document.addEventListener('click', event => {
       const button = event.target.closest('[data-fk]'); if (!button) return;

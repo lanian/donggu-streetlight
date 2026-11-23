@@ -102,7 +102,7 @@ test('different representative slots survive simultaneous selection and explicit
 test('reports include an older period beyond 1,000 newer records and refresh after live invalidation',async()=>{
   const now=new Date(),start=new Date(now.getFullYear(),now.getMonth(),1).getTime(),inspections={};for(let i=0;i<1000;i++)inspections['new'+i]={lightId:'p',date:start+i,result:'정상'};inspections.previous={lightId:'p',date:start-1000,result:'고장'};
   const {db}=local({inspections}),light={id:'p',dong:'D',status:'정상'},c=context({db,REP:{period:'last',dong:'전체',data:null},IR:{more:null},PT_COVER:{},S:{lights:[light],patrols:[],insp:[]},repRange:()=>({a:start-31*864e5,b:start-1}),byId:()=>light,inDong:()=>true,adongOf:()=> 'D',adongOrder:()=>0});
-  load(c,'function reportQueryKey(){','function repMonthKey');load(c,'function reportData(){','function reportSection');load(c,'function dataChanged(key){','/* Registry:');await c.repLoad();assert.equal(c.reportData().ins.length,1);
+  c.DGOperationsCore=require('../../app/operations-core.js');load(c,'const REPORT_KST_OFFSET=','function repRange(');load(c,'function reportQueryKey(){','function repMonthKey');load(c,'function reportData(){','function reportSection');load(c,'function dataChanged(key){','/* Registry:');await c.repLoad();assert.equal(c.reportData().ins.length,1);
   await db.doc('inspections/late').set({lightId:'p',date:start-2000,result:'고장'});c.dataChanged('insp');assert.equal(c.REP.data,null);await c.repLoad();assert.equal(c.reportData().ins.length,2);
 });
 

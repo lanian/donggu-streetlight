@@ -73,7 +73,8 @@ test('report ranges reject reversed and invalid dates and include the final mill
 });
 test('a reversed range never queries or exports and recovers when corrected', async () => {
   const REP = { period: 'custom', from: '2026-11-07', to: '2026-11-01', data: null, loading: false, err: '' }, calls = [];
-  const c = scope(['repRange', 'reportQueryKey', 'repLoad', 'exportReportCSV'], { REP, db: {}, render() {}, resolveNames() {}, listAllRecords: async () => { calls.push('query'); return []; }, dl: { save: async () => calls.push('export') } });
+  const c = scope(['repRange', 'reportQueryKey', 'repLoad', 'exportReportCSV'], { REP, db: {}, DGOperationsCore: require('../../app/operations-core.js'), render() {}, resolveNames() {}, listAllRecords: async () => { calls.push('query'); return []; }, dl: { save: async () => calls.push('export') } });
+  vm.runInContext(source.slice(source.indexOf('const REPORT_KST_OFFSET='), source.indexOf('function repRange(')), c);
   await c.repLoad(); assert.equal(calls.length, 0); assert.equal(REP.data, null); assert.match(REP.err, /기간|날짜|시작/);
   await c.exportReportCSV(); assert.equal(calls.length, 0);
   REP.to = '2026-11-07'; await c.repLoad(); assert.equal(calls.length, 2); assert.ok(REP.data);
