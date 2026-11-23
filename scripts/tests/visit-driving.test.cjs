@@ -126,3 +126,89 @@ test('invalid getters do not execute or leak raw source errors', () => {
   Object.defineProperty(source, 'lat', { get() { reads++; throw new Error('PRIVATE-SECRET'); } });
   invalid(() => Core.makeBatches([source])); assert.equal(reads, 0);
 });
+
+function legacyRouteFixture(field = true, auto = 'desktop') {
+  const operations = path.resolve(__dirname, '../../app/operations.js');
+  const lights = stops(7), handlers = {}, requested = [], choices = [], opened = [];
+  const actor = { me: 'local', tab: 'admin', asec: 'due' }, db = {}, now = Date.now();
+  let time = now, nav = 1, pendingChoice;
+  const context = vm.createContext({
+    Date: class extends Date { static now() { return time; } },
+    DGOperationsCore: require('../../app/operations-core.js'), DongguField: require('../../app/field.js'),
+    DEV: { field, auto },
+    DGOffline: { ready: true, namespace: 'test', register() {}, subscribe() {} },
+    document: { querySelector: () => ({}), addEventListener: (name, fn) => { handlers[name] = fn; } },
+    navigator: { geolocation: { getCurrentPosition: (success, failure) => requested.push({ success, failure }) } },
+    DGDialog: { choose: (_, { options }) => new Promise(resolve => { choices.push(options); pendingChoice = resolve; }) },
+    open: url => opened.push(url)
+  });
+  vm.runInContext(fs.readFileSync(operations, 'utf8'), context);
+  const { state, attach } = context.DGOperations;
+  attach({ state: () => actor, database: () => db, firebase: () => null, navGen: () => nav, navAlive: gen => gen === nav,
+    byId: id => lights.find(light => light.id === id), can: () => true, toast() {}, render() {} });
+  state.plan = { createdAt: now + 10000, stops: clone(lights) };
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  return {
+    now, lights, state, requested, choices, opened,
+    async click() { handlers.click({ target: { closest: () => ({ dataset: { dg: 'plan-route-ahead' } }) } }); await settle(); },
+    async position(accuracy, age = 0) {
+      requested.at(-1).success({ timestamp: time - age, coords: { latitude: 35.15, longitude: 126.93, accuracy } }); await settle();
+    },
+    async choose(provider) { pendingChoice(choices.at(-1).find(choice => choice.value.startsWith(provider)).value); await settle(); },
+    advance: millis => { time += millis; }, leave: () => { nav++; actor.asec = 'work'; }
+  };
+}
+
+test('the legacy route refreshes an old origin and never sends a coarse fix to Kakao', async () => {
+  const f = legacyRouteFixture();
+  f.state.pos = { lat: 33, lng: 122, acc: 9, at: f.now - 300001 };
+  await f.click();
+  assert.equal(f.requested.length, 1);
+  await f.position(3000);
+  await f.choose('kakaomap:');
+  assert.equal(new URL(f.opened[0]).searchParams.get('sp'), f.lights[0].lat + ',' + f.lights[0].lng);
+  assert.equal(f.state.pos.lat, 33, 'a coarse reading cannot replace the previous reliable measurement');
+});
+
+test('the legacy route validates the measurement time rather than the callback time', async () => {
+  const f = legacyRouteFixture(); await f.click();
+  await f.position(9, 30001); await f.choose('kakaomap:');
+  assert.equal(new URL(f.opened[0]).searchParams.get('sp'), f.lights[0].lat + ',' + f.lights[0].lng);
+  assert.equal(f.state.pos, null);
+});
+
+test('the legacy route closes out callbacks when the plan changes or the person leaves the page', async () => {
+  const f = legacyRouteFixture(); await f.click();
+  f.state.plan = { createdAt: f.now + 10000, stops: clone(f.lights.slice(2)) };
+  await f.position(9);
+  assert.equal(f.state.pos, null);
+  assert.deepEqual(f.choices, []);
+  const g = legacyRouteFixture(); await g.click(); g.leave(); await g.position(9);
+  assert.equal(g.state.pos, null);
+  assert.deepEqual(g.choices, []);
+});
+
+test('the legacy route does not open a map with reordered or replaced plan stops', async () => {
+  for (const replace of [false, true]) {
+    const f = legacyRouteFixture(); await f.click(); await f.position(9);
+    if (replace) f.state.plan = { ...f.state.plan, stops: f.state.plan.stops.slice(1) };
+    else f.state.plan.stops.reverse();
+    await f.choose('https://www.google.com');
+    assert.deepEqual(f.opened, []);
+  }
+});
+
+test('the legacy route does not open Kakao after its confirmed origin expires', async () => {
+  const f = legacyRouteFixture(); await f.click(); await f.position(9);
+  f.advance(300001); await f.choose('kakaomap:'); assert.deepEqual(f.opened, []);
+});
+
+test('the legacy route sends at most three Google waypoints on mobile and retains all on desktop', async () => {
+  for (const [field, auto, allowed] of [[true, 'phone', 3], [false, 'phone', 3], [false, 'desktop', 5]]) {
+    const f = legacyRouteFixture(field, auto); await f.click(); if (field) await f.position(9);
+    await f.choose('https://www.google.com');
+    const route = new URL(f.opened[0]).searchParams, destination = f.lights[allowed];
+    assert.equal(route.get('destination'), destination.lat + ',' + destination.lng);
+    assert.equal(route.get('waypoints').split('|').length, allowed);
+  }
+});
