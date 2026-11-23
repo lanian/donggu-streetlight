@@ -5,6 +5,17 @@
   const ask = (message, opts) => root.DGDialog ? root.DGDialog.confirm(message, opts) : Promise.resolve(confirm(message));
   let api, attached = false, loading = null, reloadRequested = false, signature = '', unsubscribe, draftWrites = Promise.resolve(), editorMap;
   let suspended = false;
+  const draftBases = new WeakMap(), conflictingDrafts = new WeakSet();
+  const copyDraft = draft => JSON.parse(JSON.stringify(draft));
+  const adoptDraft = (draft, base = draft) => { draftBases.set(draft, base ? copyDraft(base) : null); return draft; };
+  const draftConflictMessage = '다른 탭에서 이 초안을 변경했어요. 현재 입력은 화면에 남아 있으며 기기에 저장되지 않았어요.';
+  function showDraftConflict(draft) {
+    conflictingDrafts.add(draft);
+    if (state.draft !== draft || Q('#lcForm')?.dataset.recordId !== draft.recordId) return;
+    const status = Q('#lcSaveState'), reload = Q('#lcReloadDraft');
+    if (status) status.textContent = draftConflictMessage;
+    if (reload) reload.hidden = false;
+  }
   const state = { records: [], loaded: false, error: '', revision: 0, draft: null, filter: 'all', show: 40 };
   const Q = selector => document.querySelector(selector), E = value => api.esc(value == null ? '' : value);
   const CATEGORIES = { other_public: '다른 공공기관', private: '민간·공동주택', shop: '상가', building: '건물', unknown: '관리 주체 미확인', field: '현장 관찰', construction: '공사 가림막·비계', tree: '가로수·수목', sign: '간판·차양·현수막', structure: '기타 구조물·가설물' };
@@ -98,28 +109,34 @@
     if (suspended) return;
     const gen = api.navGen ? api.navGen() : null;
     if (!state.loaded) await load();
+    const current = () => !suspended && (gen === null || api.navAlive(gen));
+    if (!current()) return;
+    if (state.draft && conflictingDrafts.has(state.draft) && !Q('#lcForm')) { renderEditor(); return; }
     await persistDraft();
-    if (suspended || gen !== null && !api.navAlive(gen)) return; // the user left this screen while records were loading
+    if (!current()) return; // the user left this screen while records were loading
     if (resume) {
       const saved = id ? await root.DGOffline.get('lightingDraft', id) : state.draft ??
         (await root.DGOffline.list('lightingDraft')).sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value;
       if (suspended) return;
       if (!saved) return api.toast('이어 쓸 기록이 없어요.');
-      state.draft = saved;
+      state.draft = saved === state.draft ? saved : adoptDraft(saved);
     } else {
       const record = id && state.records.find(r => r.id === id);
       if (id && !record) return api.toast('기록을 찾을 수 없어요. 새로고침해 주세요.');
       const saved = id && root.DGOffline.ready ? await root.DGOffline.get('lightingDraft', id) : null;
       if (suspended) return;
       if (saved) {
-        const resumeSaved = await ask('이 기록의 작성 중인 초안을 이어 쓸까요?', { ok: '이어 쓰기', cancel: '새로 시작' });
+        const resumeSaved = saved.pending || await ask('이 기록의 작성 중인 초안을 이어 쓸까요?', { ok: '이어 쓰기', cancel: '새로 시작' });
         if (suspended) return;
-        if (resumeSaved) { state.draft = saved; renderEditor(); return; }
+        if (resumeSaved) { state.draft = adoptDraft(saved); renderEditor(); return; }
       }
       state.draft = { recordId: record ? record.id : uuid('lighting'), expectedRevision: record ? record.revision : 0, data: record ? root.DGLightingCommands.normalize(record) : prefill || defaults(kind, point), readonly: record ? !canEdit(record) : !canWrite(), pending: null, timeWindowManual: !!record };
-      if (!state.draft.readonly) await persistDraft(false);
+      adoptDraft(state.draft, saved || null);
+      if (!state.draft.readonly) {
+        try { await persistDraft(false); } catch (error) { if (error.code !== 'conflict') throw error; }
+      }
     }
-    renderEditor();
+    if (current()) renderEditor();
   }
   async function openObservation(input) {
     if (!canWrite()) return api.toast('현장 관찰을 기록할 권한과 저장소를 확인해 주세요.');
@@ -145,7 +162,13 @@
   }
   function saveButtons(draft, d) {
     return (draft.pending ? '<p class="notice">전송 중인 내용은 저장 대기함에서 확인해 주세요. 완료 전에는 모델에 반영되지 않아요.</p><button type="button" class="btn ghost" data-asec="outbox">저장 대기함</button>' : draft.readonly ? '<p class="muted">작성자 또는 관리자가 수정할 수 있어요.</p>' : '<div class="split"><button type="submit" class="btn" id="lcSave">기록 저장</button><button type="button" class="btn ghost" data-lc="discard">초안 버리기</button>' + (draft.expectedRevision ? '<button type="button" class="btn ghost" data-lc="remove">' + (d.removed ? '다시 사용' : '검토에서 제외') + '</button>' : '') + '</div>') +
-      '<p id="lcSaveState" class="muted" role="status">' + (root.DGOffline.durable ? '작성 내용은 이 기기에 자동 보관돼요.' : '현재 창에서만 초안을 보관해요.') + '</p>';
+      draftStatus(draft);
+  }
+  function draftStatus(draft) {
+    const conflict = conflictingDrafts.has(draft);
+    return '<p id="lcSaveState" class="muted" role="status">' +
+      (conflict ? draftConflictMessage : root.DGOffline.durable ? '작성 내용은 이 기기에 자동 보관돼요.' : '현재 창에서만 초안을 보관해요.') +
+      '</p><button type="button" class="btn ghost" id="lcReloadDraft" data-lc="reload-draft"' + (conflict ? '' : ' hidden') + '>최신 초안 확인</button>';
   }
   function renderEditor() {
     if (editorMap) { editorMap.remove(); editorMap = null; }
@@ -169,7 +192,7 @@
       (source ? '<details><summary>중복 광원 확인</summary>' + field('lcLinked', '같은 시설의 관리 대장 ID (선택)', d.linkedLightId, 'maxlength="180" placeholder="같은 시설이면 연결하고 중복 합산 제외"') + '<label class="f"><input id="lcDistinct" type="checkbox" ' + (d.distinct ? 'checked' : '') + '> 5m 이내 대장 시설과 별개의 광원임을 확인했어요</label><p class="muted">대장 시설과 가까우면 확인 전까지 중복 합산하지 않아요. 동일 이름·관리기관의 가까운 추가 기록도 중복을 확인해요.</p></details>' : '') +
       '<label class="f" for="lcNote">근거·주변 환경 메모</label><textarea class="f-in" id="lcNote" maxlength="1000" placeholder="예: 상가 폐점 후 꺼짐, 가로수 가림, 맞은편 기관 보행등">' + E(d.note) + '</textarea></fieldset>' +
       (draft.pending ? '<p class="notice">전송 중인 내용은 저장 대기함에서 확인해 주세요. 완료 전에는 모델에 반영되지 않아요.</p><button type="button" class="btn ghost" data-asec="outbox">저장 대기함</button>' : draft.readonly ? '<p class="muted">작성자 또는 관리자가 수정할 수 있어요.</p>' : '<div class="split"><button type="submit" class="btn" id="lcSave">기록 저장</button><button type="button" class="btn ghost" data-lc="discard">초안 버리기</button>' + (draft.expectedRevision ? '<button type="button" class="btn ghost" data-lc="remove">' + (d.removed ? '다시 사용' : '검토에서 제외') + '</button>' : '') + '</div>') +
-      '<p id="lcSaveState" class="muted" role="status">' + (root.DGOffline.durable ? '작성 내용은 이 기기에 자동 보관돼요.' : '현재 창에서만 초안을 보관해요.') + '</p></form>', { key: 'lcedit', reopen: () => renderEditor() });
+      draftStatus(draft) + '</form>', { key: 'lcedit', reopen: () => renderEditor() });
   }
   function CATEGORIES_SOURCE() { const result = { ...CATEGORIES }; delete result.field; return result; }
   function setPositionAccuracy(data, accuracy) {
@@ -191,24 +214,72 @@
   }
   function persistDraft(read = true) {
     const d = read ? readForm() : state.draft;
-    return writeDraft(d);
+    return d?.pending ? draftWrites.catch(() => {}) : writeDraft(d);
   }
-  function writeDraft(d) {
-    if (suspended || !d || d.readonly || !root.DGOffline.ready) return draftWrites;
-    const value = JSON.parse(JSON.stringify(d));
-    draftWrites = draftWrites.catch(() => {}).then(() => { if (!suspended) return root.DGOffline.put('lightingDraft', value.recordId, value); });
-    return draftWrites;
-  }
-  function clearDraft(owner = state.draft) {
-    if (!owner) return draftWrites;
-    const recordId = owner.recordId, pending = owner.pending;
-    if (state.draft === owner) state.draft = null;
+  function queueDraft(task) {
     draftWrites = draftWrites.catch(() => {}).then(async () => {
-      if (suspended || !root.DGOffline.ready) return;
-      const stored = await root.DGOffline.get('lightingDraft', recordId);
-      if (!suspended && stored?.recordId === recordId && stored.pending === pending) await root.DGOffline.remove('lightingDraft', recordId);
+      if (!suspended && root.DGOffline.ready) return task();
     });
     return draftWrites;
+  }
+  function writeDraft(d) {
+    if (suspended || !d || d.readonly || !root.DGOffline.ready) return draftWrites.catch(() => {});
+    const { draftRevision: ignored, ...value } = copyDraft(d);
+    return queueDraft(async () => {
+      const base = draftBases.get(d) ?? null;
+      if (base) {
+        const { draftRevision: revision, ...previous } = base;
+        if (root.DGData.equal(value, previous)) return;
+      }
+      try {
+        const saved = await root.DGOffline.putIfCurrent('lightingDraft', d.recordId, value, base ? base.draftRevision ?? 0 : null, base);
+        draftBases.set(d, saved);
+      } catch (error) {
+        if (error.code === 'conflict') showDraftConflict(d);
+        throw error;
+      }
+    });
+  }
+  function clearDraft(owner = state.draft, completed = false) {
+    if (!owner) return draftWrites.catch(() => {});
+    return queueDraft(async () => {
+      const base = completed ? await root.DGOffline.get('lightingDraft', owner.recordId) :
+        draftBases.has(owner) ? draftBases.get(owner) : copyDraft(owner);
+      if (suspended) return;
+      if (!completed && base?.pending) throw new Error('전송 중인 기록은 저장 대기함에서 먼저 확인해 주세요.');
+      try {
+        if (base && (!completed || base.pending === owner.pending)) {
+          await root.DGOffline.removeIfCurrent('lightingDraft', owner.recordId, base.draftRevision ?? 0, base);
+        }
+      } catch (error) {
+        if (error.code !== 'conflict') throw error;
+        if (!completed) { showDraftConflict(owner); throw error; }
+      }
+      if (state.draft === owner) state.draft = null;
+    });
+  }
+  async function reloadDraft() {
+    const d = readForm(), form = Q('#lcForm');
+    if (!d || !form || !conflictingDrafts.has(d) || !canWrite()) return;
+    const read = () => root.DGOffline.get('lightingDraft', d.recordId);
+    const saved = await read(), current = () => !suspended && canWrite() && state.draft === d && Q('#lcForm') === form;
+    if (!current()) return;
+    if (saved) {
+      if (!await ask('현재 입력 대신 다른 탭에서 마지막으로 저장한 초안을 열까요?', { title: '최신 초안 열기', ok: '열기', cancel: '계속 보기' }) || !current()) return;
+      const latest = await read();
+      if (!current()) return;
+      if (!latest) return api.toast('다른 탭에서 초안을 지웠어요. 다시 확인해 주세요.');
+      state.draft = adoptDraft(latest);
+    } else {
+      if (!await ask('다른 탭에서 초안을 지웠어요. 현재 입력으로 다시 작성할까요?', { title: '현재 입력 유지', ok: '다시 작성', cancel: '계속 보기' }) || !current()) return;
+      await draftWrites.catch(() => {});
+      if (!current()) return;
+      adoptDraft(d, null);
+      await writeDraft(d);
+      conflictingDrafts.delete(d);
+      if (!current()) return;
+    }
+    renderEditor();
   }
   async function save(button, remove) {
     const d = readForm(); if (!d || d.readonly || d.pending || !canWrite()) return;
@@ -226,10 +297,10 @@
       if (!canWrite()) return;
       const result = await root.DGOffline.submit('lighting', job, { id: job.id, summary: ({ source: '추가 광원 · ', obstruction: '가림·가설물 · ' }[data.kind] || '현장 밝기 · ') + data.label });
       if (suspended) return;
-      if (result.state === 'synced') { await clearDraft(d); await load(); if (suspended) return; if (form?.isConnected && Q('#lcForm') === form) api.closeSheet(); api.toast('기록했어요. 밝기 검토를 다시 실행하면 반영돼요.'); }
+      if (result.state === 'synced') { await clearDraft(d, true); await load(); if (suspended) return; if (form?.isConnected && Q('#lcForm') === form) api.closeSheet(); api.toast('기록했어요. 밝기 검토를 다시 실행하면 반영돼요.'); }
       else { api.toast(result.error || '기기에 보관했어요. 전송 완료 후 검토에 반영돼요.'); if (state.draft === d) renderEditor(); }
-    } catch (error) { d.pending = null; await writeDraft(d).catch(() => {}); throw error; }
-    finally { if (button?.isConnected) button.disabled = !!d.pending; if (form?.isConnected && !d.pending) { form.querySelector('fieldset').disabled = false; form.querySelector('#lcSaveState').textContent = '입력 내용이 남아 있어요. 오류를 확인한 뒤 다시 저장해 주세요.'; } }
+    } catch (error) { d.pending = null; if (error.code !== 'conflict') await writeDraft(d).catch(() => {}); throw error; }
+    finally { if (button?.isConnected) button.disabled = !!d.pending; if (form?.isConnected && !d.pending) { form.querySelector('fieldset').disabled = false; form.querySelector('#lcSaveState').textContent = conflictingDrafts.has(d) ? draftConflictMessage : '입력 내용이 남아 있어요. 오류를 확인한 뒤 다시 저장해 주세요.'; } }
   }
   function pickMap() {
     if (!root.L) return api.toast('지도를 불러오지 못했어요. 좌표를 입력해 주세요.');
@@ -245,8 +316,15 @@
     if (action === 'edit') return openEditor(null, null, button.dataset.id);
     if (action === 'resume') return openEditor(null, null, null, true);
     if (action === 'reload') return load();
+    if (action === 'reload-draft') return reloadDraft();
     if (action === 'more') { state.show += 40; return notify(); }
-    if (action === 'discard') { if (!await ask('작성 중인 보완 기록을 버릴까요?', { ok: '버리기', danger: true })) return; api.closeSheet(); await clearDraft(); notify(); return; } // leave first so an editor opened right after takes this level's place
+    if (action === 'discard') {
+      const d = state.draft, form = Q('#lcForm');
+      if (!d || !await ask('작성 중인 보완 기록을 버릴까요?', { ok: '버리기', danger: true }) || state.draft !== d) return;
+      await clearDraft(d);
+      if (!state.draft && Q('#lcForm') === form) api.closeSheet();
+      notify(); return;
+    }
     if (action === 'remove') { if (await ask(state.draft.data.removed ? '이 기록을 다시 검토에 사용할까요?' : '이 기록을 검토에서 제외해요. 기록은 남아 있어요.', state.draft.data.removed ? { ok: '다시 사용' } : { title: '검토에서 제외할까요?', ok: '제외' })) return save(button, !state.draft.data.removed); return; }
     if (action === 'pick-map') return pickMap();
     if (action === 'gps') {
@@ -293,12 +371,16 @@
       if (suspended) return;
       const d = entry.value; if (!d?.pending) continue;
       const job = jobs.get(d.pending);
-      if (job?.kind === 'lighting' && job.state === 'synced') await clearDraft(d);
-      else if (!job) { d.pending = null; await writeDraft(d); }
+      if (job?.kind === 'lighting' && job.state === 'synced') await clearDraft(d, true);
+      else if (!job) {
+        adoptDraft(d); d.pending = null;
+        try { await writeDraft(d); } catch (error) { if (error.code !== 'conflict') throw error; }
+      }
     }
     const saved = await root.DGOffline.list('lightingDraft');
     if (suspended) return;
-    state.draft = saved.sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value || null; await load();
+    const latest = saved.sort((a, b) => b.updatedAt - a.updatedAt)[0]?.value;
+    state.draft = latest ? adoptDraft(latest) : null; await load();
     if (suspended) return;
     if (root.DGLightingWorkflows) await root.DGLightingWorkflows.ready();
     if (suspended) return;
@@ -323,13 +405,20 @@
       if (event.type === 'synced' && event.job.kind === 'lighting') {
         const owner = state.draft?.pending === event.job.id ? state.draft : { recordId: event.job.payload.recordId, pending: event.job.id };
         if (state.draft === owner && Q('#lcForm')?.dataset.recordId === owner.recordId) api.closeSheet();
-        clearDraft(owner).catch(() => {});
+        clearDraft(owner, true).catch(() => {});
         load();
       }
       if (event.type === 'discarded' && event.job?.kind === 'lighting' && event.job.payload) {
         const id = event.job.payload.recordId;
-        if (state.draft?.pending === event.job.id) { state.draft.pending = null; persistDraft(false).catch(() => {}); }
-        else { draftWrites = draftWrites.catch(() => {}).then(async () => { if (suspended) return; const d = await root.DGOffline.get('lightingDraft', id); if (!suspended && d?.pending === event.job.id) { d.pending = null; await root.DGOffline.put('lightingDraft', id, d); } }); }
+        queueDraft(async () => {
+          const d = await root.DGOffline.get('lightingDraft', id);
+          if (suspended || d?.pending !== event.job.id) return;
+          const saved = await root.DGOffline.putIfCurrent('lightingDraft', id, { ...d, pending: null }, d.draftRevision ?? 0, d);
+          if (state.draft?.pending === event.job.id) {
+            state.draft = adoptDraft(saved);
+            if (Q('#lcForm')?.dataset.recordId === id) renderEditor();
+          }
+        }).catch(error => { if (error.code !== 'conflict') api.toast(error.message); });
       }
     });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') persistDraft().catch(() => {}); });

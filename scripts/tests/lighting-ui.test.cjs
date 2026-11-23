@@ -24,8 +24,14 @@ async function fixture(options = {}) {
   vm.runInContext(source('app/data.js'), context);
   const db = context.DGData.createLocalDB({ storage: { getItem: () => saved, setItem: (_, value) => { saved = value; } }, indexedDB: null, locks: { request: (_, run) => run() } });
   vm.runInContext(source('app/offline.js'), context);
-  const offline = context.DGOffline, adapter = offline.memoryStore(), write = adapter.write;
-  adapter.write = async (key, value) => { if (control.failDraft && key.startsWith('lightingDraft:')) throw new Error('draft quota failure'); return write(key, value); };
+  const offline = context.DGOffline, adapter = options.adapter || offline.memoryStore();
+  if (!options.adapter) {
+    const compareAndSet = adapter.compareAndSet;
+    adapter.compareAndSet = async (key, ...args) => {
+      if (control.failDraft && key.startsWith('lightingDraft:')) throw new Error('draft quota failure');
+      return compareAndSet(key, ...args);
+    };
+  }
   await offline.configure({ namespace: 'lighting-ui/local', durable: true, networkRequired: false, adapter });
   if (options.beforeAttach) await options.beforeAttach(offline);
   vm.runInContext(source('app/lighting.js'), context);
@@ -56,12 +62,15 @@ async function fixture(options = {}) {
     readAll: options.readAll || (collection => db.readAll(collection)), esc: String, render() {}, toast: message => toasts.push(message),
     invalidateLighting: reason => invalidations.push(reason), navigate: mount, closeSheet: close };
   context.DGLighting.attach(api);
-  return { context, ui: context.DGLighting, offline, db, control, toasts, invalidations,
+  return { context, ui: context.DGLighting, offline, db, adapter, control, toasts, invalidations,
     field: key => fields[key], closed: () => closes,
     async open(label = '새 외부 광원') { await context.DGLighting.openEditor('source', { lat: 35.15, lng: 126.92 }); fields['#lcLabel'].value = label; return context.DGLighting.state.draft; },
-    async requestGps() {
-      const triggered = { dataset: { lc: 'gps' }, disabled: false };
+    click(action) {
+      const triggered = { dataset: { lc: action }, disabled: false };
       for (const fn of listeners.click || []) fn({ target: { closest: selector => selector === '[data-lc]' ? triggered : null } });
+    },
+    async requestGps() {
+      this.click('gps');
       await until(() => positionRequests.length > 0); return positionRequests.shift();
     },
     submit() { for (const fn of listeners.submit || []) fn({ target: fields['#lcForm'], preventDefault() {} }); },
@@ -124,10 +133,10 @@ test('finishing an older save preserves and does not close the newer active edit
 
 test('input from an old form cannot overwrite a new record while its draft is being persisted', async () => {
   const f = await fixture(), old = await f.open('이전 지점'), gate = deferred(), started = deferred();
-  const put = f.offline.put; let blocked = false;
-  f.offline.put = async (kind, id, value) => {
+  const put = f.offline.putIfCurrent; let blocked = false;
+  f.offline.putIfCurrent = async (kind, id, ...args) => {
     if (!blocked && kind === 'lightingDraft' && id !== old.recordId) { blocked = true; started.resolve(); await gate.promise; }
-    return put(kind, id, value);
+    return put(kind, id, ...args);
   };
   const opening = f.ui.openEditor('source', { lat: 35.17, lng: 126.95 }); await started.promise;
   const next = f.ui.state.draft; assert.notEqual(next.recordId, old.recordId);
@@ -247,4 +256,71 @@ test('locking the account stops late brightness records and queued draft writes'
   assert.equal(f.ui.state.draft, null);
   assert.equal(f.ui.state.records.length, 0);
   assert.equal((await f.offline.get('lightingDraft', draft.recordId)).data.label, '기존 계정에서 저장한 내용');
+});
+
+
+async function twoObservationTabs() {
+  const first = await fixture();
+  await first.ui.openObservation(patrolObservation());
+  const id = first.ui.state.draft.recordId;
+  const second = await fixture({ adapter: first.adapter });
+  await second.ui.openEditor(null, null, id, true);
+  return { first, second, id };
+}
+
+test('a stale observation tab preserves the shared draft and blocks submitting a conflicting edit', async () => {
+  const { first, second, id } = await twoObservationTabs();
+  first.input('#lcNote', '먼저 저장한 관찰 내용'); await first.ui.persistDraft();
+  second.input('#lcNote', '오래된 화면에서 쓴 관찰 내용');
+  await assert.rejects(second.ui.persistDraft(), { code: 'conflict' });
+  assert.equal(second.field('#lcNote').value, '오래된 화면에서 쓴 관찰 내용');
+  assert.equal((await first.offline.get('lightingDraft', id)).data.note, '먼저 저장한 관찰 내용');
+  second.submit();
+  await until(() => !second.field('fieldset').disabled);
+  assert.equal((await second.offline.jobs()).length, 0);
+  assert.equal((await first.offline.get('lightingDraft', id)).data.note, '먼저 저장한 관찰 내용');
+});
+
+test('discarding a stale observation draft cannot delete a newer tab’s draft or close the stale editor', async () => {
+  const { first, second, id } = await twoObservationTabs(), owner = second.ui.state.draft;
+  first.input('#lcNote', '보존해야 할 최신 초안'); await first.ui.persistDraft();
+  await assert.rejects(second.ui.clearDraft(owner), { code: 'conflict' });
+  assert.equal(second.ui.state.draft, owner);
+  assert.equal((await first.offline.get('lightingDraft', id)).data.note, '보존해야 할 최신 초안');
+});
+
+test('delivery cleanup compares the pending draft atomically and preserves another tab’s replacement', async () => {
+  const first = await fixture(), gate = deferred(); let command;
+  await first.ui.openObservation(patrolObservation());
+  const id = first.ui.state.draft.recordId;
+  first.offline.register('lighting', async value => { command = value; await gate.promise; });
+  first.submit(); await until(() => !!command);
+  const peer = await fixture({ adapter: first.adapter }), get = first.offline.get;
+  let replaced = false;
+  first.offline.get = async (kind, key) => {
+    const value = await get(kind, key);
+    if (!replaced && kind === 'lightingDraft' && value?.pending === command.id) {
+      replaced = true;
+      await peer.offline.putIfCurrent(kind, key, { ...value, pending: null, data: { ...value.data, note: '새 편집 초안' } }, value.draftRevision ?? 0, value);
+    }
+    return value;
+  };
+  gate.resolve();
+  await until(() => first.toasts.some(toast => toast.includes('기록했어요')));
+  assert.equal(replaced, true);
+  assert.equal((await get('lightingDraft', id))?.data.note, '새 편집 초안');
+});
+
+
+test('the latest observation draft can be opened explicitly after a conflict', async () => {
+  const { first, second } = await twoObservationTabs();
+  first.input('#lcNote', '다른 탭의 최신 관찰'); await first.ui.persistDraft();
+  second.input('#lcNote', '저장되지 않은 자체 관찰');
+  await assert.rejects(second.ui.persistDraft(), { code: 'conflict' });
+  assert.match(second.field('#lcSaveState').textContent, /화면에 남아/);
+  assert.equal(second.field('#lcNote').value, '저장되지 않은 자체 관찰');
+  second.click('reload-draft');
+  await until(() => second.field('#lcNote').value === '다른 탭의 최신 관찰');
+  second.input('#lcNote', '최신 초안 확인 후 수정'); await second.ui.persistDraft();
+  assert.equal((await second.offline.get('lightingDraft', second.ui.state.draft.recordId)).data.note, '최신 초안 확인 후 수정');
 });
