@@ -328,7 +328,7 @@ const PWA={prompt:null,canInstall:false,iosHint:false,waiting:null,standalone:ma
   const ios=DEV.ios&&!window.MSStream; // includes iPadOS, which reports itself as a Mac
   if(ios&&!PWA.standalone&&!recently&&!(window.claude&&window.claude.use))PWA.iosHint=true;
   if("serviceWorker" in navigator&&!(window.claude&&window.claude.use)&&(location.protocol==="https:"||location.hostname==="localhost")){
-    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareUpdate:()=>updateCheck(),onChange:()=>{try{render();verRefresh()}catch(e){}},prepareOcr:async()=>{try{await fetch("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js",{cache:"reload"})}catch(e){}await getOcr(null,"eng",{refresh:true});await getOcr(null,"kor+eng",{refresh:true})}});
+    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareUpdate:()=>updateCheck(),canReload:async()=>!(await updateItems()).lose.length,onChange:()=>{try{render();verRefresh()}catch(e){}},prepareOcr:async()=>{try{await fetch("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js",{cache:"reload"})}catch(e){}await getOcr(null,"eng",{refresh:true});await getOcr(null,"kor+eng",{refresh:true})}});
   }
   // shortcuts from the home-screen icon
   const go=new URLSearchParams(location.search).get("go");if(go)window.addEventListener("load",()=>setTimeout(()=>{if(go==="scan")openScanner("inspect");else if(go==="patrol"&&can("inspect")){if(DEV.field)openPatrol();else{openAdminSection("patrol");toast("야간 순찰은 GPS가 있는 휴대폰에서 시작해요. PC에서는 순찰 기록을 볼 수 있어요.")}}},900));

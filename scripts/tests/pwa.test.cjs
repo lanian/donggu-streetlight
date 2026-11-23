@@ -174,6 +174,42 @@ test('with the app pre-check, the update goes only on its yes, and an approved u
   flags.dirty = true; await listeners.controllerchange(); assert.equal(calls.reloads, 1);
 });
 
+test('newly unpreserved input during update activation defers reload until staff retry', async () => {
+  let safe = true;
+  const { c, calls, listeners } = await pwaContext(true, {
+    prepareUpdate: async () => safe,
+    canReload: async () => safe
+  });
+  assert.equal(await c.DongguPWA.applyUpdate(), true);
+  assert.equal(calls.posts, 1);
+  safe = false;
+  await listeners.controllerchange();
+  assert.equal(calls.reloads, 0, 'the old approval cannot discard input added while activation was pending');
+  assert.equal(c.DongguPWA.updateReady(), true);
+  safe = true;
+  assert.equal(await c.DongguPWA.applyUpdate(), true);
+  assert.equal(calls.posts, 1, 'the active service worker needs only a reload');
+  assert.equal(calls.reloads, 1, 'durable drafts can still count as pending');
+});
+
+test('a failed final storage check defers reload even when a new controller is already active', async () => {
+  let checkFails = true;
+  const { c, calls, listeners } = await pwaContext(false, {
+    prepareUpdate: async () => true,
+    canReload: async () => {
+      if (checkFails) throw Error('Could not read stored drafts');
+      return true;
+    }
+  });
+  await listeners.controllerchange();
+  assert.equal(await c.DongguPWA.applyUpdate(), false);
+  assert.equal(calls.reloads, 0);
+  assert.equal(c.DongguPWA.updateReady(), true);
+  checkFails = false;
+  assert.equal(await c.DongguPWA.applyUpdate(), true);
+  assert.equal(calls.reloads, 1);
+});
+
 test('the version shown in the app is the service-worker release, and its release note is on top', () => {
   const sw = /const VERSION = '([^']+)'/.exec(readSource(path.join(root, 'sw.js'), 'utf8'))[1];
   const html = readSource(path.join(root, 'index.html'), 'utf8');
