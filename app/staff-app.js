@@ -469,20 +469,52 @@ function sheetWide(key){if(DEV.field||!key)return false;if(/^(map|ptmap):/.test(
    lost; otherwise each item has a button that takes the person to it. */
 const DRAFT_KIND={assetDraft:"시설·회로 관리",preventiveDraft:"정기점검 계획",draft:"점검 작성",patrol:"순찰 기록",patrolTargets:"다음 순찰 대상",inventoryDraft:"자재 정보 수정",workEdit:"보수 작업 정보 수정",workDraft:"보수 작업 등록",workCompletion:"보수 작업 완료 보고",lightingDraft:"외부 광원·현장 밝기",lightingTaskDraft:"밝기 재확인 업무",lightingAreaDraft:"밝기 검토 제외 구역",formDraft:"입력 양식"};
 async function updateItems(){
-  // store whatever can be stored first, so it moves from "would be lost" to "kept"
-  try{await DGIntegration.persistDraft()}catch(e){}try{await DGIntegration.persistPatrol()}catch(e){}
-  try{const top=navTop();if(top&&fdKind(top.key))await fdPersist(top.key)}catch(e){}
-  try{if(window.DGOperations?.persistActive)await DGOperations.persistActive()}catch(e){}
-  const durable=!!(DGOffline.ready&&DGOffline.durable),lose=[],keep=[];
+  // Try to preserve the latest input before deciding whether it is safe to reload.
+  const lose=[],keep=[],uncertain=new Set(),namespace=DGOffline.namespace;
+  let inspectionFailed=false;
+  try{inspectionFailed=await DGIntegration.persistDraft()===false}catch(e){inspectionFailed=true}
+  try{await DGIntegration.persistPatrol()}catch(e){uncertain.add("patrol");lose.push({t:"최신 순찰 기록을 보관하지 못했어요",how:"순찰 화면에서 기록을 확인해 주세요.",go:"patrol"})}
+  const stores=[
+    [window.DGOperations,["workDraft","workCompletion","workEdit"]],
+    [window.DGAssetMaintenance,["assetDraft"]],
+    [window.DGPreventive,["preventiveDraft"]],
+    [window.DGLightingWorkflows,["lightingTaskDraft"]],
+    [window.DGLightingAreas,["lightingAreaDraft"]]
+  ];
+  for(const [module,kinds] of stores){
+    try{await module?.persistActive?.()}
+    catch(e){for(const kind of kinds)uncertain.add(kind);
+      lose.push({t:`${DRAFT_KIND[kinds[0]]} 초안을 보관하지 못했어요`,how:e?.message||"입력과 저장 공간을 확인해 주세요.",go:"close"})}
+  }
+  if($("#lcForm"))try{await window.DGLighting?.persistDraft?.()}catch(e){uncertain.add("lightingDraft");lose.push({t:"최신 밝기 기록을 보관하지 못했어요",how:"입력과 저장 공간을 확인해 주세요.",go:"close"})}
+  const top=navTop(),fk=top&&fdKind(top.key);
+  if(fk)await fdPersist(top.key);
+  const durable=!!(DGOffline.ready&&DGOffline.durable);
   if(pt.on)lose.push({t:`야간 순찰이 진행 중이에요 (표시 ${pt.marks.length}건, 어두운 지점 ${pt.spots.length}곳)`,how:"순찰을 끝내고 저장하면 적용할 수 있어요.",go:"patrol"});
   if(typeof photoEditor!=="undefined"&&photoEditor)lose.push({t:"사진을 편집하고 있어요",how:"편집을 마치거나 취소하세요.",go:"close"});
   if(typeof scan==="object"&&scan&&scan.busy)lose.push({t:"표찰을 읽는 중이에요",how:"읽기가 끝나면 적용할 수 있어요."});
-  const top=navTop(),fk=top&&fdKind(top.key);
-  if(fk&&fdDirty(top.key)&&!(durable&&FD.state[top.key]?.persisted))lose.push({t:`${FD_FORMS[fk].label||"입력 내용"}을 작성하고 있어요`,how:durable?"기기에 보관하지 못했어요. 저장하거나 입력을 비우세요.":"이 기기(공유 모드)에는 보관되지 않아요. 저장하거나 입력을 비우세요.",go:"close"});
-  if(draftDirty(draft)&&!durable){const l=byId(draft.lightId);lose.push({t:`${l?l.code:"시설"} 점검을 작성하고 있어요`,how:"공유 기기 모드라 보관되지 않아요. 점검 결과를 저장하세요.",go:"light:"+draft.lightId})}
+  if(fk&&fdDirty(top.key)&&!(durable&&FD.state[top.key]?.savedFingerprint===fdFingerprint(fdSnapshot(top.key)))){
+    uncertain.add("formDraft");lose.push({t:`${FD_FORMS[fk].label||"입력 내용"}을 작성하고 있어요`,how:durable?"기기에 보관하지 못했어요. 저장하거나 입력을 비우세요.":"이 기기(공유 모드)에는 보관되지 않아요. 저장하거나 입력을 비우세요.",go:"close"});
+  }
   if(["#rNum","#rDesc","#ibNum","#ibDesc"].some(q=>$(q)?.value?.trim()))lose.push({t:"신고 내용을 입력하고 있어요",how:"접수를 마치거나 입력을 지우세요.",go:"close"});
   let jobs=[],drafts=[];
-  if(DGOffline.ready){try{jobs=(await DGOffline.jobs()).filter(j=>j.state!=="synced");drafts=(await Promise.all(Object.keys(DRAFT_KIND).map(k=>DGOffline.list(k).then(rows=>rows.map(r=>({...r,kind:k})))))).flat()}catch(e){}}
+  if(DGOffline.ready){
+    try{
+      const [allJobs,...entries]=await Promise.all([DGOffline.jobs(),...Object.keys(DRAFT_KIND).map(k=>DGOffline.list(k).then(rows=>rows.map(r=>({...r,kind:k}))))]);
+      jobs=allJobs.filter(j=>j.state!=="synced");drafts=entries.flat();
+    }catch(e){lose.push({t:"기기에 보관한 기록을 확인하지 못했어요",how:"저장 대기함에서 기록을 확인하고 다시 시도해 주세요.",go:"outbox"})}
+  }
+  if(namespace!==DGOffline.namespace){
+    lose.push({t:"기록을 확인하는 동안 계정이 바뀌었어요",how:"현재 계정의 기록을 다시 확인해 주세요."});return {lose,keep,durable};
+  }
+  const unpreserved=new Set(DGIntegration.unpreservedInspectionDrafts(drafts.filter(row=>row.kind==="draft")));
+  if(inspectionFailed&&draft?.lightId)unpreserved.add(draft.lightId);
+  for(const id of unpreserved){
+    const l=byId(id);
+    lose.push({t:`${l?l.code:"시설"} 점검을 작성하고 있어요`,how:durable?"최신 점검 초안을 기기에 보관하지 못했어요. 화면의 입력과 저장을 확인해 주세요.":"공유 기기 모드라 보관되지 않아요. 점검 결과를 저장하세요.",go:"light:"+id});
+  }
+  if(inspectionFailed&&!unpreserved.size)lose.push({t:"점검 초안 저장을 확인하지 못했어요",how:"저장 대기함에서 기록을 확인해 주세요.",go:"outbox"});
+  drafts=drafts.filter(row=>!uncertain.has(row.kind)&&(row.kind!=="draft"||!unpreserved.has(row.id)));
   const nameOf=d=>{const l=d.kind==="draft"?byId(d.id):d.value&&d.value.lightId?byId(d.value.lightId):null;return `${DRAFT_KIND[d.kind]||"작성 중 기록"}${l?" · "+l.code:d.value&&d.value.title?" · "+d.value.title:""}`};
   if(jobs.length)(durable?keep:lose).push({t:`보내지 못한 기록 ${jobs.length}건`,how:durable?"이 기기에 보관돼 있고, 연결되면 자동으로 보내요.":"공유 기기 모드라 새로 열면 사라져요. 먼저 보내세요.",go:"outbox",list:jobs.slice(0,5).map(j=>j.summary)});
   if(drafts.length)(durable?keep:lose).push({t:`작성 중이던 기록 ${drafts.length}건`,how:durable?"이 기기에 보관돼 있어요. 업데이트 후 저장 대기함에서 이어 쓸 수 있어요.":"공유 기기 모드라 새로 열면 사라져요. 저장하거나 정리하세요.",go:"outbox",list:drafts.slice(0,5).map(nameOf)});

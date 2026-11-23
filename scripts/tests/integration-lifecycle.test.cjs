@@ -17,11 +17,11 @@ const patrol = sessionId => ({ sessionId, on: false, start: 1, end: 10, dong: '�
 const emptyPatrol = () => ({ ...patrol('empty'), track: [], passed: new Map(), marks: [] });
 
 function harness() {
-  const storage = new Map(), subscribers = [], listeners = new Map(), submitted = [], resets = [], opened = [], toasts = [];
-  let sequence = 0, putGate = null, submitGate = null, draftReadGate = null;
+  const storage = new Map(), subscribers = [], listeners = new Map(), submitted = [], resets = [], opened = [], toasts = [], intervals = new Set();
+  let sequence = 0, putGate = null, submitGate = null, draftReadGate = null, stopped = 0;
   const snapshotKey = d => JSON.stringify({ lightId: d.lightId, checks: d.checks, result: d.result, memo: d.memo, photos: d.photos });
   const context = {
-    console, setTimeout, clearTimeout, setInterval: () => 0, clearInterval() {}, confirm: () => true,
+    console, setTimeout, clearTimeout, setInterval: cb => { intervals.add(cb); return cb; }, clearInterval: cb => intervals.delete(cb), confirm: () => true,
     document: { querySelector: () => null, addEventListener(type, callback) { if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(callback); } },
     addEventListener() {}, navigator: { onLine: true }, CSS: { escape: String },
     S: { me: 'local', canWrite: true, lights: [], reports: [], asec: null }, FB: null, BASE: [], OV: {}, DRAFTS: {}, draft: null, pt: emptyPatrol(),
@@ -50,6 +50,19 @@ function harness() {
     list: async kind => { if (kind === 'draft' && draftReadGate) await draftReadGate.promise; return [...storage.values()].filter(entry => entry.kind === kind).map(copy); },
     get: async (kind, id) => copy(storage.get(kind + ':' + id)?.value || null),
     put: async (kind, id, value) => { const saved = copy(value), gate = putGate; putGate = null; if (gate) { gate.entered.resolve(); await gate.release.promise; } storage.set(kind + ':' + id, { kind, id, value: saved, updatedAt: 1 }); emit({ type: 'draft', kind, id }); },
+    putIfCurrent: async (kind, id, value, revision, expected) => {
+      const current = storage.get(kind + ':' + id)?.value || null;
+      assert.equal(current ? current.draftRevision || 0 : null, revision);
+      assert.deepEqual(current, expected);
+      const saved = { ...copy(value), draftRevision: (revision || 0) + 1 };
+      await context.DGOffline.put(kind, id, saved); return copy(saved);
+    },
+    removeIfCurrent: async (kind, id, revision, expected) => {
+      const current = storage.get(kind + ':' + id)?.value || null;
+      if (!current) return;
+      if ((current.draftRevision || 0) !== revision || JSON.stringify(current) !== JSON.stringify(expected)) throw Object.assign(new Error('다른 탭에서 변경했어요.'), { code: 'conflict' });
+      await context.DGOffline.remove(kind, id);
+    },
     remove: async (kind, id) => { storage.delete(kind + ':' + id); emit({ type: 'removed', kind, id }); },
     submit: async (kind, payload) => { submitted.push({ kind, payload: copy(payload) }); const gate = submitGate; submitGate = null; if (gate) { gate.entered.resolve(); await gate.release.promise; } return { state: 'synced' }; },
     discard: async id => { const job = context.DGOperations.state.jobs.find(job => job.id === id); emit({ type: 'discarded', id, job: copy(job) }); }
@@ -62,8 +75,9 @@ function harness() {
   vm.runInContext(html.slice(finish, finishEnd), context, { filename: 'index.html:finishPatrolJob' });
   for (const [file, source] of sources) vm.runInContext(source, context, { filename: file });
   context.initializeOperations();
+  context.DGOperations.subscribeUpdates = () => () => { stopped++; };
   return {
-    context, storage, submitted, resets, opened, toasts, emit,
+    context, storage, submitted, resets, opened, toasts, emit, intervals, get stopped() { return stopped; },
     putDraft(kind, id, value) { storage.set(kind + ':' + id, { kind, id, value: copy(value), updatedAt: 1 }); },
     holdPut() { const gate = { entered: deferred(), release: deferred() }; putGate = gate; return gate; },
     holdSubmit() { const gate = { entered: deferred(), release: deferred() }; submitGate = gate; return gate; },
@@ -123,6 +137,58 @@ test('discarding an inspection draft waits out older queued autosaves', async ()
   h.click('discard-draft', { kind: 'draft', id: 'L1' }); await turn(); gate.release.resolve(); await first; await second;
   await until(() => !h.storage.has('draft:L1') && !c.DRAFTS.L1 && c.draft === null);
   assert.equal(await c.DGIntegration.hasUnsaved(), false);
+});
+
+test('an older outbox row cannot discard a newer inspection draft', async () => {
+  const h = harness(), c = h.context;
+  const old = { lightId: 'L1', checks: {}, memo: '대기함에 보이는 이전 메모', draftRevision: 2 };
+  h.putDraft('draft', 'L1', old);
+  await c.DGOperations.refreshQueue();
+  h.putDraft('draft', 'L1', { ...old, memo: '다른 탭의 최신 메모', draftRevision: 3 });
+  h.click('discard-draft', { kind: 'draft', id: 'L1' });
+  await turn(); await turn();
+  assert.equal(h.storage.get('draft:L1')?.value.memo, '다른 탭의 최신 메모');
+});
+
+test('suspending integration invalidates a pending boot before draft recovery or timer creation', async () => {
+  const h = harness(), c = h.context;
+  h.putDraft('draft', 'L1', { lightId: 'L1', memo: '이전 사용자의 초안' });
+  const gate = h.holdRecovery(), booting = c.DGIntegration.ready();
+  await turn();
+  c.DGIntegration.suspend?.();
+  gate.resolve();
+  await booting;
+  assert.equal(await c.DGIntegration.whenReady(), false);
+  assert.deepEqual(c.DRAFTS, {});
+  assert.equal(h.intervals.size, 0);
+});
+
+test('suspending integration stops its live timer and operations subscription', async () => {
+  const h = harness(), c = h.context; await c.DGIntegration.ready();
+  assert.equal(h.intervals.size, 1);
+  c.DGIntegration.suspend?.();
+  assert.equal(h.intervals.size, 0);
+  assert.equal(h.stopped, 1);
+});
+
+test('patrol submission does not follow a delayed draft write after access is revoked', async () => {
+  const h = harness(), c = h.context; c.pt = patrol('old-session');
+  const gate = h.holdPut(), saving = c.DGIntegration.savePatrol(); await gate.entered.promise;
+  c.S.me = null;
+  c.DGIntegration.suspend?.();
+  gate.release.resolve(); await saving;
+  assert.deepEqual(h.submitted, []);
+});
+
+test('a pending patrol restore cannot reopen a previous account route', async () => {
+  const h = harness(), c = h.context;
+  const gate = deferred(), entered = deferred();
+  c.DGOffline.get = async () => { entered.resolve(); await gate.promise; return { ...patrol('stored-session'), passed: [['L1', 1]] }; };
+  const restoring = c.DGIntegration.restorePatrol(); await entered.promise;
+  c.S.me = null; c.DGIntegration.suspend();
+  gate.resolve(); await restoring;
+  assert.equal(c.pt.sessionId, 'empty');
+  assert.ok(!h.toasts.some(message => message.includes('이전 순찰을 불러왔어요')));
 });
 
 test('a photo added while an inspection is saving remains in the newer draft', async () => {
