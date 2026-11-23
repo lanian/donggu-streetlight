@@ -66,13 +66,24 @@
     finally { clearTimeout(timer); state.preparing = false; render(); }
   }
   async function pending() { try { return !!(await options.hasPendingWork?.()); } catch (_) { return true; } }
+  async function reloadUpdate() {
+    const approved = state.approved;
+    state.approved = false;
+    let safe;
+    try { safe = options.canReload ? await options.canReload() : approved || !(await pending()); }
+    catch (_) { safe = false; }
+    if (safe) { location.reload(); return true; }
+    state.message = '새 버전이 준비됐어요. 화면 위의 「새 버전 적용」을 다시 누르면 남길 내용을 확인한 뒤 적용해요.';
+    render(); options.onChange?.();
+    return false;
+  }
   async function applyUpdate() {
     if (!state.waiting && !state.reloadReady) return false;
     // The app explains exactly what is kept and what must be finished first, and says yes only when nothing would be lost
     // (records already kept on this device survive the update). Without that hook, any pending work blocks the update.
     if (options.prepareUpdate) { if (!(await options.prepareUpdate())) return false; state.approved = true; }
     else if (await pending()) { options.notice?.('작성 중인 기록과 전송 대기를 먼저 저장·동기화하고, 열린 화면을 닫은 뒤 새 버전을 적용하세요.'); return false; }
-    if (state.reloadReady) { location.reload(); return true; }
+    if (state.reloadReady) return reloadUpdate();
     state.requested = true; state.waiting.postMessage({ type: 'activate-update' });
     state.message = '새 버전을 적용하는 중…'; render(); return true;
   }
@@ -97,8 +108,8 @@
       state.reloadReady = controlled; controlled = true; state.waiting = null;
       if (state.requested) {
         state.requested = false;
-        if (state.approved || !(await pending())) { location.reload(); return; }
-        state.message = '새 버전이 준비됐어요. 화면 위의 「새 버전 적용」을 다시 누르면 남길 내용을 확인한 뒤 적용해요.';
+        await reloadUpdate();
+        return;
       }
       else if (state.reloadReady) state.message = '다른 창에서 새 버전을 적용했어요. 이 창도 「새 버전 적용」을 누르면 남길 내용을 확인한 뒤 새로 열려요.';
       render(); options.onChange?.();

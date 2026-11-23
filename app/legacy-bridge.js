@@ -19,8 +19,8 @@ function initializeOperations() {
     // route = { key, reopen, back?, replace? }: how to rebuild this screen when the user comes back to it
     navigate: (html, route) => { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; S.asec = null; if (route) navRoute(route.key, route.reopen, route); openSheet(html); },
     navGen: () => navGen(), navAlive: g => navAlive(g), navDepth: () => navDepth(),
-    closeSheet: () => closeSheet(), openLight: id => openLight(id), openMap: (...args) => { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; S.asec = null; openMap(...args); },
-    removeDraft: async id => { delete DRAFTS[id]; if (draft && draft.lightId === id) { draft = null; closeSheet(); } await DGIntegration.flushDraftWrites().catch(() => {}); await DGOffline.remove('draft', id); },
+    closeSheet: mode => closeSheet(mode), openLight: id => openLight(id), openMap: (...args) => { DGIntegration.persistDraft().catch(e => toast(e.message)); stashDraft(); draft = null; S.asec = null; openMap(...args); },
+    removeDraft: (id, displayed) => DGIntegration.discardInspectionDraft(id, displayed),
     removePatrolDraft: sessionId => { if (pt.sessionId === sessionId) { ptReset(); if ($('#ptSumm')) closeSheet(); } },
     restorePatrol: () => DGIntegration.restorePatrol(),
     print: html => {

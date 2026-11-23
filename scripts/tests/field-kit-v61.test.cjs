@@ -98,3 +98,37 @@ test('discard keeps prepared records when the app confirmation dialog is unavail
   assert.equal(native, 0); assert.deepEqual(await f.offline.get('fieldKit', 'current'), saved);
   assert.ok(f.toasts.some(value => /확인 창/.test(value)));
 });
+
+test('refresh locks the old selection until the new list is ready and leaves both actions usable', async () => {
+  const f = fixture();
+  await f.kit.loadWorks();
+  const entered = deferred(), release = deferred(), readAll = f.api.readAll;
+  let refreshReads = 0;
+  f.api.readAll = async (collection, options) => {
+    if (collection === 'workOrders') {
+      refreshReads++;
+      if (refreshReads === 1) {
+        entered.resolve();
+        await release.promise;
+      }
+    }
+    return readAll(collection, options);
+  };
+  const refresh = f.kit.loadWorks();
+  await entered.promise;
+  try {
+    assert.equal(await f.kit.prepare(['w']), false, 'Refresh must keep the earlier selection from starting a download.');
+    assert.equal(await f.kit.loadWorks(), false, 'A second refresh cannot replace the current request.');
+    assert.equal(refreshReads, 1);
+    assert.match(f.kit.view(), /<select[^>]+id="fieldKitScope" disabled/);
+    assert.match(f.kit.view(), /<fieldset[^>]+ disabled>/);
+    assert.equal(f.kit.state.selected.has('w'), true);
+  } finally {
+    release.resolve();
+    await refresh;
+  }
+  assert.equal(f.kit.state.loading, false);
+  assert.equal(f.kit.state.downloading, false);
+  assert.doesNotMatch(f.kit.view(), /<fieldset[^>]+ disabled>/);
+  assert.equal(await f.kit.prepare(['w']), true, 'Released refresh lock allows a fresh download.');
+});

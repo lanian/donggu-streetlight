@@ -294,9 +294,10 @@ test('report, shared summary and CSV use the same district and date selection', 
     inDong: (light, dong) => dong === '전체' || light.dong === dong,
     adongOf: light => light?.dong || '', adongOrder: () => 0,
     byId: id => lights.find(light => light.id === id),
-    dongLabel: value => value, fmtD: value => String(value),
+    dongLabel: value => value, DGOperationsCore: require('../../app/operations-core.js'),
     dl: { save: async file => { csv = file.data; } },
   });
+  load(c, 'const REPORT_KST_OFFSET=', 'function repRange(');
   load(c, 'function reportData(){', 'function reportSection(forPrint=false){');
   load(c, 'function repSummaryText(){', '/* per-light dossier:');
   assert.equal(c.reportData().ins.length, 1);

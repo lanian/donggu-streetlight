@@ -17,10 +17,10 @@ const secondNormal = { ...firstNormal, id: 'i-normal-2', date: at('13:00') };
 const fault = inspection('i-fault', 'elsewhere', 'PERIOD-FAULT', '서석동', '고장');
 const strip = html => html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 
-async function fixture({ inspections = [firstNormal, secondNormal, fault], patrols = [], dong = '전체', dbMode = 'local', metadata = { inspections: { source: 'local', complete: true }, patrols: { source: 'local', complete: true } } } = {}) {
-  const allLights = clone([normal, elsewhere, retired]), rows = clone(inspections), sessions = clone(patrols), downloads = [];
+async function fixture({ clock = Date, period = { period: 'custom', from: '2026-11-01', to: '2026-11-03' }, inspections = [firstNormal, secondNormal, fault], patrols = [], dong = '전체', dbMode = 'local', metadata = { inspections: { source: 'local', complete: true }, patrols: { source: 'local', complete: true } } } = {}) {
+  const allLights = clone([normal, elsewhere, retired]), rows = clone(inspections), sessions = clone(patrols), downloads = [], queries = [];
   const context = vm.createContext({
-    Date, Promise, Set, Map, console, db: { mode: dbMode }, FB: null,
+    Date: clock, Promise, Set, Map, console, DGOperationsCore: require('../../app/operations-core.js'), db: { mode: dbMode }, FB: null,
     S: { lights: allLights.filter(light => !light.removed), allLights, insp: [], patrols: [], names: { inspector: '점검 담당자', local: '기기 담당자' }, me: 'local' },
     byId: id => allLights.find(light => light.id === id),
     esc: value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]),
@@ -30,6 +30,7 @@ async function fixture({ inspections = [firstNormal, secondNormal, fault], patro
     setTimeout: () => { throw new Error('The loaded report must not schedule another background fetch.'); },
     render() {}, resolveNames() {}, toast() {},
     listAllRecords: async (collection, options = {}) => {
+      queries.push({ collection, where: clone(options.where || []) });
       options.onMetadata?.(clone(metadata[collection] || { source: 'unknown', complete: false }));
       if (collection === 'inspections') return clone(rows);
       if (collection === 'patrols') return clone(sessions);
@@ -44,15 +45,15 @@ async function fixture({ inspections = [firstNormal, secondNormal, fault], patro
   const reportStart = source.indexOf('const REP={'), reportEnd = source.indexOf('/* photo appendix:', reportStart);
   assert.ok(reportStart >= 0 && reportEnd > reportStart);
   vm.runInContext(source.slice(reportStart, reportEnd), context);
-  const exportStart = source.indexOf('async function exportReportCSV()'), exportEnd = source.indexOf('/* per-light dossier:', exportStart);
+  const exportStart = source.indexOf('function repSummaryText()'), exportEnd = source.indexOf('/* per-light dossier:', exportStart);
   assert.ok(exportStart >= 0 && exportEnd > exportStart);
   vm.runInContext(source.slice(exportStart, exportEnd), context);
   const rep = vm.runInContext('REP', context);
-  Object.assign(rep, { period: 'custom', from: '2026-11-01', to: '2026-11-03', dong, photos: false, inlinePh: false });
+  Object.assign(rep, { ...period, dong, photos: false, inlinePh: false });
   await context.repLoad();
   assert.ok(rep.data, 'The real loader establishes a complete period snapshot before rendering.');
   const original = JSON.stringify({ lights: allLights, inspections: rows, patrols: sessions });
-  return { context, rep, downloads, data: () => clone(context.reportData()), html: () => context.reportSection(true), original, unchanged: () => JSON.stringify({ lights: allLights, inspections: rows, patrols: sessions }) === original };
+  return { context, rep, downloads, queries, data: () => clone(context.reportData()), html: () => context.reportSection(true), original, unchanged: () => JSON.stringify({ lights: allLights, inspections: rows, patrols: sessions }) === original };
 }
 
 test('period district rows include retired and unlocated historical inspections without losing the eight-column CSV contract', async () => {
@@ -119,5 +120,41 @@ test('report provenance uses both query metadata and never claims artifact or un
     assert.match(sourceText, /전체 여부 미확인/, 'Either incomplete query makes the combined period report completeness unconfirmed.');
     assert.equal(f.data().ins.length, 3, 'Provenance wording must not remove or rewrite returned inspection records.');
     assert.equal(f.unchanged(), true);
+  }
+});
+
+test('period reports anchor month, trend and output dates in Korean time on Seoul and UTC devices', async () => {
+  const originalTimezone = process.env.TZ;
+  const now = Date.parse('2026-12-01T01:00:00+09:00');
+  class Clock extends Date {
+    constructor(...args) { super(...(args.length ? args : [now])); }
+    static now() { return now; }
+  }
+  const november = { ...firstNormal, date: Date.parse('2026-11-30T23:59:59+09:00') };
+  const december = { ...secondNormal, date: Date.parse('2026-12-01T00:00:00+09:00') };
+  try {
+    for (const tz of ['Asia/Seoul', 'UTC']) {
+      process.env.TZ = tz;
+      const thisMonth = await fixture({ clock: Clock, period: { period: 'month' }, inspections: [november, december] });
+      assert.deepEqual(thisMonth.data().ins.map(row => row.id), [december.id], tz);
+      assert.equal(thisMonth.data().a, december.date, tz);
+      assert.equal(thisMonth.context.repMonthKey(december.date), '2026.12', tz);
+      assert.equal(thisMonth.queries.find(row => row.collection === 'inspections').where[0][2], Date.parse('2026-07-01T00:00:00+09:00'), tz);
+
+      const lastMonth = await fixture({ clock: Clock, period: { period: 'last' }, inspections: [november, december] });
+      assert.deepEqual(lastMonth.data().ins.map(row => row.id), [november.id], tz);
+      assert.equal(lastMonth.data().b, december.date - 1, tz);
+      assert.match(lastMonth.html(), /기간 2026\.11\.01 ~ 2026\.11\.30/, tz);
+
+      const day = await fixture({ clock: Clock, period: { period: 'custom', from: '2026-12-01', to: '2026-12-01' }, inspections: [november, december] });
+      assert.deepEqual(day.data().ins.map(row => row.id), [december.id], tz);
+      assert.match(day.html(), /기간 2026\.12\.01 ~ 2026\.12\.01/, tz);
+      assert.match(day.context.repSummaryText(), /2026\.12\.01~2026\.12\.01/, tz);
+      await day.context.exportReportCSV();
+      assert.equal(day.downloads[0].filename, '동구가로등_보고서_20261201-20261201.csv', tz);
+    }
+  } finally {
+    if (originalTimezone == null) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
   }
 });

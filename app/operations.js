@@ -9,7 +9,7 @@
   const draftVersions = new WeakMap(), editorTokens = new WeakMap(), draftOwners = new WeakMap(), processSettlements = new Map();
   let subscriptions = null, watchedWorkKey = '', watchedReportId = '';
   let editConflict = null;
-  let drivingSession = null, drivingToken = 0;
+  let drivingSession = null, drivingToken = 0, routeRequest = 0;
   const clone = value => JSON.parse(JSON.stringify(value));
   const state = { orders: [], inventory: [], reports: [], settings: { inspectionDays: 90, privacyDays: 90 }, loaded: false, error: '', at: 0, filter: 'open', mine: false, deadline: 'all', urgent: false, workDong: '전체', show: 40, cursor: null, hasMore: false, workQueryKey: '', queryAt: Date.now(), workMeta: null, draft: null, completion: null, edit: null, currentOrder: null, reportVersions: {}, lightVersion: null, plan: null, planRevision: null, dueFilter: 'needed', dueDong: '전체', dueShow: 60, dueSort: 'priority', pos: null, planPick: new Set(), workPick: new Map(), bulk: null, jobs: [], drafts: [] };
   const uuid = prefix => prefix + '-' + (root.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
@@ -697,11 +697,23 @@
   }
   const fmtM = m => !Number.isFinite(m) ? '' : m < 1000 ? Math.round(m) + 'm' : (m / 1000).toFixed(1) + 'km';
   /* One position fix for sorting and "가까운 N곳"; the list is not re-sorted while the person is picking. */
-  function locate() {
+  const ROUTE_ORIGIN_MAX_M = 100, ROUTE_ORIGIN_MAX_AGE = 300000;
+  function locate(accept = () => true) {
+    const owner = captureOwner(), gen = api.navGen?.();
     return new Promise(resolve => {
-      if (!root.navigator?.geolocation) { api.toast('이 기기에서는 위치를 쓸 수 없어요.'); return resolve(null); }
-      root.navigator.geolocation.getCurrentPosition(p => { state.pos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, at: Date.now() }; resolve(state.pos); },
-        () => { api.toast('내 위치를 가져오지 못했어요. 위치 권한을 확인해 주세요.'); resolve(null); }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+      const alive = () => ownsContext(owner) && (gen == null || api.navAlive(gen)) && accept();
+      const fail = message => { if (alive()) api.toast(message); resolve(null); };
+      if (!root.navigator?.geolocation) return fail('이 기기에서는 위치를 쓸 수 없어요.');
+      try {
+        root.navigator.geolocation.getCurrentPosition(position => {
+          if (!alive()) return resolve(null);
+          const fix = root.DongguField.gpsFix(position, ROUTE_ORIGIN_MAX_M);
+          if (!fix) return fail('100m 이내의 최신 위치를 확인하지 못했어요. 실외에서 다시 확인해 주세요.');
+          const previous = drivingOrigin({ origin: state.pos });
+          if (!previous || previous.at <= fix.at) state.pos = fix;
+          resolve(state.pos);
+        }, () => fail('내 위치를 가져오지 못했어요. 위치 권한을 확인해 주세요.'), { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+      } catch (_) { fail('내 위치를 가져오지 못했어요. 위치 권한을 확인해 주세요.'); }
     });
   }
   // a stop counts as done when it was ticked, or when the light was inspected after the plan was made
@@ -760,27 +772,50 @@
   }
   /* 다음 N곳 경로: several stops as waypoints in one map app route, starting from the device's current position */
   async function routeAhead(plan) {
-    const field = !root.DEV || root.DEV.field;
-    if (field && !state.pos) await locate();
-    Object.assign(plan, C.reconcilePlan(plan, api.byId));
-    const done = plan.stops.map(s => stopDone(plan, s)), ahead = plan.stops.filter((s, i) => !done[i]).slice(0, ROUTE_STOPS);
+    if (!plan) return;
+    const field = !root.DEV || root.DEV.field, owner = captureOwner(), gen = api.navGen?.(), request = ++routeRequest;
+    const current = () => request === routeRequest && state.plan === plan && ownsContext(owner) &&
+      api.state().tab === 'admin' && api.state().asec === 'due' && !!Q('#sheet.open') && (gen == null || api.navAlive(gen));
+    const snapshot = () => {
+      const reconciled = C.reconcilePlan(plan, api.byId), ahead = reconciled.stops.filter(stop => !stopDone(reconciled, stop)).slice(0, ROUTE_STOPS);
+      return { reconciled, ahead, key: JSON.stringify(ahead.map(({ id, code, lat, lng }) => ({ id, code, lat, lng }))) };
+    };
+    if (!current()) return;
+    const { ahead, key } = snapshot();
     if (!ahead.length) return api.toast('남은 방문지가 없어요.');
+    let start = field ? drivingOrigin({ origin: state.pos }) : null;
+    if (field && !start) {
+      start = await locate(() => current() && snapshot().key === key);
+      if (!current()) return;
+      if (snapshot().key !== key) { notify(); return api.toast('방문 계획이나 시설 위치가 바뀌었어요. 최신 경로를 확인하고 다시 열어 주세요.'); }
+    }
     const dest = ahead[ahead.length - 1], via = ahead.slice(0, -1), name = s => encodeURIComponent(s.code || '방문지'), ll = s => s.lat + ',' + s.lng;
     const naver = mode => 'nmap://route/' + mode + '?dlat=' + dest.lat + '&dlng=' + dest.lng + '&dname=' + name(dest) + via.map((s, i) => '&v' + (i + 1) + 'lat=' + s.lat + '&v' + (i + 1) + 'lng=' + s.lng + '&v' + (i + 1) + 'name=' + name(s)).join('') + '&appname=lanian.github.io';
-    const google = mode => 'https://www.google.com/maps/dir/?api=1&destination=' + ll(dest) + (via.length ? '&waypoints=' + encodeURIComponent(via.map(ll).join('|')) : '') + '&travelmode=' + mode;
-    // 카카오맵 app route: sp (start) is required and takes coordinates only, waypoints vp, vp2 … vp5 (none for public transit).
-    // The start is my position when known; otherwise the first stop becomes the start and the rest stay waypoints.
-    const start = state.pos || null, kVia = start ? via : via.slice(1), kStart = start || ahead[0];
+    // Mobile browsers accept at most three Google Maps waypoints.
+    const mobileGoogle = field || ['phone', 'tablet'].includes(root.DEV?.auto);
+    const googleStops = mobileGoogle ? ahead.slice(0, 4) : ahead, gDest = googleStops.at(-1), gVia = googleStops.slice(0, -1);
+    const google = mode => 'https://www.google.com/maps/dir/?api=1&destination=' + ll(gDest) + (gVia.length ? '&waypoints=' + encodeURIComponent(gVia.map(ll).join('|')) : '') + '&travelmode=' + mode;
+    const googleHint = googleStops.length < ahead.length ? '휴대폰에서 처음 ' + googleStops.length + '곳까지 안내' : '';
+    // Kakao requires an explicit start. When GPS is unavailable the first visit is the start, as shown in the chooser.
+    const kVia = start ? via : via.slice(1), kStart = start || ahead[0];
     const kakao = mode => 'kakaomap://route?sp=' + ll(kStart) + kVia.map((s, i) => '&vp' + (i ? i + 1 : '') + '=' + ll(s)).join('') + '&ep=' + ll(dest) + '&by=' + mode;
-    const kakaoHint = (start ? '내 위치에서 출발' : ahead.length > 1 ? '위치를 몰라 ' + (ahead[0].code || '첫 방문지') + '에서 출발' : '') + ' · 경유지 ' + kVia.length + '곳';
-    // phone/tablet: navigation apps (app links only work where the app is installed); PC: web maps only
-    const options = field ? [{ value: naver('car'), label: '네이버 지도 · 차량', hint: '앱이 설치된 경우 · 경유지 ' + via.length + '곳' }, ...(ahead.length > 1 ? [{ value: kakao('car'), label: '카카오맵 · 차량', hint: '앱이 설치된 경우 · ' + kakaoHint }, { value: kakao('foot'), label: '카카오맵 · 도보', hint: '앱이 설치된 경우 · ' + kakaoHint }] : []), { value: google('driving'), label: '구글 지도 · 차량' }, { value: google('walking'), label: '구글 지도 · 도보' }]
-      : [{ value: google('driving'), label: '구글 지도 (웹) · 차량', hint: '경유지 ' + via.length + '곳 · 네이버·카카오 경유지 경로는 휴대폰 앱에서 열려요' }, { value: google('walking'), label: '구글 지도 (웹) · 도보' }];
+    const kakaoHint = (start ? '내 위치에서 출발' : '위치를 확인하지 못해 ' + (ahead[0].code || '첫 방문지') + '에서 출발') + ' · 경유지 ' + kVia.length + '곳';
+    const options = field ? [{ value: naver('car'), label: '네이버 지도 · 차량', hint: '앱이 설치된 경우 · 경유지 ' + via.length + '곳' }, ...(ahead.length > 1 ? [{ value: kakao('car'), label: '카카오맵 · 차량', hint: '앱이 설치된 경우 · ' + kakaoHint }, { value: kakao('foot'), label: '카카오맵 · 도보', hint: '앱이 설치된 경우 · ' + kakaoHint }] : []), { value: google('driving'), label: '구글 지도 · 차량', hint: googleHint }, { value: google('walking'), label: '구글 지도 · 도보', hint: googleHint }]
+      : [{ value: google('driving'), label: '구글 지도 (웹) · 차량', hint: googleHint || '경유지 ' + gVia.length + '곳 · 네이버·카카오 경유지 경로는 휴대폰 앱에서 열려요' }, { value: google('walking'), label: '구글 지도 (웹) · 도보', hint: googleHint }];
     const url = root.DGDialog ? await root.DGDialog.choose(ahead.map(s => s.code).join(' → '), { title: '다음 ' + ahead.length + '곳을 한 경로로 열까요?', options }) : options.find(o => o.value.startsWith('https:')).value;
-    if (url && ahead.some(stop => { const current = api.byId(stop.id); return !current || current.removed || current.posApprox || current.lat !== stop.lat || current.lng !== stop.lng; })) {
-      Object.assign(plan, C.reconcilePlan(plan, api.byId)); await savePlan(plan); notify(); return api.toast('시설 위치가 바뀌었어요. 좌표 확인 후 경로를 다시 열어 주세요.');
+    if (!url || !current()) return;
+    const latest = snapshot();
+    if (latest.key !== key) {
+      if (ahead.some(stop => { const live = api.byId(stop.id); return !live || live.removed || live.posApprox || live.lat !== stop.lat || live.lng !== stop.lng; })) {
+        Object.assign(plan, latest.reconciled); await savePlan(plan);
+      }
+      if (current()) { notify(); api.toast('방문 계획이나 시설 위치가 바뀌었어요. 최신 경로를 확인하고 다시 열어 주세요.'); }
+      return;
     }
-    if (url) root.open(url, '_blank', 'noopener');
+    if (url.startsWith('kakaomap:') && start && (state.pos !== start || !drivingOrigin({ origin: start }))) {
+      return api.toast('출발 위치가 바뀌었거나 확인한 지 5분이 지났어요. 출발 위치를 다시 확인해 주세요.');
+    }
+    root.open(url, '_blank', 'noopener,noreferrer');
   }
   // Vehicle routes are a view of the plan: opening a map never saves or completes visits.
   function drivingVisible(s) {
@@ -790,7 +825,7 @@
   function drivingOrigin(s) {
     const p = s.origin;
     return p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180 &&
-      Number.isFinite(p.acc) && p.acc >= 0 && p.acc <= 100 && Date.now() >= p.at && Date.now() - p.at <= 300000 ? p : null;
+      Number.isFinite(p.acc) && p.acc >= 0 && p.acc <= ROUTE_ORIGIN_MAX_M && Date.now() >= p.at && Date.now() - p.at <= ROUTE_ORIGIN_MAX_AGE ? p : null;
   }
   function drivingSnapshot(s) {
     const plan = C.reconcilePlan(s.plan, api.byId), origin = drivingOrigin(s);
@@ -825,8 +860,8 @@
       if (s.request !== request) return;
       s.locating = false;
       if (!drivingVisible(s) || drivingSnapshot(s).planKey !== model.planKey) { if (drivingVisible(s)) { s.status = '방문 계획이 바뀌어 출발 위치를 적용하지 않았어요. 내 위치를 다시 확인해 주세요.'; notify(); } return; }
-      const p = position?.coords;
-      s.origin = p ? { lat: p.latitude, lng: p.longitude, acc: p.accuracy, at: Date.now(), code: '내 위치' } : null;
+      const fix = root.DongguField.gpsFix(position, ROUTE_ORIGIN_MAX_M);
+      s.origin = fix ? { ...fix, code: '내 위치' } : null;
       s.status = drivingOrigin(s) ? '확인한 내 위치에서 출발해요 (±' + Math.round(s.origin.acc) + 'm). 카카오·네이버 차량 경로를 열 수 있어요.' : message || '위치가 정확하지 않아요. 다시 확인하거나 네이버 지도앱의 현재 위치를 사용해 주세요.';
       if (!drivingOrigin(s)) s.origin = null;
       notify();
@@ -991,22 +1026,32 @@
       if (job && job.kind === 'work' && job.payload) await releasePending(job);
       return refreshQueue();
     }
-    if (action === 'recover-draft') { if (button.dataset.kind === 'assetDraft') return root.DGAssetMaintenance.resumeDraft(button.dataset.id); if (button.dataset.kind === 'preventiveDraft') return root.DGPreventive.resumeDraft(button.dataset.id); if (button.dataset.kind === 'inventoryDraft') return root.DGManagement.resumeInventoryDraft(button.dataset.id); if (button.dataset.kind === 'lightingAreaDraft') return root.DGLightingAreas.openEditor(null, button.dataset.id, true); if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return api.openLight(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workEdit') { const saved = await root.DGOffline.get('workEdit', button.dataset.id); return saved ? openEdit(saved.workId, button.dataset.id) : refreshQueue(); } if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
+    if (action === 'recover-draft') { if (button.dataset.kind === 'assetDraft') return root.DGAssetMaintenance.resumeDraft(button.dataset.id); if (button.dataset.kind === 'preventiveDraft') return root.DGPreventive.resumeDraft(button.dataset.id); if (button.dataset.kind === 'inventoryDraft') return root.DGManagement.resumeInventoryDraft(button.dataset.id); if (button.dataset.kind === 'lightingAreaDraft') return root.DGLightingAreas.openEditor(null, button.dataset.id, true); if (button.dataset.kind === 'lightingTaskDraft') return root.DGLightingWorkflows.openTask(null, button.dataset.id, true); if (button.dataset.kind === 'lightingDraft') return root.DGLighting.openEditor(null, null, button.dataset.id, true); if (button.dataset.kind === 'draft') return root.DGIntegration.restoreInspectionDraft(button.dataset.id); if (button.dataset.kind === 'patrol') return api.restorePatrol(); if (button.dataset.kind === 'workEdit') { const saved = await root.DGOffline.get('workEdit', button.dataset.id); return saved ? openEdit(saved.workId, button.dataset.id) : refreshQueue(); } if (button.dataset.kind === 'workCompletion') { const saved = await root.DGOffline.get('workCompletion', button.dataset.id); return saved ? openWork(saved.workId, button.dataset.id) : refreshQueue(); } return newWork(null, null, button.dataset.id); }
     if (action === 'discard-draft') {
-      const owner = captureOwner();
+      const owner = captureOwner(), { kind, id } = button.dataset;
+      const displayed = ['draft', 'lightingDraft'].includes(kind) ? state.drafts.find(row => row.kind === kind && row.id === id)?.value : undefined;
       if (!await ask('작성 중인 이 초안을 폐기할까요?', { ok: '폐기', danger: true })) return;
       if (!ownsContext(owner)) return;
-      const kind = button.dataset.kind, id = button.dataset.id, saved = await owner.offline.get(kind, id);
+      if (kind === 'draft') {
+        try { await api.removeDraft(id, displayed); }
+        finally { if (ownsContext(owner)) await refreshQueue(); }
+        return;
+      }
+      if (kind === 'lightingDraft') {
+        try { if (displayed) await root.DGLighting.clearDraft(displayed); }
+        finally { if (ownsContext(owner)) await refreshQueue(); }
+        return;
+      }
+      const saved = await owner.offline.get(kind, id);
       if (!ownsContext(owner)) return;
       if (kind === 'inventoryDraft') { await root.DGManagement.discardInventoryDraft(id, { confirmed: true }); return refreshQueue(); }
       if (kind === 'assetDraft') { await root.DGAssetMaintenance.discardDraft(id, { confirmed: true }); return refreshQueue(); }
       if (kind === 'preventiveDraft') { await root.DGPreventive.discardDraft(id, { confirmed: true }); return refreshQueue(); }
       if (kind === 'lightingAreaDraft') { await root.DGLightingAreas.discardDraft(id); return refreshQueue(); }
       if (kind === 'lightingTaskDraft') { await root.DGLightingWorkflows.discardDraft(id); return refreshQueue(); }
-      if (kind === 'lightingDraft') { const active = root.DGLighting.state.draft; await root.DGLighting.clearDraft(active?.recordId === id ? active : saved); return refreshQueue(); }
       if (kind === 'patrol' && saved) api.removePatrolDraft(saved.sessionId);
       if (['workDraft', 'workCompletion', 'workEdit'].includes(kind)) { const active = kind === 'workDraft' ? state.draft : kind === 'workEdit' ? state.edit : state.completion; const owner = active?.storageId === id ? active : saved; if (owner) { owner.storageId = id; await clearWorkDraft(owner, kind); } return refreshQueue(); }
-      await root.DGOffline.remove(kind, id); if (kind === 'draft') await api.removeDraft(id); return refreshQueue();
+      await root.DGOffline.remove(kind, id); return refreshQueue();
     }
   }
   function attach(context) {

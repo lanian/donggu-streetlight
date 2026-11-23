@@ -198,12 +198,31 @@ async function fbBoot(cfg){
   const V="10.12.2";for(const m of ["app","auth","firestore"])await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-${m}-compat.js`);
   if(!firebase.apps.length)firebase.initializeApp(cfg);
   if(cfg.appCheckSiteKey&&!window.DG_APP_CHECK_ACTIVE){await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-app-check-compat.js`);firebase.appCheck().activate(cfg.appCheckSiteKey,true);window.DG_APP_CHECK_ACTIVE=true;}
-  const fs=firebase.firestore();if(window.DG_DEVICE_TRUSTED){try{await fs.enablePersistence({synchronizeTabs:true})}catch(e){toast("오프라인 보관을 시작하지 못했어요. 공유 PC 방식으로 계속합니다.")}}
+  const fs=firebase.firestore();if(window.DG_DEVICE_TRUSTED){try{await fs.enablePersistence({synchronizeTabs:true})}catch(e){window.DG_DEVICE_TRUSTED=false;toast("오프라인 보관을 시작하지 못했어요. 공유 PC 방식으로 계속합니다.")}}
   const auth=firebase.auth();await auth.setPersistence(window.DG_DEVICE_TRUSTED?"local":"session");
-  FB={auth,fs};
-  await new Promise(res=>{const un=FB.auth.onAuthStateChanged(()=>{un();res()})});
-  try{const r=await FB.auth.getRedirectResult();}catch(e){}
-  const u=FB.auth.currentUser;
+  const session=FB={auth,fs},subscriptions=[];
+  let actor=null,started=false,locked=false,staffRole=null,stopAuth;
+  const current=()=>!locked&&FB===session&&(auth.currentUser?.uid||null)===actor;
+  const lock=()=>{
+    if(locked||FB!==session)return;
+    locked=true;
+    stopAuth?.();
+    for(const stop of subscriptions)stop?.();
+    Object.assign(S,{me:null,canWrite:false,live:false,rolesSeen:true,fbError:true,fbAccessChanged:true,
+      lights:[],insp:[],reports:[],patrols:[],roles:[],names:{}});
+    db=null;user=null;
+    if(typeof clearFirebaseView==="function")clearFirebaseView();
+    setSync(false,"접근 권한 변경");render();
+  };
+  await new Promise(ready=>{
+    stopAuth=auth.onAuthStateChanged(()=>{
+      if(!started)ready();
+      else if(!current())lock();
+    });
+  });
+  try{await auth.getRedirectResult()}catch(e){}
+  const u=auth.currentUser;
+  actor=u?.uid||null;started=true;
   if(!u){S.me=null;S.fbSignedOut=true;setSync(false,"로그인 필요");render();return}
   S.me=u.uid;S.fbSignedOut=false;
   // This optional profile write may wait for the server while offline. Start cached reads immediately.
@@ -211,14 +230,36 @@ async function fbBoot(cfg){
   db=fs;
   user={id:async()=>u.uid,can:async()=>true,profiles:async ids=>{const out={};await Promise.all(ids.map(async id=>{try{const d=await fs.collection("users").doc(id).get();if(d.exists)out[id]={name:d.data().name}}catch(e){}}));return out}};
   dl={save:async({filename,data})=>{const a=document.createElement("a");a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data],{type:"text/csv"}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)}};
-  const sub=(q,key,map)=>q.onSnapshot({includeMetadataChanges:true},snap=>{if(key==="roles"&&!(snap.metadata.fromCache&&snap.empty))S.rolesSeen=true;if(key==="lights")onLights(snap);else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));if(map)map();dataChanged(key);S.live=true;setSync(!snap.metadata.fromCache,snap.metadata.fromCache?"오프라인":"실시간");render();resolveNames()},err=>{if(key==="roles"&&!S.rolesSeen){S.rolesSeen=true;render()}if(err&&err.code==="permission-denied"){setSync(false,"권한 없음")}else setSync(false,"연결 끊김")});
+  const sub=(q,key,map)=>subscriptions.push(q.onSnapshot({includeMetadataChanges:true},snap=>{
+    if(!current())return;
+    if(key==="roles"){
+      const roles=snap.docs.map(d=>({id:d.id,...d.data()}));
+      const role=roles.find(r=>r.id===actor)?.role;
+      const nextRole=role==="admin"||role==="inspector"?role:null;
+      if(staffRole&&staffRole!==nextRole){
+        if(!snap.metadata.fromCache)lock();
+        return;
+      }
+      staffRole=nextRole;
+      if(!(snap.metadata.fromCache&&snap.empty))S.rolesSeen=true;
+      S.roles=roles;
+    }else if(key==="lights")onLights(snap);
+    else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));
+    if(map)map();
+    dataChanged(key);S.live=true;setSync(!snap.metadata.fromCache,snap.metadata.fromCache?"오프라인":"실시간");render();resolveNames();
+  },err=>{
+    if(!current())return;
+    if(err?.code==="permission-denied"&&staffRole){lock();return}
+    if(key==="roles"&&!S.rolesSeen){S.rolesSeen=true;render()}
+    setSync(false,err?.code==="permission-denied"?"권한 없음":"연결 끊김");
+  }));
   sub(fs.collection("lights"),"lights");
   sub(fs.collection("inspections").orderBy("date","desc").limit(40),"insp");
   sub(fs.collection("reports").orderBy("createdAt","desc"),"reports");
   sub(fs.collection("patrols").orderBy("start","desc").limit(30),"patrols",ptIndex);
   sub(fs.collection("roles"),"roles");
   // Until the role list answers, the screen says it is checking instead of flashing the "직원 승인 전" page.
-  if(typeof setTimeout==="function")setTimeout(()=>{if(!S.rolesSeen){S.rolesSeen=true;render()}},8000);
+  if(typeof setTimeout==="function")setTimeout(()=>{if(current()&&!S.rolesSeen){S.rolesSeen=true;render()}},8000);
 }
 async function fbSignIn(){const prov=new firebase.auth.GoogleAuthProvider();try{await FB.auth.signInWithPopup(prov);location.reload()}catch(e){if(e&&/popup/.test(e.code||"")){await FB.auth.signInWithRedirect(prov)}else toast("로그인하지 못했어요: "+(e&&e.code||""))}}
 async function fbSignOut(){
@@ -238,7 +279,7 @@ function residentPanel(){
     <p class="muted" style="font-size:12px;margin:8px 0 0">${official?"이 앱에서는 신고를 접수하지 않아요. 사진·연락처 입력과 처리상태 확인은 운영서비스에서 진행해 주세요.":"신고 내용과 연락처는 담당 부서만 봐요. 점검 기록은 직원으로 로그인해야 보여요."}</p></div>`;
 }
 function vSignIn(){return `<div class="panel" style="margin-top:12px"><h3>직원 로그인</h3><p class="muted">구청 Google 계정으로 로그인하면 점검·순찰 기록이 공유 저장소에 저장돼요. 역할(관리자·점검자)은 관리자가 지정해요.</p><button class="btn sodium block" id="fbSignIn">Google로 로그인</button></div>${residentPanel()}${DGSecurity.devicePanel()}`}
-function vConnectionError(){return `<div class="panel" style="margin-top:12px"><h3>공유 저장소에 연결하지 못했어요</h3><p class="muted">인터넷 연결을 확인한 뒤 다시 열어 주세요. 문제가 계속되면 관리자에게 연결 설정을 확인해 달라고 하세요.</p><button class="btn sodium block" id="fbRetry">다시 연결</button></div>`}
+function vConnectionError(){if(S.fbAccessChanged)return `<div class="panel" style="margin-top:12px"><h3>계정이나 접근 권한이 바뀌었어요</h3><p class="muted">현재 계정의 권한으로 작업하려면 앱을 다시 열어 주세요.</p><button class="btn sodium block" id="fbRetry">다시 열기</button></div>`;return `<div class="panel" style="margin-top:12px"><h3>공유 저장소에 연결하지 못했어요</h3><p class="muted">인터넷 연결을 확인한 뒤 다시 열어 주세요. 문제가 계속되면 관리자에게 연결 설정을 확인해 달라고 하세요.</p><button class="btn sodium block" id="fbRetry">다시 연결</button></div>`}
 async function boot(){
   await loadRegistry();
   if((!window.claude||!window.claude.use)&&window.FIREBASE_CONFIG!=null){
@@ -287,7 +328,7 @@ const PWA={prompt:null,canInstall:false,iosHint:false,waiting:null,standalone:ma
   const ios=DEV.ios&&!window.MSStream; // includes iPadOS, which reports itself as a Mac
   if(ios&&!PWA.standalone&&!recently&&!(window.claude&&window.claude.use))PWA.iosHint=true;
   if("serviceWorker" in navigator&&!(window.claude&&window.claude.use)&&(location.protocol==="https:"||location.hostname==="localhost")){
-    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareUpdate:()=>updateCheck(),onChange:()=>{try{render();verRefresh()}catch(e){}},prepareOcr:async()=>{try{await fetch("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js",{cache:"reload"})}catch(e){}await getOcr(null,"eng",{refresh:true});await getOcr(null,"kor+eng",{refresh:true})}});
+    DongguPWA.start({hasPendingWork:hasPendingFieldWork,notice:toast,prepareUpdate:()=>updateCheck(),canReload:async()=>!(await updateItems()).lose.length,onChange:()=>{try{render();verRefresh()}catch(e){}},prepareOcr:async()=>{try{await fetch("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js",{cache:"reload"})}catch(e){}await getOcr(null,"eng",{refresh:true});await getOcr(null,"kor+eng",{refresh:true})}});
   }
   // shortcuts from the home-screen icon
   const go=new URLSearchParams(location.search).get("go");if(go)window.addEventListener("load",()=>setTimeout(()=>{if(go==="scan")openScanner("inspect");else if(go==="patrol"&&can("inspect")){if(DEV.field)openPatrol();else{openAdminSection("patrol");toast("야간 순찰은 GPS가 있는 휴대폰에서 시작해요. PC에서는 순찰 기록을 볼 수 있어요.")}}},900));
@@ -302,10 +343,11 @@ function applyTheme(t){if(t==="auto")delete document.documentElement.dataset.the
   document.querySelectorAll('meta[name="theme-color"]').forEach(m=>{if(m.dataset.media==null)m.dataset.media=m.getAttribute("media")||"";if(t==="auto")m.setAttribute("media",m.dataset.media);else m.setAttribute("media",m.dataset.media.includes(t)?"all":"not all")});const b=$("#themeBtn");if(b){b.innerHTML=THEME_ICON[t];b.title=`화면: ${t==="auto"?"자동":t==="dark"?"야간":"주간"}`}}
 (function(){let t="auto";try{t=localStorage.getItem("dg-theme")||"auto"}catch(e){}applyTheme(t)})();
 async function resolveNames(){
-  if(!user)return;
+  const requester=user;
+  if(!requester)return;
   const ids=[...new Set([...S.insp.map(i=>i.inspector),...(S.allLights||S.lights).flatMap(l=>[l.foundBy,...(l.edits||[]).map(e=>e.by)]),...S.patrols.map(p=>p.by),...S.roles.map(r=>r.id),...S.reports.map(r=>r.reporterId)].filter(Boolean))].filter(id=>!(id in S.names));
   if(!ids.length)return;
-  try{const ps=await user.profiles(ids);ids.forEach(id=>S.names[id]=(ps[id]&&ps[id].name)||"점검자");render()}catch(e){}
+  try{const ps=await requester.profiles(ids);if(user!==requester)return;ids.forEach(id=>S.names[id]=(ps[id]&&ps[id].name)||"점검자");render()}catch(e){}
 }
 /* ---------- roles: admin / inspector / resident. Enforced in the UI; the shared DB itself only knows "can write".
    Until someone claims the admin role, every participant keeps full access (as before). ---------- */
@@ -427,20 +469,52 @@ function sheetWide(key){if(DEV.field||!key)return false;if(/^(map|ptmap):/.test(
    lost; otherwise each item has a button that takes the person to it. */
 const DRAFT_KIND={assetDraft:"시설·회로 관리",preventiveDraft:"정기점검 계획",draft:"점검 작성",patrol:"순찰 기록",patrolTargets:"다음 순찰 대상",inventoryDraft:"자재 정보 수정",workEdit:"보수 작업 정보 수정",workDraft:"보수 작업 등록",workCompletion:"보수 작업 완료 보고",lightingDraft:"외부 광원·현장 밝기",lightingTaskDraft:"밝기 재확인 업무",lightingAreaDraft:"밝기 검토 제외 구역",formDraft:"입력 양식"};
 async function updateItems(){
-  // store whatever can be stored first, so it moves from "would be lost" to "kept"
-  try{await DGIntegration.persistDraft()}catch(e){}try{await DGIntegration.persistPatrol()}catch(e){}
-  try{const top=navTop();if(top&&fdKind(top.key))await fdPersist(top.key)}catch(e){}
-  try{if(window.DGOperations?.persistActive)await DGOperations.persistActive()}catch(e){}
-  const durable=!!(DGOffline.ready&&DGOffline.durable),lose=[],keep=[];
+  // Try to preserve the latest input before deciding whether it is safe to reload.
+  const lose=[],keep=[],uncertain=new Set(),namespace=DGOffline.namespace;
+  let inspectionFailed=false;
+  try{inspectionFailed=await DGIntegration.persistDraft()===false}catch(e){inspectionFailed=true}
+  try{await DGIntegration.persistPatrol()}catch(e){uncertain.add("patrol");lose.push({t:"최신 순찰 기록을 보관하지 못했어요",how:"순찰 화면에서 기록을 확인해 주세요.",go:"patrol"})}
+  const stores=[
+    [window.DGOperations,["workDraft","workCompletion","workEdit"]],
+    [window.DGAssetMaintenance,["assetDraft"]],
+    [window.DGPreventive,["preventiveDraft"]],
+    [window.DGLightingWorkflows,["lightingTaskDraft"]],
+    [window.DGLightingAreas,["lightingAreaDraft"]]
+  ];
+  for(const [module,kinds] of stores){
+    try{await module?.persistActive?.()}
+    catch(e){for(const kind of kinds)uncertain.add(kind);
+      lose.push({t:`${DRAFT_KIND[kinds[0]]} 초안을 보관하지 못했어요`,how:e?.message||"입력과 저장 공간을 확인해 주세요.",go:"close"})}
+  }
+  try{await window.DGLighting?.persistDraft?.()}catch(e){uncertain.add("lightingDraft");lose.push({t:"최신 밝기 기록을 보관하지 못했어요",how:"입력과 저장 공간을 확인해 주세요.",go:"close"})}
+  const top=navTop(),fk=top&&fdKind(top.key);
+  if(fk)await fdPersist(top.key);
+  const durable=!!(DGOffline.ready&&DGOffline.durable);
   if(pt.on)lose.push({t:`야간 순찰이 진행 중이에요 (표시 ${pt.marks.length}건, 어두운 지점 ${pt.spots.length}곳)`,how:"순찰을 끝내고 저장하면 적용할 수 있어요.",go:"patrol"});
   if(typeof photoEditor!=="undefined"&&photoEditor)lose.push({t:"사진을 편집하고 있어요",how:"편집을 마치거나 취소하세요.",go:"close"});
   if(typeof scan==="object"&&scan&&scan.busy)lose.push({t:"표찰을 읽는 중이에요",how:"읽기가 끝나면 적용할 수 있어요."});
-  const top=navTop(),fk=top&&fdKind(top.key);
-  if(fk&&fdDirty(top.key)&&!(durable&&FD.state[top.key]?.persisted))lose.push({t:`${FD_FORMS[fk].label||"입력 내용"}을 작성하고 있어요`,how:durable?"기기에 보관하지 못했어요. 저장하거나 입력을 비우세요.":"이 기기(공유 모드)에는 보관되지 않아요. 저장하거나 입력을 비우세요.",go:"close"});
-  if(draftDirty(draft)&&!durable){const l=byId(draft.lightId);lose.push({t:`${l?l.code:"시설"} 점검을 작성하고 있어요`,how:"공유 기기 모드라 보관되지 않아요. 점검 결과를 저장하세요.",go:"light:"+draft.lightId})}
+  if(fk&&fdDirty(top.key)&&!(durable&&FD.state[top.key]?.savedFingerprint===fdFingerprint(fdSnapshot(top.key)))){
+    uncertain.add("formDraft");lose.push({t:`${FD_FORMS[fk].label||"입력 내용"}을 작성하고 있어요`,how:durable?"기기에 보관하지 못했어요. 저장하거나 입력을 비우세요.":"이 기기(공유 모드)에는 보관되지 않아요. 저장하거나 입력을 비우세요.",go:"close"});
+  }
   if(["#rNum","#rDesc","#ibNum","#ibDesc"].some(q=>$(q)?.value?.trim()))lose.push({t:"신고 내용을 입력하고 있어요",how:"접수를 마치거나 입력을 지우세요.",go:"close"});
   let jobs=[],drafts=[];
-  if(DGOffline.ready){try{jobs=(await DGOffline.jobs()).filter(j=>j.state!=="synced");drafts=(await Promise.all(Object.keys(DRAFT_KIND).map(k=>DGOffline.list(k).then(rows=>rows.map(r=>({...r,kind:k})))))).flat()}catch(e){}}
+  if(DGOffline.ready){
+    try{
+      const [allJobs,...entries]=await Promise.all([DGOffline.jobs(),...Object.keys(DRAFT_KIND).map(k=>DGOffline.list(k).then(rows=>rows.map(r=>({...r,kind:k}))))]);
+      jobs=allJobs.filter(j=>j.state!=="synced");drafts=entries.flat();
+    }catch(e){lose.push({t:"기기에 보관한 기록을 확인하지 못했어요",how:"저장 대기함에서 기록을 확인하고 다시 시도해 주세요.",go:"outbox"})}
+  }
+  if(namespace!==DGOffline.namespace){
+    lose.push({t:"기록을 확인하는 동안 계정이 바뀌었어요",how:"현재 계정의 기록을 다시 확인해 주세요."});return {lose,keep,durable};
+  }
+  const unpreserved=new Set(DGIntegration.unpreservedInspectionDrafts(drafts.filter(row=>row.kind==="draft")));
+  if(inspectionFailed&&draft?.lightId)unpreserved.add(draft.lightId);
+  for(const id of unpreserved){
+    const l=byId(id);
+    lose.push({t:`${l?l.code:"시설"} 점검을 작성하고 있어요`,how:durable?"최신 점검 초안을 기기에 보관하지 못했어요. 화면의 입력과 저장을 확인해 주세요.":"공유 기기 모드라 보관되지 않아요. 점검 결과를 저장하세요.",go:"light:"+id});
+  }
+  if(inspectionFailed&&!unpreserved.size)lose.push({t:"점검 초안 저장을 확인하지 못했어요",how:"저장 대기함에서 기록을 확인해 주세요.",go:"outbox"});
+  drafts=drafts.filter(row=>!uncertain.has(row.kind)&&(row.kind!=="draft"||!unpreserved.has(row.id)));
   const nameOf=d=>{const l=d.kind==="draft"?byId(d.id):d.value&&d.value.lightId?byId(d.value.lightId):null;return `${DRAFT_KIND[d.kind]||"작성 중 기록"}${l?" · "+l.code:d.value&&d.value.title?" · "+d.value.title:""}`};
   if(jobs.length)(durable?keep:lose).push({t:`보내지 못한 기록 ${jobs.length}건`,how:durable?"이 기기에 보관돼 있고, 연결되면 자동으로 보내요.":"공유 기기 모드라 새로 열면 사라져요. 먼저 보내세요.",go:"outbox",list:jobs.slice(0,5).map(j=>j.summary)});
   if(drafts.length)(durable?keep:lose).push({t:`작성 중이던 기록 ${drafts.length}건`,how:durable?"이 기기에 보관돼 있어요. 업데이트 후 저장 대기함에서 이어 쓸 수 있어요.":"공유 기기 모드라 새로 열면 사라져요. 저장하거나 정리하세요.",go:"outbox",list:drafts.slice(0,5).map(nameOf)});
@@ -449,8 +523,9 @@ async function updateItems(){
 function updateItemHtml(i,act){return `<div class="upd-item${act?" lose":""}"><b>${esc(i.t)}</b><span class="muted">${esc(i.how)}</span>${i.list&&i.list.length?`<ul>${i.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}${act&&i.go?`<button type="button" class="btn sm" data-updgo="${esc(i.go)}">${i.go==="outbox"?"저장 대기함 열기":i.go==="patrol"?"순찰 화면으로":i.go==="close"?"그 화면으로":"점검 화면 열기"}</button>`:""}</div>`}
 /* 앱 버전: sw.js의 VERSION과 같은 이름을 쓴다(scripts/tests/pwa.test.cjs가 확인). 새 버전을 낼 때 둘을 함께 올리고
    RELEASE_NOTES 맨 위에 한 줄을 보탠다 — 버전 정보 화면의 "최근 바뀐 점"이 된다. */
-const APP_VER="v86-lighting-area-lines";
+const APP_VER="v87-field-operation-safety";
 const RELEASE_NOTES=[
+  {v:"v87-field-operation-safety",d:"2026-11-23",t:"현장 점검 초안·권한 전환 보호 · GPS 위치 기록·도로망 갱신·보고서 날짜 개선"},
   {v:"v86-lighting-area-lines",d:"2026-11-21",t:"밝기 검토 제외 구역 · 도로 중심선을 따라 점을 찍고 전체 폭으로 범위 지정"},
   {v:"v85-map-cluster-toggle",d:"2026-11-19",t:"지도보기 묶어 보기 켜기·끄기 · 끄면 모든 시설을 실제 위치에 점으로 표시"},
   {v:"v84-plan-dashboard-fixes",d:"2026-11-18",t:"방문 계획 삭제 후에도 탭 간 덮어쓰기 방지 · 업무 현황 한국 시간 집계와 CSV 회로 제목 정정"},
@@ -609,7 +684,7 @@ function filtered(){
   const rank={"고장":0,"수리중":1,"점검필요":2,"정상":3};
   if(S.mine==null){try{S.mine=localStorage.getItem("dg-mine")!=="0"}catch(e){S.mine=true}}
   return S.lights.filter(l=>inDong(l,S.dong)&&(!S.mine||inMyDongs(l))&&(S.kind==="전체"||(l.kind||"가로등")===S.kind)&&(!S.stat||(S.stat==="__open"?l.status!=="정상":l.status===S.stat))&&(!q||(l.code+" "+(l.label||"")+" "+l.dong+" "+l.address+" "+(l.poleNo||"")+" "+(l.lampId||"")+" "+(l.aliases||[]).join(" ")).toLowerCase().replace(/\s+/g,"").includes(q.replace(/\s+/g,""))))
-    .map(l=>[l,S.near&&S.pos?(distM(S.pos,l)||1e9):0]).sort(([a,da],[b,db])=>S.near&&S.pos?da-db:(rank[a.status]-rank[b.status])||((a.lastInspected||0)-(b.lastInspected||0))).map(([l])=>l);
+    .map(l=>{const distance=S.near&&S.pos?distM(S.pos,l):0;return [l,Number.isFinite(distance)?distance:Infinity]}).sort(([a,da],[b,db])=>S.near&&S.pos?da-db:(rank[a.status]-rank[b.status])||((a.lastInspected||0)-(b.lastInspected||0))).map(([l])=>l);
 }
 function nearToggle(){
   S.near=!S.near;S.limit=60;try{localStorage.setItem("dg-near",S.near?"1":"")}catch(e){}
@@ -621,7 +696,9 @@ function nearToggle(){
       if(!quality.ok){S.near=false;S.pos=null;try{localStorage.setItem("dg-near","")}catch(e){}
         if(S.posWatch!=null){navigator.geolocation.clearWatch(S.posWatch);S.posWatch=null}
         toast(`위치 오차 ${quality.label}로 가까운 순 정렬을 사용할 수 없어요. 주소·시설 번호 검색이나 지도를 사용해 주세요.`);render();return}
-      const np={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy,at:Date.now()};if(!S.pos||distM(S.pos,np)>8){S.pos=np;if(S.tab==="inspect"&&S.near)renderList()}
+      const np=DongguField.gpsFix(p,POSITION_MAP_FOLLOW_MAX_M);
+      if(!np||S.pos?.at>np.at)return;
+      const moved=!S.pos||distM(S.pos,np)>8;S.pos=np;if(moved&&S.tab==="inspect"&&S.near)renderList();
     },e=>{if(e&&e.code===3)return; // a slow fix is not a failure: keep waiting
       if(S.posWatch!=null){navigator.geolocation.clearWatch(S.posWatch);S.posWatch=null}
       toast("위치 권한을 확인하거나 지도로 시설을 찾아 주세요.");S.near=false;S.pos=null;try{localStorage.setItem("dg-near","")}catch(err){}render()},{enableHighAccuracy:true,maximumAge:5000,timeout:15000});}
@@ -1019,6 +1096,23 @@ function sheetHide(){
   const sheet=$("#sheet");sheet.classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close(sheet);document.body.style.overflow="";
   NAV.stack.length=0;NAV.restoring=null;NAV.replaceNext=false;NAV.leaving=0;sheetHist=false;NAV.gen++;
 }
+function clearFirebaseView(){
+  DGIntegration.suspend?.();
+  window.DGLighting?.suspend();
+  DGOffline.configure({namespace:"firebase:locked",durable:false,networkRequired:true});
+  window.DongguPrint?.cancel();
+  window.DGDialog?.cancelAll();
+  RAW_OV={};OV={};LIGHT_FIELDS=[];ALL_LIGHTS=[];ALL_FROM=null;LIDX=null;LG=null;GAL={};
+  S.pos=null;
+  if(S.posWatch!=null){navigator.geolocation?.clearWatch(S.posWatch);S.posWatch=null}
+  if(pt.watch!=null){navigator.geolocation?.clearWatch(pt.watch);pt.watch=null}
+  pt.on=false;pt.hist=false;ptListen(false);ptStopCam();ptWakeRelease();ptHide();
+  if(pt.map){pt.map.remove();pt.map=null}
+  sheetLeave();sheetHide();NAV.pending=null;NAV.forward.length=0;
+  $("#sheetIn").replaceChildren();
+  const overlay=$("#ovl");
+  overlay.hidden=true;overlay.replaceChildren();
+}
 // A route that found nothing to show (deleted item, lost permission) calls this instead of opening: drop the level.
 function navAbandon(){if(!NAV.restoring)return false;NAV.restoring=null;NAV.stack.pop();if(!NAV.stack.length){sheetHide();try{history.go(-1)}catch(e){}return true}NAV.forceRender=true;try{history.go(-1)}catch(e){sheetHide()}return true}
 // Bring the stack to `target` levels (the depth stored in the History entry we arrived at) and re-render the new top.
@@ -1274,7 +1368,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.fclear){const k=t.dataset.fclear;if(k==="dong")S.dong="전체";else if(k==="kind")S.kind="전체";else if(k==="mine"){S.mine=false;try{localStorage.setItem("dg-mine","0")}catch(e){}}else S.stat=null;S.limit=60;render();return}
   if(t.id==="rvRun"){runLightingReview();return}
   if(t.dataset.rvmode){S.rvMode=t.dataset.rvmode;invalidateLightingReview("검토 방식이 바뀌었어요.");render();return}
-  if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");invalidateLightingReview("도로망을 갱신하고 있어요.");if(t.dataset.refetch){ROADS=null;idbSet("roads",null)}roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";invalidateLightingReview("도로망이 바뀌었어요.");S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
+  if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");invalidateLightingReview("도로망을 갱신하고 있어요.");roadsLoad(m=>{if(st)st.textContent=m},{refresh:!!t.dataset.refetch}).then(r=>{S.rvMode="roads";invalidateLightingReview("도로망이 바뀌었어요.");S.rvRoadsStat="";toast(r.shareFailed?"이 기기에서 도로망을 갱신했어요. 다른 기기와의 공유는 실패했어요.":`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{if(e.message==="road-load-superseded")return;S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
   if(t.id==="rvMore"){S.review.show+=30;render();return}
   if(t.hasAttribute("data-rvback")){if(navDepth()>1&&navTop().key==="rvmap")closeSheet();else returnLightingReview();return}
   if(t.dataset.rvpage!==undefined){openReviewMap("all",+t.dataset.rvpage);return}
@@ -1615,8 +1709,8 @@ async function inspLoadMore(){
 /* ---------- citizen reports come in by phone, SMS, e-mail or the public QR page; staff log them here ---------- */
 const IB={show:30,only:true};
 function inboxSection(){
-  const rs=S.reports.filter(r=>!IB.only||r.status!=="완료");
-  return `<details class="help"><summary>신고 접수는</summary><p>주민은 표찰의 QR로 여는 신고 페이지(앱과 분리)나 전화·문자로 신고해요. 여기서는 담당자가 받은 신고를 기록하고 처리 상태(접수→처리중→완료)를 관리해요. 접수 시 등 번호를 넣으면 그 등과 연결되고, 등 상세에서도 보여요.</p></details>
+  const rs=S.reports.filter(r=>!IB.only||r.status!=="완료"), official=window.REPORT_CONFIG?.backend==="official";
+  return `<details class="help"><summary>신고 접수는</summary><p>주민은 표찰의 QR로 여는 신고 페이지(앱과 분리)나 전화·문자로 신고해요. 여기서는 담당자가 받은 신고를 기록하고 처리 상태(접수→처리중→완료)를 관리해요.${official?" 공식 운영서비스에서 접수한 신고는 확인 후 여기에 직접 등록해 주세요.":""} 접수 시 등 번호를 넣으면 그 등과 연결되고, 등 상세에서도 보여요.</p></details>
   <div class="panel">
     <div class="grid2"><div><label class="f" for="ibVia">접수 경로</label><select class="f-in" id="ibVia">${INBOX_VIA.map(v=>`<option>${v}</option>`).join("")}</select></div><div><label class="f" for="ibRc">접수번호 (QR 신고면)</label><input class="f-in" id="ibRc" placeholder="R251013-AB12"></div></div>
     <label class="f" for="ibNum">등 번호 <span class="muted">(표찰 번호, 모르면 비움)</span></label><div class="row" style="display:flex;gap:8px"><input class="f-in" id="ibNum" placeholder="산수동 642 / 지호로 65-5" autocomplete="off"><button type="button" class="btn ghost sm" data-scan="inbox" style="flex:none">스캔</button></div>
@@ -1628,7 +1722,7 @@ function inboxSection(){
   </div>
   <h2 style="display:flex;align-items:center;gap:8px">신고 목록 <span class="muted">${rs.length}</span><label class="muted" style="margin-left:auto;font-weight:400;display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="ibOnly" ${IB.only?"checked":""}> 미완료만</label></h2>
   ${rs.length?`<div class="list">${rs.slice(0,IB.show).map(r=>reportCard(r,can("admin"))).join("")}${rs.length>IB.show?`<button class="btn ghost block" id="ibMore">더 보기 · ${rs.length-IB.show}건 남음</button>`:""}</div>`:`<div class="empty">${IB.only?"미완료 신고가 없어요.":"접수된 신고가 없어요."}</div>`}
-  <div class="split">${dl&&S.reports.length?`<button class="btn ghost sm" id="csv8">신고 CSV</button>`:""}${fsReady()?`<button class="btn ghost sm" id="ibImport" ${IB.importing?"disabled":""}>${IB.importing?"가져오는 중…":"QR 신고 가져오기"}</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${IB.importMsg||(fsReady()?"신고 페이지로 들어온 건을 서버에서 받아요 (Google 로그인)":"자동 접수(Firestore)는 report/config.js에 설정하면 켜져요")}</span></div>`;
+  <div class="split">${dl&&S.reports.length?`<button class="btn ghost sm" id="csv8">신고 CSV</button>`:""}${fsReady()?`<button class="btn ghost sm" id="ibImport" ${IB.importing?"disabled":""}>${IB.importing?"가져오는 중…":official?"기존 QR 신고 가져오기":"QR 신고 가져오기"}</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${IB.importMsg||(official?(fsReady()?"기존 자체 신고 서버의 미이관 기록을 받아요 (Google 로그인).":"공식 운영서비스 접수 건은 확인 후 직접 등록해 주세요."):(fsReady()?"신고 페이지로 들어온 건을 서버에서 받아요 (Google 로그인)":"자동 접수(Firestore)는 report/config.js에 설정하면 켜져요"))}</span></div>`;
 }
 /* ---------- stage 2: pull citizen reports from Firestore (staff Google sign-in), file them in the inbox ---------- */
 // The resident delivery choice must not hide earlier reports from authorized staff.
@@ -1829,9 +1923,21 @@ const REPORTER_FIELDS=["contact","photo","lat","lng","acc","ua"];
 function withoutReporter(r){const out={...r};for(const k of REPORTER_FIELDS)delete out[k];if(out.ext&&out.location)out.location="";return out}
 /* ---------- period report: one printable page the office can file ---------- */
 const REP={period:"month",from:"",to:"",dong:"전체",photos:true,inlinePh:true,detail:"issues",data:null,loading:false,err:""};
-function repRange(){const now=new Date();let a,b=now.getTime();
-  if(REP.period==="month"){a=new Date(now.getFullYear(),now.getMonth(),1).getTime()}
-  else if(REP.period==="last"){a=new Date(now.getFullYear(),now.getMonth()-1,1).getTime();b=new Date(now.getFullYear(),now.getMonth(),1).getTime()-1}
+const REPORT_KST_OFFSET=9*3600000;
+function repMonthStart(at, offset=0){
+  const [year,month]=DGOperationsCore.kstDateKey(at).split("-").map(Number);
+  return Date.UTC(year,month-1+offset,1)-REPORT_KST_OFFSET;
+}
+function repDate(at,withTime=false){
+  if(!at||!Number.isFinite(at))return withTime?"":"기록 없음";
+  const shifted=new Date(at+REPORT_KST_OFFSET);
+  if(!Number.isFinite(shifted.getTime()))return withTime?"":"기록 없음";
+  const iso=shifted.toISOString(),date=iso.slice(0,10).replace(/-/g,".");
+  return withTime?date+" "+iso.slice(11,16):date;
+}
+function repRange(now=Date.now()){let a,b=now;
+  if(REP.period==="month"){a=repMonthStart(now)}
+  else if(REP.period==="last"){a=repMonthStart(now,-1);b=repMonthStart(now)-1}
   else if(REP.period==="7"){a=b-7*86400000}
   else if(REP.period==="30"){a=b-30*86400000}
   else{
@@ -1849,11 +1955,11 @@ function reportSourceText(){
 }
 async function repLoad(){
   if(REP.loading||!db)return;
-  const range=repRange();if(range.error){REP.err=range.error;REP.data=null;render();return}
+  const now=Date.now(),range=repRange(now);if(range.error){REP.err=range.error;REP.data=null;render();return}
   REP.loading=true;REP.err="";const key=reportQueryKey(),revision=REP.revision||0,actor=S.me,database=db,firebase=FB,metadata=[];render();
-  const now=new Date(),trendStart=new Date(now.getFullYear(),now.getMonth()-5,1).getTime();
+  const trendStart=repMonthStart(now,-5);
   try{const [insp,patrols]=await Promise.all([
-    listAllRecords("inspections",{where:[["date",">=",Math.min(range.a,trendStart)],["date","<=",Math.max(range.b,Date.now())]],orderBy:[["date","desc"]],onMetadata:m=>metadata.push(m)}),
+    listAllRecords("inspections",{where:[["date",">=",Math.min(range.a,trendStart)],["date","<=",Math.max(range.b,now)]],orderBy:[["date","desc"]],onMetadata:m=>metadata.push(m)}),
     listAllRecords("patrols",{where:[["start",">=",range.a],["start","<=",range.b]],orderBy:[["start","desc"]],onMetadata:m=>metadata.push(m)})
   ]);if(key===reportQueryKey()&&revision===(REP.revision||0)&&S.me===actor&&db===database&&FB===firebase){
     const sources=[...new Set(metadata.map(m=>m.source))];
@@ -1863,7 +1969,7 @@ async function repLoad(){
   REP.loading=false;render();resolveNames();
 }
 
-function repMonthKey(t){const d=new Date(t);return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}`}
+function repMonthKey(at){return repDate(at).slice(0,7)}
 // One selection drives the on-screen report, shared summary and CSV.
 function reportData(){
   const {a,b}=repRange();const inD=l=>!!l&&inDong(l,REP.dong);
@@ -1890,7 +1996,7 @@ function reportControls(){
     <div style="margin-top:8px"><span class="muted small">점검 내역 범위</span>${seg("detail",[["issues","이상 발견만"],["all","전체 점검"]],REP.detail||"issues")}</div>
     <label class="muted" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="repInline" ${REP.inlinePh?"checked":""}> 점검 내역 표에 사진 칸</label>
     <p class="muted small">A4 세로·배율 100%를 권장해요. 브라우저의 머리글·바닥글을 끄면 제목·주소 중복을 줄일 수 있어요. 미리보기의 표시 한도와 관계없이 선택한 내역·사진 전체를 출력해요.</p>
-    <div class="split"><button class="btn sm" id="repPrint" ${ready?"":"disabled"}>인쇄 / PDF 저장</button>${dl?`<button class="btn ghost sm" id="csv7" ${ready?"":"disabled"}>표 CSV</button>`:""}${navigator.share?`<button class="btn ghost sm" id="repShare" ${ready?"":"disabled"}>요약 공유</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${REP.loading?"기간 기록 불러오는 중…":ready?`기간 조회 완료 · ${fmtDT(REP.data.at)}`:esc(REP.err||"")}</span></div></div>`;
+    <div class="split"><button class="btn sm" id="repPrint" ${ready?"":"disabled"}>인쇄 / PDF 저장</button>${dl?`<button class="btn ghost sm" id="csv7" ${ready?"":"disabled"}>표 CSV</button>`:""}${navigator.share?`<button class="btn ghost sm" id="repShare" ${ready?"":"disabled"}>요약 공유</button>`:""}<span class="muted" style="align-self:center;font-size:12px">${REP.loading?"기간 기록 불러오는 중…":ready?`기간 조회 완료 · ${repDate(REP.data.at,true)}`:esc(REP.err||"")}</span></div></div>`;
 }
 function reportSection(forPrint=false){
   if(REP.data&&REP.data.key!==reportQueryKey())REP.data=null;
@@ -1903,16 +2009,16 @@ function reportSection(forPrint=false){
   const cnt=r=>ins.filter(i=>i.result===r).length;
   const faults={};ins.forEach(i=>inspectionFaults(i).forEach(f=>faults[f]=(faults[f]||0)+1));const faultTop=Object.entries(faults).sort((x,y)=>y[1]-x[1]);
   // 6-month trend from everything loaded (not just the period)
-  const months=[];for(let k=5;k>=0;k--){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-k);months.push(repMonthKey(d.getTime()))}
+  const trendAt=Date.now(),months=Array.from({length:6},(_,index)=>repMonthKey(repMonthStart(trendAt,index-5)));
   const trend=months.map(m=>{const ii=all.filter(i=>repMonthKey(i.date)===m);return{m,ok:ii.filter(i=>i.result==="정상").length,warn:ii.filter(i=>i.result==="점검필요").length,bad:ii.filter(i=>i.result==="고장").length}});const tmax=Math.max(1,...trend.map(t=>t.ok+t.warn+t.bad));
   const detailRows=REP.detail==="all"?ins:ins.filter(i=>i.result!=="정상"),found=detailRows.slice(0,forPrint?undefined:100);
   const longNotes=forPrint?found.filter(i=>String(i.memo||"").length>600||String(i.memo||"").split("\n").length>10):[],noteNumbers=new Map(longNotes.map((i,n)=>[i,n+1]));
   const memoHTML=i=>!i.memo?"":noteNumbers.has(i)?`<br><span class="muted">${esc(String(i.memo).slice(0,180))}…</span><br><strong>전체 내용: 상세 메모 ${noteNumbers.get(i)}번</strong>`:`<br><span class="muted" style="white-space:pre-wrap">${esc(i.memo)}</span>`;
   const title=`${dongLabel(REP.dong)} 가로등·보안등 점검 보고서`;
-  const periodTxt=`${fmtD(a)} ~ ${fmtD(b)}`;
+  const periodTxt=`${repDate(a)} ~ ${repDate(b)}`;
   const photoAppendix=REP.photos?repPhotoAppendix(ins,{all:forPrint,load:!forPrint}):"";
   return controls+`<div class="rep" id="repBody">
-    <div class="cover"><h2>${esc(title)}</h2><div class="muted">기간 ${periodTxt} · 작성 ${fmtDT(Date.now())} · ${esc(S.names[S.me]||"담당자")}</div><div class="report-meta"><span>선택 범위: ${esc(dongLabel(REP.dong))}</span><span>기간 자료 조회: ${fmtDT(REP.data.at)}</span><span>자료 출처: ${esc(reportSourceText())}</span><span>내역 범위: ${REP.detail==="all"?"전체 점검":"이상 발견만"} · 사진 부록 ${REP.photos?"포함":"제외"}</span></div></div>
+    <div class="cover"><h2>${esc(title)}</h2><div class="muted">기간 ${periodTxt} · 작성 ${repDate(Date.now(),true)} · ${esc(S.names[S.me]||"담당자")}</div><div class="report-meta"><span>선택 범위: ${esc(dongLabel(REP.dong))}</span><span>기간 자료 조회: ${repDate(REP.data.at,true)}</span><span>자료 출처: ${esc(reportSourceText())}</span><span>내역 범위: ${REP.detail==="all"?"전체 점검":"이상 발견만"} · 사진 부록 ${REP.photos?"포함":"제외"}</span></div></div>
     <div class="kpi"><div><b>${lights.length.toLocaleString()}</b><span>현재 대상 시설</span></div><div><b>${ins.length}</b><span>기간 점검 기록 건수</span></div><div><b>${open.length}</b><span>현재 조치 필요</span></div>
       <div><b style="color:var(--ok)">${cnt("정상")}</b><span>정상</span></div><div><b style="color:var(--warn)">${cnt("점검필요")}</b><span>점검필요</span></div><div><b style="color:var(--bad)">${cnt("고장")}</b><span>고장</span></div></div>
     <div class="report-reading-notes"><p>점검은 기록 건수이며, 같은 시설의 반복 점검을 포함해요. 현재 대상 시설·현재 조치 필요는 작성 시점의 현황으로 기간 실적과 달라요.</p><p>행정동은 현재 시설 정보를 우선 사용해요. 현재 시설이 없는 동의 과거 기록도 포함하고, 확인되지 않은 동은 별도로 집계해요.</p><p>${REP.dong==="전체"?"순찰은 선택 기간의 전체 세션이에요.":"순찰은 선택한 동이 포함된 전체 세션의 거리·통과·표시예요. 해당 동 안의 구간만 계산한 값은 아니에요."} 누적 통과 기록은 같은 시설의 중복을 포함하며 점등 확인 건수가 아니에요.</p></div>
@@ -1924,13 +2030,13 @@ function reportSection(forPrint=false){
     ${faultTop.length?`<h3>불량 항목</h3><table><tbody>${faultTop.map(([f,n])=>`<tr><td>${esc(f)}</td><td class="n">${n}</td></tr>`).join("")}</tbody></table>`:""}
     <h3>순찰·등록·수정</h3><table><tbody><tr><td>야간 순찰</td><td class="report-summary-value">${pats.length}회 · ${(pats.reduce((s,p)=>s+(p.dist||0),0)/1000).toFixed(1)}km · 누적 통과 ${pats.reduce((s,p)=>s+(p.passed||[]).length,0)}개 · 표시 ${pats.reduce((s,p)=>s+(p.marks||[]).length,0)}건</td></tr><tr><td>현장 등록(미등록)</td><td class="n">${pend.length}건 (대장반영 ${pend.filter(l=>l.reg==="대장반영").length} · 반려 ${pend.filter(l=>l.reg==="반려").length})</td></tr><tr><td>등 정보 수정</td><td class="n">${edits.length}건</td></tr></tbody></table>
     <h3>${REP.detail==="all"?"점검 내역":"이상 발견 내역"} <span class="muted">${found.length}${detailRows.length>found.length?" / "+detailRows.length:""}건</span></h3>
-    ${found.length?`<table class="report-findings-table"><colgroup><col class="col-date"><col class="col-light"><col class="col-result"><col>${REP.inlinePh?'<col class="col-photo">':""}</colgroup><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th>${REP.inlinePh?`<th>사진</th>`:""}</tr></thead><tbody>${found.map(i=>`<tr data-report-inspection="${esc(i.id||"")}"><td>${fmtDT(i.date)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${inspectionFaults(i).map(esc).join(", ")}${memoHTML(i)}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td>${REP.inlinePh?`<td class="phcell">${inspectionThumbs(i).slice(0,2).map(t=>`<img src="${esc(safeImageSrc(t.t))}" alt="${esc(t.label||"")}" title="${esc(t.label||"")}">`).join("")||(i.photo?`<img src="${esc(safeImageSrc(i.photo))}" alt="">`:"")}</td>`:""}</tr>`).join("")}</tbody></table>`:`<p class="muted">${REP.detail==="all"?"기간 내 점검 기록이 없어요.":"기간 내 이상 발견이 없어요."}</p>`}
+    ${found.length?`<table class="report-findings-table"><colgroup><col class="col-date"><col class="col-light"><col class="col-result"><col>${REP.inlinePh?'<col class="col-photo">':""}</colgroup><thead><tr><th>일시</th><th>등</th><th>결과</th><th>내용</th>${REP.inlinePh?`<th>사진</th>`:""}</tr></thead><tbody>${found.map(i=>`<tr data-report-inspection="${esc(i.id||"")}"><td>${repDate(i.date,true)}</td><td><b>${esc(i.code)}</b><br><span class="muted">${esc((byId(i.lightId)||{}).dong||i.dong||"")} · ${esc(S.names[i.inspector]||"점검자")}</span></td><td><span class="chip st-${esc(i.result)}">${esc(i.result)}</span></td><td>${inspectionFaults(i).map(esc).join(", ")}${memoHTML(i)}${i.patrol?`<br><span class="muted">야간 순찰</span>`:""}</td>${REP.inlinePh?`<td class="phcell">${inspectionThumbs(i).slice(0,2).map(t=>`<img src="${esc(safeImageSrc(t.t))}" alt="${esc(t.label||"")}" title="${esc(t.label||"")}">`).join("")||(i.photo?`<img src="${esc(safeImageSrc(i.photo))}" alt="">`:"")}</td>`:""}</tr>`).join("")}</tbody></table>`:`<p class="muted">${REP.detail==="all"?"기간 내 점검 기록이 없어요.":"기간 내 이상 발견이 없어요."}</p>`}
     ${!forPrint&&detailRows.length>found.length?'<p class="report-preview-note">화면은 일부 내역만 표시하며 인쇄 / PDF에는 선택한 전체 내역이 포함돼요.</p>':""}
     <h3>현재 조치 필요 등 <span class="muted">${open.length}</span></h3>
-    ${open.length?`<table><thead><tr><th>등</th><th>상태</th><th>마지막 점검</th><th>위치</th></tr></thead><tbody>${open.slice(0,forPrint?undefined:150).map(l=>`<tr><td><b>${esc(l.code)}</b><br><span class="muted">${esc(l.dong)}</span></td><td><span class="chip st-${esc(l.status)}">${esc(l.status)}</span></td><td style="white-space:nowrap">${fmtD(l.lastInspected)}</td><td class="muted">${esc(l.address||"")}</td></tr>`).join("")}</tbody></table>${!forPrint&&open.length>150?`<p class="muted">외 ${open.length-150}개</p>`:""}`:`<p class="muted">모든 등이 정상이에요.</p>`}
-    ${longNotes.length?`<section class="report-long-notes"><h3>상세 메모 · 긴 점검 내용</h3>${longNotes.map((i,n)=>`<article class="report-long-note"><h4>${n+1}. ${esc(i.code)} · ${fmtDT(i.date)} · ${esc(i.result)}</h4><p>${esc(i.memo)}</p></article>`).join("")}</section>`:""}
+    ${open.length?`<table><thead><tr><th>등</th><th>상태</th><th>마지막 점검</th><th>위치</th></tr></thead><tbody>${open.slice(0,forPrint?undefined:150).map(l=>`<tr><td><b>${esc(l.code)}</b><br><span class="muted">${esc(l.dong)}</span></td><td><span class="chip st-${esc(l.status)}">${esc(l.status)}</span></td><td style="white-space:nowrap">${repDate(l.lastInspected)}</td><td class="muted">${esc(l.address||"")}</td></tr>`).join("")}</tbody></table>${!forPrint&&open.length>150?`<p class="muted">외 ${open.length-150}개</p>`:""}`:`<p class="muted">모든 등이 정상이에요.</p>`}
+    ${longNotes.length?`<section class="report-long-notes"><h3>상세 메모 · 긴 점검 내용</h3>${longNotes.map((i,n)=>`<article class="report-long-note"><h4>${n+1}. ${esc(i.code)} · ${repDate(i.date,true)} · ${esc(i.result)}</h4><p>${esc(i.memo)}</p></article>`).join("")}</section>`:""}
     ${photoAppendix}
-    <p class="muted" style="margin-top:16px;font-size:11px">${REP.data?`조회한 기간 기록으로 집계했어요. 자료 기준 ${fmtDT(REP.data.at)} · ${esc(reportSourceText())}.`:""} 밝기·조명 범위는 모델 추정이며 실측값이 아니에요.</p>
+    <p class="muted" style="margin-top:16px;font-size:11px">${REP.data?`조회한 기간 기록으로 집계했어요. 자료 기준 ${repDate(REP.data.at,true)} · ${esc(reportSourceText())}.`:""} 밝기·조명 범위는 모델 추정이며 실측값이 아니에요.</p>
   </div>`;
 }
 /* photo appendix: full-size photos of the period's inspections, before/after pairs side by side, loaded on demand */
@@ -1958,7 +2064,7 @@ function repPhotoAppendix(ins,options={}){
   const fig=x=>{
     const d=x.id?REP_PH.docs[x.id]:null,src=safeImageSrc(x.full||(d&&d.data)||x.t);
     const fallback=x.id&&!(d&&d.data),note=fallback?(d?.missing?'원본 조회 실패 · 보관된 미리보기':'원본 확인 전 · 미리보기'):"";
-    return '<figure>'+(src?'<img src="'+esc(src)+'" alt="'+esc(x.label)+'" loading="eager">':'<div class="notice">사진을 불러올 수 없어요.</div>')+'<figcaption><b>'+esc(x.code)+'</b> · '+esc(x.label)+(x.result!=="정상"?' · '+esc(x.result):"")+'<br>'+fmtDT(x.date)+' · '+esc(names[x.by]||"점검자")+(d?.note?' · '+esc(d.note):"")+(note?'<br><strong>'+note+'</strong>':"")+'</figcaption></figure>';
+    return '<figure>'+(src?'<img src="'+esc(src)+'" alt="'+esc(x.label)+'" loading="eager">':'<div class="notice">사진을 불러올 수 없어요.</div>')+'<figcaption><b>'+esc(x.code)+'</b> · '+esc(x.label)+(x.result!=="정상"?' · '+esc(x.result):"")+'<br>'+repDate(x.date,true)+' · '+esc(names[x.by]||"점검자")+(d?.note?' · '+esc(d.note):"")+(note?'<br><strong>'+note+'</strong>':"")+'</figcaption></figure>';
   };
   const blocks=DGReporting.photoGroups(items,REP_PH.docs).map(({before,after,rest})=>(before&&after?'<div class="pair-ba"><div class="pl">동일 작업·점검의 조치 전 · 후</div>'+fig(before)+fig(after)+'</div>':"")+rest.map(fig).join("")+(before&&!after?fig(before):"")+(after&&!before?fig(after):"")).join("");
   const missing=items.filter(x=>x.id&&REP_PH.docs[x.id]?.missing).length;
@@ -1991,7 +2097,7 @@ async function printSheet(btn){
   const signatureAt=signature(),scope=REP_PH.scope,size=REP_PH.size,names={...S.names};
   const isCurrent=()=>navAlive(generation)&&S.me===actor&&db===database&&FB===firebase&&myRole()===role&&sheet.classList.contains("open")&&(report?!!sheet.querySelector("#repBody")&&REP.data===data&&!REP.loading&&!REP.err&&signature()===signatureAt:source?.isConnected);
   const html=report?reportSection(true):sheet.innerHTML;
-  const title=report?`동구가로등_기간보고서_${fmtD(repRange().a)}-${fmtD(repRange().b)}`:(sheet.querySelector("h2,h3")?.textContent||"동구 가로등 출력");
+  const title=report?`동구가로등_기간보고서_${repDate(repRange().a)}-${repDate(repRange().b)}`:(sheet.querySelector("h2,h3")?.textContent||"동구 가로등 출력");
   const items=report&&REP.photos?DGReporting.photoItems(reportData().ins,inspectionThumbs,scope):null;
   try{
     await DongguPrint.run({html,title,button:btn,isCurrent,kind:sheet.querySelector(".qrgrid")?"labels":"report",prepare:async target=>{
@@ -2003,7 +2109,7 @@ async function printSheet(btn){
   }catch(error){toast(error.message||"인쇄 자료를 준비하지 못했어요.")}
 }
 function repSummaryText(){const {a,b,ins,open,pats}=reportData();
-  return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${fmtD(a)}~${fmtD(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${pats.length}회`}
+  return `[${dongLabel(REP.dong)} 가로등 점검 요약] ${repDate(a)}~${repDate(b)}\n점검 ${ins.length}건 (정상 ${ins.filter(i=>i.result==="정상").length} · 점검필요 ${ins.filter(i=>i.result==="점검필요").length} · 고장 ${ins.filter(i=>i.result==="고장").length})\n현재 조치 필요 ${open.length}개\n야간 순찰 ${pats.length}회`}
 async function exportReportCSV(){
   const range=repRange();if(range.error){REP.err=range.error;REP.data=null;toast(range.error);render();return}
   if(REP.data&&REP.data.key!==reportQueryKey())REP.data=null;
@@ -2013,7 +2119,7 @@ async function exportReportCSV(){
   for(const r of byDong)rows.push(["행정동",r.d,r.n,r.insp,r.ok,r.warn,r.bad,r.open]);
   for(const r of byWho)rows.push(["점검자",S.names[r.w]||r.w,"",r.n,r.ok,r.warn,r.fault,""]);
   const csv="\ufeff"+rows.map(r=>r.map(q).join(",")).join("\r\n");
-  try{await dl.save({filename:`동구가로등_보고서_${fmtD(a).replace(/\./g,"")}-${fmtD(b).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
+  try{await dl.save({filename:`동구가로등_보고서_${repDate(a).replace(/\./g,"")}-${repDate(b).replace(/\./g,"")}.csv`,data:csv})}catch(e){if(e&&e.code!=="cancelled"&&e.code!=="declined")toast("파일을 내려받지 못했어요.")}
 }
 /* per-light dossier: registry, status, inspections, photos — for a complaint file or a repair order */
 async function openLightDossier(id){
@@ -2216,6 +2322,8 @@ async function openRepPhoto(id,slot){
 /* ---------- 위치 확인: while a light is open, compare the phone's GPS with the registered coordinate. The distance is
    saved with the inspection; a big gap can be corrected (admin, with edit history) or left as a suggestion (inspector). ---------- */
 const POS_OK=25,POS_FAR=60; // m
+const POSITION_CHECK_MAX_AGE_MS=30000;
+const posFresh=pos=>!!pos&&Number.isFinite(pos.at)&&Date.now()>=pos.at&&Date.now()-pos.at<=POSITION_CHECK_MAX_AGE_MS;
 let PK={id:null,watch:null,pos:null,map:null,t:0};
 function posBox(l){
   const w=S.canWrite&&can("inspect"),has=typeof l.lat==="number";
@@ -2224,24 +2332,53 @@ function posBox(l){
     <div class="pmap" id="posMap" hidden></div>
     <div class="ops"><button type="button" class="btn ghost sm" id="posAgain">위치 다시 잡기</button>${w?`<button type="button" class="btn ghost sm" id="posFix" hidden></button>`:""}<button type="button" class="btn ghost sm" id="posMapBtn" ${has?"":"hidden"}>지도 보기</button></div></div>`;
 }
-function posCheckStart(id){
-  posCheckStop();PK={id,watch:null,pos:null,map:null,t:Date.now()};
-  if(!navigator.geolocation){const t=$("#posTxt");if(t)t.textContent="이 기기에서는 위치를 쓸 수 없어요";return}
-  const onPos=p=>{if(PK.id!==id)return;const pos={lat:p.coords.latitude,lng:p.coords.longitude,acc:Math.round(p.coords.accuracy||0)};
-    if(PK.pos&&pos.acc>PK.pos.acc&&Date.now()-PK.t<8000)return; // keep the better fix while it settles
-    PK.pos=pos;S.pos={lat:pos.lat,lng:pos.lng};posDraw();if(pos.acc<=15&&Date.now()-PK.t>6000)posCheckStop(true)};
-  const onErr=e=>{if(PK.id!==id)return;const t=$("#posTxt");if(t)t.textContent=e&&e.code===1?"위치 권한이 없어요":"위치를 못 잡았어요 — 하늘이 보이는 곳에서 다시";};
-  try{PK.watch=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:20000})}catch(e){}
-  setTimeout(()=>{if(PK.id===id)posCheckStop(true)},30000);
+function posCheckMessage(message){
+  const t=$("#posTxt"),d=$("#posD"),fx=$("#posFix");
+  if(t)t.textContent=message;
+  if(d){d.textContent="";d.className="d"}
+  if(fx)fx.hidden=true;
 }
-function posCheckStop(keep){if(PK.watch!=null){try{navigator.geolocation.clearWatch(PK.watch)}catch(e){}PK.watch=null}if(!keep){if(PK.map){try{PK.map.remove()}catch(e){}PK.map=null}PK.id=null}}
+function posCheckStart(id){
+  posCheckStop();
+  const check=PK={id,watch:null,pos:null,map:null,t:Date.now(),active:true,watchTimer:null,positionTimer:null};
+  if(!navigator.geolocation){posCheckMessage("이 기기에서는 위치를 쓸 수 없어요");return}
+  posCheckMessage("GPS 잡는 중…");
+  const active=()=>PK===check&&check.active;
+  const onErr=e=>{
+    if(!active())return;
+    check.pos=null;clearTimeout(check.positionTimer);
+    posCheckMessage(e&&e.code===1?"위치 권한이 없어요":"위치를 못 잡았어요. 위치 다시 잡기를 눌러 주세요.");
+    if(check.map)posMapDraw();
+  };
+  const onPos=p=>{
+    if(!active())return;
+    const pos=DongguField.gpsFix(p,Infinity,POSITION_CHECK_MAX_AGE_MS,Date.now());
+    if(!pos){onErr();return}
+    if(check.pos?.at>pos.at)return;
+    if(pos.acc<=POSITION_INPUT_MAX_M&&posFresh(check.pos)&&pos.acc>check.pos.acc&&Date.now()-check.t<8000)return;
+    check.pos=pos;
+    if(pos.acc<=POSITION_INPUT_MAX_M&&!(S.pos?.at>pos.at))S.pos=pos;
+    clearTimeout(check.positionTimer);
+    check.positionTimer=setTimeout(()=>{if(PK===check&&check.pos===pos)posDraw()},Math.max(1,pos.at+POSITION_CHECK_MAX_AGE_MS-Date.now()+1));
+    posDraw();
+    if(pos.acc<=15&&Date.now()-check.t>6000)posCheckStop(true);
+  };
+  try{check.watch=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:20000})}catch(e){onErr(e)}
+  check.watchTimer=setTimeout(()=>{if(active())posCheckStop(true)},POSITION_CHECK_MAX_AGE_MS);
+}
+function posCheckStop(keep){
+  PK.active=false;clearTimeout(PK.watchTimer);
+  if(PK.watch!=null){try{navigator.geolocation.clearWatch(PK.watch)}catch(e){}PK.watch=null}
+  if(!keep){clearTimeout(PK.positionTimer);if(PK.map){try{PK.map.remove()}catch(e){}PK.map=null}PK.id=null}
+}
 function posDraw(){
   const l=byId(PK.id),pos=PK.pos;if(!l||!pos)return;const t=$("#posTxt"),d=$("#posD"),fx=$("#posFix");if(!t)return;
+  if(!posFresh(pos)){posCheckMessage("현재 위치를 다시 확인해 주세요.");if(PK.map)posMapDraw();return}
   const has=typeof l.lat==="number";const dist=has?distM(pos,l):null;
   // a position coarser than ±50m (PC Wi-Fi/IP estimate) cannot judge or correct a light's coordinate, nor be stored on the inspection
   if(!Number.isFinite(pos.acc)||pos.acc>POSITION_INPUT_MAX_M){
     if(draft&&draft.lightId===l.id&&!(draft.pos&&draft.pos.acc<=POSITION_INPUT_MAX_M)){draft.pos=null;draft.posDist=null} // keep an earlier good fix
-    t.textContent=`현재 위치가 추정치예요 (±${Number.isFinite(pos.acc)?pos.acc:"?"}m) — ${DEV.gps?"GPS가 잡힐 때까지 기다리거나 실외에서 다시 시도하세요":"이 기기에서는 위치로 등을 확인할 수 없어요. 지도에서 확인하세요"}.`;
+    t.textContent=`현재 위치가 추정치예요 (±${Number.isFinite(pos.acc)?Math.round(pos.acc):"?"}m) — ${DEV.gps?"GPS가 잡힐 때까지 기다리거나 실외에서 다시 시도하세요":"이 기기에서는 위치로 등을 확인할 수 없어요. 지도에서 확인하세요"}.`;
     d.textContent="";d.className="d";if(fx)fx.hidden=true;if(PK.map)posMapDraw();return}
   if(draft&&draft.lightId===l.id){draft.pos=pos;draft.posDist=dist==null?null:Math.round(dist)}
   if(!has){t.textContent=`등록 좌표가 없어요 · 현재 위치 ±${pos.acc}m`;d.textContent="";if(fx){fx.hidden=false;fx.textContent=can("admin")?"현재 위치로 좌표 등록":"현재 위치를 좌표로 제안"}return}
@@ -2254,28 +2391,34 @@ function posDraw(){
 }
 function posMapShow(){
   const l=byId(PK.id),box=$("#posMap");if(!l||!box||!window.L)return;box.hidden=false;
-  if(!PK.map){const c=typeof l.lat==="number"?[l.lat,l.lng]:(PK.pos?[PK.pos.lat,PK.pos.lng]:[35.146,126.923]);
+  if(!PK.map){const c=typeof l.lat==="number"?[l.lat,l.lng]:(posFresh(PK.pos)?[PK.pos.lat,PK.pos.lng]:[35.146,126.923]);
     PK.map=L.map(box,{zoomControl:false,attributionControl:true,tap:true}).setView(c,18);DongguPWA.tileLayer(L).addTo(PK.map);PK.layer=L.layerGroup().addTo(PK.map)}
   posMapDraw();setTimeout(()=>{try{PK.map.invalidateSize()}catch(e){}},50);
 }
 function posMapDraw(){
   const l=byId(PK.id);if(!l||!PK.map)return;PK.layer.clearLayers();const pts=[];
   if(typeof l.lat==="number"){L.marker([l.lat,l.lng],{icon:L.divIcon({className:"lepin",html:'<div class="lepin-dot" style="cursor:default"></div>',iconSize:[30,30],iconAnchor:[15,15]}),interactive:false}).addTo(PK.layer);pts.push([l.lat,l.lng])}
-  if(PK.pos){L.circle([PK.pos.lat,PK.pos.lng],{radius:PK.pos.acc||0,color:"#2F5DA8",weight:1,fillOpacity:.1,interactive:false}).addTo(PK.layer);L.marker([PK.pos.lat,PK.pos.lng],{icon:L.divIcon({className:"posme",html:"<i></i>",iconSize:[14,14],iconAnchor:[7,7]}),interactive:false}).addTo(PK.layer);pts.push([PK.pos.lat,PK.pos.lng])}
+  if(posFresh(PK.pos)){L.circle([PK.pos.lat,PK.pos.lng],{radius:PK.pos.acc||0,color:"#2F5DA8",weight:1,fillOpacity:.1,interactive:false}).addTo(PK.layer);L.marker([PK.pos.lat,PK.pos.lng],{icon:L.divIcon({className:"posme",html:"<i></i>",iconSize:[14,14],iconAnchor:[7,7]}),interactive:false}).addTo(PK.layer);pts.push([PK.pos.lat,PK.pos.lng])}
   if(pts.length===2){L.polyline(pts,{color:"#E89A0C",weight:2,dashArray:"4 4",interactive:false}).addTo(PK.layer);PK.map.fitBounds(pts,{padding:[24,24],maxZoom:19})}else if(pts.length)PK.map.setView(pts[0],18);
 }
 async function posFix(){
-  const l=byId(PK.id),pos=PK.pos;if(!l||!pos)return;
-  if(!Number.isFinite(pos.acc)||pos.acc>POSITION_INPUT_MAX_M){toast(`위치 정확도(±${pos.acc}m)가 낮아 좌표로 쓸 수 없어요. 정보 수정의 지도에서 지정하세요.`);return}const has=typeof l.lat==="number";const dist=has?Math.round(distM(pos,l)):null;
-  if(can("admin")){
-    if(!await dgConfirm(`${l.code}의 좌표를 현재 위치(±${pos.acc}m)로 ${has?"바로잡아요. "+dist+"m 옮겨요.":"등록해요."} 변경 이력에 남아요.`,{title:has?"좌표를 바로잡을까요?":"좌표를 등록할까요?",ok:has?"바로잡기":"등록"}))return;
+  const check=PK,l=byId(check.id),pos=check.pos;if(!l||!pos||!S.canWrite||!can("inspect"))return;
+  if(!posFresh(pos)){posDraw();toast("위치 다시 잡기로 현재 위치를 확인해 주세요.");return}
+  if(!Number.isFinite(pos.acc)||pos.acc>POSITION_INPUT_MAX_M){toast(`위치 정확도(±${Math.round(pos.acc)}m)가 낮아 좌표로 쓸 수 없어요. 정보 수정의 지도에서 지정하세요.`);return}
+  const admin=can("admin"),actor=S.me,store=db,gen=navGen(),acc=Math.round(pos.acc);
+  const ready=()=>PK===check&&check.pos===pos&&posFresh(pos)&&S.me===actor&&db===store&&navAlive(gen)&&S.canWrite&&can("inspect")&&can("admin")===admin;
+  const has=typeof l.lat==="number",dist=has?Math.round(distM(pos,l)):null;
+  if(admin){
+    if(!await dgConfirm(`${l.code}의 좌표를 현재 위치(±${acc}m)로 ${has?"바로잡아요. "+dist+"m 옮겨요.":"등록해요."} 변경 이력에 남아요.`,{title:has?"좌표를 바로잡을까요?":"좌표를 등록할까요?",ok:has?"바로잡기":"등록"}))return;
+    if(!ready()){toast("위치나 화면이 바뀌었어요. 현재 위치를 확인한 뒤 다시 진행해 주세요.");return}
     const changes=[{f:"lat",from:has?l.lat:null,to:+pos.lat.toFixed(6)},{f:"lng",from:has?l.lng:null,to:+pos.lng.toFixed(6)}];
-    const entry={at:Date.now(),by:S.me||null,changes,note:`점검 중 위치 확인(GPS ±${pos.acc}m)`};
-    const ok=await write(()=>patchLight(l.id,{lat:changes[0].to,lng:changes[1].to,acc:pos.acc,posSuggest:null,posApprox:null,edits:withEdit(l,{...entry,prior:{posApprox:l.posApprox||null}}),updatedAt:entry.at}),`${l.code} 좌표를 현재 위치로 ${has?"바로잡았어요":"등록했어요"}.`);
+    const entry={at:Date.now(),by:S.me||null,changes,note:`점검 중 위치 확인(GPS ±${acc}m)`};
+    const ok=await write(()=>patchLight(l.id,{lat:changes[0].to,lng:changes[1].to,acc,posSuggest:null,posApprox:null,edits:withEdit(l,{...entry,prior:{posApprox:l.posApprox||null}}),updatedAt:entry.at}),`${l.code} 좌표를 현재 위치로 ${has?"바로잡았어요":"등록했어요"}.`);
     if(ok)setTimeout(()=>posDraw(),80);
   }else{
-    if(!await dgConfirm(`현재 위치(±${pos.acc}m)를 ${l.code}의 좌표로 제안해요. 관리자가 확인한 뒤 적용해요.`,{title:"좌표를 제안할까요?",ok:"제안"}))return;
-    const ok=await write(()=>patchLight(l.id,{posSuggest:{lat:+pos.lat.toFixed(6),lng:+pos.lng.toFixed(6),acc:pos.acc,dist:dist||0,at:Date.now(),by:S.me||null},updatedAt:Date.now()}),"좌표 제안을 남겼어요. 관리자가 적용할 수 있어요.");
+    if(!await dgConfirm(`현재 위치(±${acc}m)를 ${l.code}의 좌표로 제안해요. 관리자가 확인한 뒤 적용해요.`,{title:"좌표를 제안할까요?",ok:"제안"}))return;
+    if(!ready()){toast("위치나 화면이 바뀌었어요. 현재 위치를 확인한 뒤 다시 진행해 주세요.");return}
+    const ok=await write(()=>patchLight(l.id,{posSuggest:{lat:+pos.lat.toFixed(6),lng:+pos.lng.toFixed(6),acc,dist:dist||0,at:Date.now(),by:S.me||null},updatedAt:Date.now()}),"좌표 제안을 남겼어요. 관리자가 적용할 수 있어요.");
     if(ok){const fx=$("#posFix");if(fx)fx.hidden=true}
   }
 }
@@ -2327,8 +2470,8 @@ function refreshRepBox(id){const b=$("#repBox"),l=byId(id);if(!b||!l||b.dataset.
 async function openPhotoViewer(id){
   const g=navGen();const r=await getPhoto(id);if(!navAlive(g))return;if(!r){toast("사진을 불러오지 못했어요.");return}
   const sib=Object.values(GAL).filter(x=>x.lightId===r.lightId).sort((a,b)=>b.at-a.at);let i=Math.max(0,sib.findIndex(x=>x.id===id));
-  const ov=$("#ovl");ov.hidden=false;NAV.gen++;
-  const show=()=>{const x=sib[i]||r;ov.innerHTML=`<div class="bar"><b>${esc(x.code||"")}</b><span style="color:#A9B6CC">${esc(x.label||"")} · ${fmtDT(x.at)} · ${esc(S.names[x.by]||"점검자")}</span><button class="x" id="pvX" aria-label="닫기">×</button></div>
+  const ov=$("#ovl");ov.hidden=false;const viewGen=++NAV.gen;
+  const show=()=>{if(!navAlive(viewGen)||ov.hidden)return;const x=sib[i]||r;ov.innerHTML=`<div class="bar"><b>${esc(x.code||"")}</b><span style="color:#A9B6CC">${esc(x.label||"")} · ${fmtDT(x.at)} · ${esc(S.names[x.by]||"점검자")}</span><button class="x" id="pvX" aria-label="닫기">×</button></div>
     <div class="stage"><img class="full" src="${esc(safeImageSrc(x.data))}" alt="${esc(x.label||"")}"></div>
     ${x.note?`<div class="cap">${esc(x.note)}</div>`:""}
     <div class="tools"><button type="button" id="pvPrev" ${i<=0?"disabled":""}>‹ 이전</button><span style="color:#A9B6CC">${i+1} / ${sib.length||1}</span><button type="button" id="pvNext" ${i>=sib.length-1?"disabled":""}>다음 ›</button>${S.canWrite&&can("inspect")&&x.lightId&&byId(x.lightId)?(()=>{const rs=repSlots(byId(x.lightId));const cur=REP_SLOTS.find(k=>rs[k]&&rs[k].id===x.id);return cur?`<span style="color:#FFB347">대표 · ${esc(cur)}</span>`:`<button type="button" id="pvRep">대표 사진으로</button><span id="pvSlots" hidden>${REP_SLOTS.map(k=>`<button type="button" data-pvslot="${k}">${k}${rs[k]?" 바꾸기":""}</button>`).join("")}</span>`})():""}${dl?`<button type="button" id="pvDl" style="margin-left:auto">내려받기</button>`:""}</div>`;
@@ -2336,7 +2479,7 @@ async function openPhotoViewer(id){
     const rp=ov.querySelector("#pvRep");if(rp)rp.onclick=()=>{rp.hidden=true;ov.querySelector("#pvSlots").hidden=false};
     ov.querySelectorAll("[data-pvslot]").forEach(b=>b.onclick=async()=>{b.disabled=true;const ok=await setRepFromPhoto(x.lightId,x.id,b.dataset.pvslot);if(ok){setTimeout(()=>{refreshRepBox(x.lightId);show()},60)}else b.disabled=false});
     ov.querySelector("#pvPrev").onclick=()=>{if(i>0){i--;show()}};ov.querySelector("#pvNext").onclick=()=>{if(i<sib.length-1){i++;show()}};
-    const d=ov.querySelector("#pvDl");if(d)d.onclick=async()=>{try{const b=await (await fetch(x.data)).blob();await dl.save({filename:`${(x.code||"사진").replace(/\s+/g,"_")}_${fmtD(x.at).replace(/\./g,"")}_${x.label||""}.jpg`,data:b})}catch(e){}}};
+    const d=ov.querySelector("#pvDl");if(d)d.onclick=async()=>{try{const b=await (await fetch(x.data)).blob();if(!navAlive(viewGen)||ov.hidden)return;await dl.save({filename:`${(x.code||"사진").replace(/\s+/g,"_")}_${fmtD(x.at).replace(/\./g,"")}_${x.label||""}.jpg`,data:b})}catch(e){}}};
   show();
 }
 function openPhotoCompare(lightId){
@@ -2382,7 +2525,7 @@ function editedSection(){
 /* A desktop may have no GNSS: never copy coarse IP/Wi-Fi location into the lighting registry. */
 const POSITION_INPUT_MAX_M=50,POSITION_MAP_FOLLOW_MAX_M=150;
 function positionQuality(p,limit=POSITION_INPUT_MAX_M){
-  const c=p&&p.coords||{},acc=Number(c.accuracy);
+  const c=p&&p.coords||{},acc=c.accuracy;
   const valid=Number.isFinite(c.latitude)&&Math.abs(c.latitude)<=90&&Number.isFinite(c.longitude)&&Math.abs(c.longitude)<=180;
   return {ok:valid&&Number.isFinite(acc)&&acc>=0&&acc<=limit,acc:Number.isFinite(acc)&&acc>=0?Math.round(acc):null,label:Number.isFinite(acc)&&acc>=0?"±"+Math.round(acc)+"m":"확인 불가"};
 }
@@ -2623,13 +2766,81 @@ let ROADS=null;
 function idbOpen(){return new Promise((res,rej)=>{try{const r=indexedDB.open("dg-cache",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}})}
 async function idbGet(k){try{const d=await idbOpen();return await new Promise(res=>{const g=d.transaction("kv","readonly").objectStore("kv").get(k);g.onsuccess=()=>res(g.result);g.onerror=()=>res(null)})}catch(e){return null}}
 async function idbSet(k,v){try{const d=await idbOpen();await new Promise(res=>{const t=d.transaction("kv","readwrite");t.objectStore("kv").put(v,k);t.oncomplete=res;t.onerror=res})}catch(e){}}
-async function roadsLoad(onStatus){
-  if(ROADS)return ROADS;
-  const say=t=>onStatus&&onStatus(t);
-  const cached=await idbGet("roads");if(cached&&cached.ver===ROADS_VER&&cached.ways&&cached.ways.length){ROADS=cached;adongIndex();return ROADS}
-  if(db&&S.me!=="local"){say("공유 저장소에서 도로망을 읽는 중…");try{const snap=await db.collection("roads").get();const meta=snap.docs.find(d=>d.id==="meta");const md=meta?meta.data():null;
-    if(md&&md.ver===ROADS_VER){const parts=snap.docs.filter(d=>d.id.startsWith("part-")&&+d.id.slice(5)<(md.parts||0)).sort((a,b)=>+a.id.slice(5)-+b.id.slice(5));const ways=[],areas=[],pois=[];let bounds=[],gu=null;for(const d of parts){const x=d.data();ways.push(...(x.ways||[]));areas.push(...(x.areas||[]));pois.push(...(x.pois||[]));if(x.bounds)bounds=x.bounds;if(x.gu)gu=x.gu}
-      if(ways.length){ROADS={ver:ROADS_VER,ways,areas,bounds,gu,pois:md.pois!=null?pois:undefined,at:md.at||0,src:"db"};idbSet("roads",ROADS);adongIndex();return ROADS}}}catch(e){}}
+let roadLoadSequence=0;
+function roadCacheUsable(pack){
+  return pack?.ver===ROADS_VER&&Array.isArray(pack.ways)&&pack.ways.length>0&&
+    (pack.src==="osm"||pack.src==="db"&&pack.verified===true);
+}
+function sharedRoadPackage(snap){
+  const documents=new Map(snap.docs.map(d=>[d.id,d]));
+  const meta=documents.get("meta")?.data();
+  if(meta?.ver!==ROADS_VER||!Number.isInteger(meta.parts)||meta.parts<1||meta.parts>=documents.size)return null;
+  const parts=[];
+  for(let i=0;i<meta.parts;i++){
+    const part=documents.get("part-"+i)?.data();
+    if(!part||part.generation!==meta.generation)return null;
+    parts.push(part);
+  }
+  let pack;
+  if(meta.encoding==="json"){
+    if(!parts.every(part=>typeof part.payload==="string"))return null;
+    try{pack=JSON.parse(parts.map(part=>part.payload).join(""))}catch(e){return null}
+  }else if(meta.encoding==null){
+    const ways=[],areas=[],pois=[];let bounds=[],gu=null;
+    for(const part of parts){
+      if(!Array.isArray(part.ways)||!Array.isArray(part.areas)||
+        (part.pois!=null&&!Array.isArray(part.pois))||(meta.pois!=null&&part.pois==null))return null;
+      for(const way of part.ways)ways.push(way);
+      for(const area of part.areas)areas.push(area);
+      for(const poi of part.pois||[])pois.push(poi);
+      if(part.bounds)bounds=part.bounds;
+      if(part.gu)gu=part.gu;
+    }
+    pack={ways,areas,pois:meta.pois!=null?pois:undefined,bounds,gu};
+  }
+  if(!pack||!Array.isArray(pack.ways)||!pack.ways.length||pack.ways.length!==meta.count||
+    !Array.isArray(pack.areas)||pack.areas.length!==meta.areas||!Array.isArray(pack.bounds)||
+    (meta.pois!=null&&(!Array.isArray(pack.pois)||pack.pois.length!==meta.pois)))return null;
+  return {...pack,ver:ROADS_VER,at:meta.at||0,src:"db",verified:true};
+}
+
+async function publishRoadPackage(store,pack){
+  const {ways,areas,pois,bounds,gu,geometryWarnings,at}=pack;
+  const payload=JSON.stringify({ways,areas,pois,bounds,gu,geometryWarnings});
+  const generation=DGData.newId("roads"),batch=store.batch();
+  let offset=0,parts=0;
+  while(offset<payload.length){
+    let end=Math.min(offset+190000,payload.length);
+    // Avoid cutting a Unicode surrogate pair between Firestore strings.
+    if(end<payload.length&&/[\uD800-\uDBFF]/.test(payload[end-1]))end--;
+    batch.set(store.doc("roads/part-"+parts++),{generation,payload:payload.slice(offset,end)});
+    offset=end;
+  }
+  // Coordinates contain nested arrays, so encode the chunks as strings and replace the whole snapshot atomically.
+  batch.set(store.doc("roads/meta"),{ver:ROADS_VER,at,generation,encoding:"json",parts,
+    count:ways.length,areas:areas.length,pois:pois.length,attribution:"© OpenStreetMap contributors (ODbL)"});
+  await batch.commit();
+
+}
+async function roadsLoad(onStatus,{refresh=false}={}){
+  if(!refresh&&roadCacheUsable(ROADS))return ROADS;
+  const seq=++roadLoadSequence,store=db,actor=S.me;
+  const current=()=>seq===roadLoadSequence&&db===store&&S.me===actor&&!S.fbError;
+  const requireCurrent=()=>{if(!current())throw new Error("road-load-superseded")};
+  const say=t=>{if(current())onStatus?.(t)};
+  const install=pack=>{requireCurrent();ROADS=pack;adongIndex();return pack};
+  if(!refresh){
+    const cached=await idbGet("roads");
+    requireCurrent();
+    if(roadCacheUsable(cached))return install(cached);
+    if(store&&actor!=="local"){
+      say("공유 저장소에서 도로망을 읽는 중…");
+      let shared;
+      try{shared=sharedRoadPackage(await store.collection("roads").get())}catch(e){}
+      requireCurrent();
+      if(shared){install(shared);idbSet("roads",shared);return shared}
+    }
+  }
   say("OpenStreetMap에서 동구 도로망을 받는 중… (휴대폰 데이터 약 4MB, 수 초에서 1분)");
   const bb=ROAD_BBOX.join(",");
   const q=`[out:json][timeout:120];(way["highway"~"^(${ROAD_TYPES})$"](${bb});
@@ -2640,8 +2851,16 @@ async function roadsLoad(onStatus){
     node["highway"~"^(crossing|bus_stop)$"](${bb});node["amenity"~"^(school|kindergarten|childcare)$"](${bb});way["amenity"~"^(kindergarten|childcare)$"](${bb});relation["amenity"~"^(kindergarten|childcare)$"](${bb});node["public_transport"="platform"]["bus"="yes"](${bb}););out geom;`;
   let data=null,err=null;
   for(const ep of ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"]){
-    try{const r=await fetch(ep,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"}});if(r.ok){data=await r.json();break}err=new Error("HTTP "+r.status)}catch(e){err=e}
+    requireCurrent();
+    try{
+      const r=await fetch(ep,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"}});
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      const result=await r.json();
+      if(result.remark||!Array.isArray(result.elements))throw new Error("Incomplete Overpass response");
+      data=result;break;
+    }catch(e){err=e}
   }
+  requireCurrent();
   if(!data)throw err||new Error("overpass");
   const ways=[],areas=[],bounds=[],pois=[];let gu=null,geometryWarnings=0;
   // 횡단보도·버스정류장·학교·어린이 시설: candidates near them are checked first (the brightness index is unchanged)
@@ -2661,11 +2880,15 @@ async function roadsLoad(onStatus){
     }
   }
   if(!ways.length)throw new Error("empty");
-  ROADS={ver:ROADS_VER,ways,areas,bounds,gu,pois,geometryWarnings,at:Date.now(),src:"osm"};idbSet("roads",ROADS);adongIndex();
-  if(db&&S.canWrite&&S.me!=="local"){say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");try{const chunks=[];let cur={ways:[],areas:[],pois:[]},size=0;const push=(key,x)=>{const s=JSON.stringify(x).length+1;if(size+s>190000){chunks.push(cur);cur={ways:[],areas:[],pois:[]};size=0}cur[key].push(x);size+=s};
-    for(const w of ways)push("ways",w);for(const a of areas)push("areas",a);for(const p of pois)push("pois",p);if(cur.ways.length||cur.areas.length||cur.pois.length)chunks.push(cur);chunks[0].bounds=bounds;chunks[0].gu=gu;
-    for(let i=0;i<chunks.length;i++)await db.doc("roads/part-"+i).set(chunks[i]);await db.doc("roads/meta").set({ver:ROADS_VER,at:ROADS.at,parts:chunks.length,count:ways.length,areas:areas.length,pois:pois.length,attribution:"© OpenStreetMap contributors (ODbL)"})}catch(e){}}
-  return ROADS;
+  const fresh=install({ver:ROADS_VER,ways,areas,bounds,gu,pois,geometryWarnings,at:Date.now(),src:"osm"});
+  idbSet("roads",fresh);
+  if(store&&actor!=="local"&&S.canWrite&&can("admin")&&typeof store.batch==="function"){
+    say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");
+    requireCurrent();
+    try{await publishRoadPackage(store,fresh)}catch(e){fresh.shareFailed=true}
+  }
+  requireCurrent();
+  return fresh;
 }
 /* assign every light its 행정동 from the boundary polygons that came with the road network */
 function adongIndex(){
@@ -3359,36 +3582,47 @@ function patrolLightPatch(current,mark){
   return Object.prototype.hasOwnProperty.call(patch,"status")?patch:{};
 }
 async function commitPatrolJob(job){
+  const database=db,firebaseBackend=FB,actor=S.me;
+  const ensure=()=>{
+    if(!database||!actor||db!==database||FB!==firebaseBackend||S.me!==actor||S.canWrite===false||
+      (firebaseBackend&&firebaseBackend.auth.currentUser?.uid!==actor)||
+      (Object.hasOwn(job.rec,"by")&&job.rec.by!==actor))
+      throw Object.assign(new Error("계정 또는 저장소가 바뀌어 이전 순찰을 저장하지 않았어요."),{code:"permission-denied"});
+  };
+  ensure();
   // Rebuild from observations at send time, including old jobs which carried unsafe normal-clearing patches.
   const candidates=[...(job.inspections||[]).map(i=>({path:"inspections/"+i.id,data:i.data})),...(job.rec.marks||[]).filter(m=>["고장","점검필요"].includes(m.result)).map(mark=>({path:"lights/"+mark.id,mark})),{path:"patrols/"+job.id,data:job.rec}];
   async function stage(rows,read){
     const ops=[],expected={};
     for(const row of rows){
       if(!row.mark){ops.push({...row,merge:true});continue}
-      const current=await read(row.path),patch=patrolLightPatch(current||{},row.mark);
+      const current=await read(row.path);ensure();
+      const patch=patrolLightPatch(current||{},row.mark);
       if(Object.keys(patch).length){ops.push({path:row.path,data:patch,merge:true});expected[row.path]=current?{document:current}:null}
     }
     return{ops,expected};
   }
   const value=snap=>snap&&snap.exists!==false&&typeof snap.data==="function"?snap.data()||null:null;
-  if(FB){
+  if(firebaseBackend){
     // Reads and status decisions share a transaction, including administrators who can bypass staff rules.
     // Large sessions retain immutable IDs and write their patrol document last, so a partial retry is safe.
     for(let at=0;at<candidates.length;at+=400){const rows=candidates.slice(at,at+400);
-      await FB.fs.runTransaction(async transaction=>{
-        const prepared=await stage(rows,async path=>value(await transaction.get(FB.fs.doc(path))));
-        for(const op of prepared.ops)transaction.set(FB.fs.doc(op.path),op.data,{mergeFields:Object.keys(op.data)});
+      ensure();await firebaseBackend.fs.runTransaction(async transaction=>{
+        ensure();
+        const prepared=await stage(rows,async path=>value(await transaction.get(firebaseBackend.fs.doc(path))));
+        ensure();
+        for(const op of prepared.ops)transaction.set(firebaseBackend.fs.doc(op.path),op.data,{mergeFields:Object.keys(op.data)});
       });
     }
-  }else if(typeof db.commitMany==="function"){
+  }else if(typeof database.commitMany==="function"){
     for(let attempt=0;;attempt++){
-      const prepared=await stage(candidates,async path=>value(await db.doc(path).get()));
-      try{await db.commitMany(prepared.ops,{expected:prepared.expected});break}catch(error){if(error.code!=="conflict"||attempt>=3)throw error}
+      ensure();const prepared=await stage(candidates,async path=>value(await database.doc(path).get()));
+      ensure();try{await database.commitMany(prepared.ops,{expected:prepared.expected});break}catch(error){if(error.code!=="conflict"||attempt>=3)throw error}
     }
   }else{
     // The artifact backend reduces immutable light-field operations by timestamp when reading them.
     const prepared=await stage(candidates,async path=>await lightState(path.slice(7)));
-    for(const op of prepared.ops){if(op.path.startsWith("lights/"))await patchLight(op.path.slice(7),op.data,job.id+"-"+op.path.slice(7));else{const ref=db.doc(op.path),snap=await ref.get(),current=value(snap);if(current)await ref.update(op.data);else await ref.set(op.data)}}
+    for(const op of prepared.ops){ensure();if(op.path.startsWith("lights/"))await patchLight(op.path.slice(7),op.data,job.id+"-"+op.path.slice(7));else{const ref=database.doc(op.path),snap=await ref.get(),current=value(snap);ensure();if(current)await ref.update(op.data);else await ref.set(op.data)}}
   }
   return job.id;
 }
@@ -4154,4 +4388,4 @@ const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;repConfirmC
 initializeOperations();
 render();
 try{if(localStorage.getItem("dg-near")==="1"){S.near=false;nearToggle()}}catch(e){}
-boot().then(async()=>{await DGIntegration.ready();idbGet("roads").then(r=>{if(r&&r.ver===ROADS_VER&&r.ways&&r.ways.length){ROADS=r;adongIndex();render()}})}).catch(e=>toast("앱 초기화를 마치지 못했어요: "+e.message));
+boot().then(async()=>{await DGIntegration.ready();idbGet("roads").then(r=>{if(!S.fbError&&roadLoadSequence===0&&roadCacheUsable(r)){ROADS=r;adongIndex();render()}})}).catch(e=>toast("앱 초기화를 마치지 못했어요: "+e.message));

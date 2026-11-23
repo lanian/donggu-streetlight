@@ -142,11 +142,13 @@ const HERE = { latitude: 35.1530952, longitude: 126.9217072, accuracy: 9 };
     checks.push('다음 N곳 경로');
     await page.evaluate(() => { window.__opened = []; });
     await page.locator('[data-dg="plan-route-ahead"]').click();
-    await page.locator('#dgDialog [data-dgdlg-choice]', { hasText: '구글 지도 · 도보' }).click();
+    const googleWalking = page.locator('#dgDialog [data-dgdlg-choice]', { hasText: '구글 지도 · 도보' });
+    assert.match(await googleWalking.textContent(), /처음 4곳까지 안내/);
+    await googleWalking.click();
     const ahead = await page.evaluate(() => { const p = DGOperations.state.plan; return p.stops.filter(s => !s.visited && (byId(s.id).lastInspected || 0) < p.createdAt).slice(0, 6); });
     const routeUrl = new URL((await page.evaluate(() => window.__opened))[0]);
-    assert.equal(routeUrl.searchParams.get('destination'), ahead[5].lat + ',' + ahead[5].lng, 'the sixth open stop is the destination');
-    assert.equal(routeUrl.searchParams.get('waypoints'), ahead.slice(0, 5).map(s => s.lat + ',' + s.lng).join('|'), 'the five before it are waypoints in order');
+    assert.equal(routeUrl.searchParams.get('destination'), ahead[3].lat + ',' + ahead[3].lng, 'the fourth open stop is the mobile Google destination');
+    assert.equal(routeUrl.searchParams.get('waypoints'), ahead.slice(0, 3).map(s => s.lat + ',' + s.lng).join('|'), 'the three before it are waypoints in order');
     assert.equal(routeUrl.searchParams.get('travelmode'), 'walking');
     assert.match(await page.locator('.dg-plan p').first().textContent(), /남은 8곳 약 [\d.]+k?m\(내 위치부터\)/);
     // 카카오맵 app: my position as the start (sp), the first five open stops as vp, vp2 … vp5, the sixth as ep, in order

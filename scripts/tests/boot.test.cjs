@@ -109,7 +109,7 @@ test('an indefinitely pending profile write does not block Firebase cached liste
     ]);
   } finally { clearTimeout(timer); }
   assert.equal(profileWrites, 1);
-  assert.equal(unsubscribed, 1);
+  assert.equal(unsubscribed, 0);
   assert.equal(scripts.length, 3);
   assert.equal(sandbox.db, firestore);
   assert.equal(sandbox.S.me, 'inspector-a');
@@ -223,4 +223,90 @@ test('after a refresh a signed-in staff member sees "checking role" until the ro
   ui.S.rolesSeen = true; vm.runInContext('render()', ui);
   assert.doesNotMatch(view.innerHTML, /역할을 확인하는 중/, 'once known, a person without a staff role gets the resident screen');
   assert.equal(ui.S.tab, 'report');
+});
+
+function firebaseSessionFixture({ persistenceFails = false } = {}) {
+  let authChange, stopped = 0;
+  const listeners = new Map(), modes = [], resets = [], notices = [];
+  const auth = {
+    currentUser: { uid: 'staff-a' },
+    async setPersistence(mode) { modes.push(mode); },
+    onAuthStateChanged(callback) {
+      authChange = callback;
+      queueMicrotask(() => callback(auth.currentUser));
+      return () => { authChange = null; };
+    },
+    async getRedirectResult() {}
+  };
+  const firestore = {
+    async enablePersistence() { if (persistenceFails) throw new Error('unavailable'); },
+    collection(name) {
+      return {
+        doc: () => ({ set: async () => {} }), orderBy() { return this; }, limit() { return this; },
+        onSnapshot(options, next, error) { listeners.set(name, { next, error }); return () => { stopped++; }; }
+      };
+    }
+  };
+  const sandbox = vm.createContext({
+    window: { DG_DEVICE_TRUSTED: true }, S: { canWrite: true, roles: [], reports: [] }, FB: null, db: null, user: null,
+    firebase: { apps: [{}], firestore: () => firestore, auth: () => auth },
+    loadScript: async () => {}, setSync() {}, render() {}, onLights() {}, ptIndex() {}, resolveNames() {}, dataChanged() {},
+    toast: message => notices.push(message), clearFirebaseView: () => resets.push('view')
+  });
+  vm.runInContext(firebaseSource, sandbox);
+  const snapshot = (rows, fromCache = false) => ({
+    docs: rows.map(({ id, ...data }) => ({ id, data: () => data })),
+    empty: rows.length === 0, metadata: { fromCache }
+  });
+  return {
+    sandbox, listeners, modes, resets, notices, stopped: () => stopped,
+    boot: () => vm.runInContext('fbBoot({projectId:"demo"})', sandbox),
+    change(user) { auth.currentUser = user; authChange?.(user); },
+    snapshot
+  };
+}
+
+test('Firebase account changes close the previous work context and ignore late snapshots', async () => {
+  const f = firebaseSessionFixture(); await f.boot();
+  f.listeners.get('roles').next(f.snapshot([{ id: 'staff-a', role: 'admin' }]));
+  const reports = f.listeners.get('reports');
+  reports.next(f.snapshot([{ id: 'previous-report' }]));
+  f.change({ uid: 'staff-b' });
+  reports.next(f.snapshot([{ id: 'late-report' }]));
+  assert.equal(f.sandbox.S.me, null);
+  assert.equal(f.sandbox.S.canWrite, false);
+  assert.equal(f.sandbox.S.reports.length, 0);
+  assert.equal(f.sandbox.S.roles.length, 0);
+  assert.equal(f.sandbox.db, null);
+  assert.equal(f.stopped(), 5);
+  assert.equal(f.resets.length, 1);
+});
+
+test('a permission denial after staff authorization clears protected snapshots', async () => {
+  const f = firebaseSessionFixture(); await f.boot();
+  f.listeners.get('roles').next(f.snapshot([{ id: 'staff-a', role: 'admin' }]));
+  f.listeners.get('reports').next(f.snapshot([{ id: 'prior-report' }]));
+  f.listeners.get('roles').error({ code: 'permission-denied' });
+  assert.equal(f.sandbox.S.canWrite, false);
+  assert.equal(f.sandbox.S.roles.length, 0);
+  assert.equal(f.sandbox.S.reports.length, 0);
+  assert.equal(f.stopped(), 5);
+});
+
+test('a server-confirmed role change closes privileged view, but an empty cache keeps the known scope', async () => {
+  const f = firebaseSessionFixture(); await f.boot();
+  const roles = f.listeners.get('roles');
+  roles.next(f.snapshot([{ id: 'staff-a', role: 'admin' }]));
+  roles.next(f.snapshot([], true));
+  assert.equal(f.sandbox.S.canWrite, true);
+  roles.next(f.snapshot([{ id: 'staff-a', role: 'inspector' }, { id: 'supervisor', role: 'admin' }]));
+  assert.equal(f.sandbox.S.canWrite, false);
+  assert.equal(f.resets.length, 1);
+});
+
+test('Firebase persistence fallback actually uses shared session authentication', async () => {
+  const f = firebaseSessionFixture({ persistenceFails: true }); await f.boot();
+  assert.deepEqual(f.modes, ['session']);
+  assert.equal(f.sandbox.window.DG_DEVICE_TRUSTED, false);
+  assert.match(f.notices[0], /공유 PC/);
 });

@@ -10,6 +10,9 @@
   let storage = null, namespace = '', durable = false, networkRequired = true, generation = 0, openPromise = null;
   const errorText = error => String(error && (error.message || error.code) || '저장 요청을 완료하지 못했어요.').slice(0, 300);
   const canonical = value => value == null || typeof value !== 'object' ? JSON.stringify(value) : Array.isArray(value) ? '[' + value.map(canonical).join(',') + ']' : '{' + Object.keys(value).sort().filter(k => value[k] !== undefined).map(k => JSON.stringify(k) + ':' + canonical(value[k])).join(',') + '}';
+  const matchesDraft = (current, revision, expectedValue) =>
+    (current ? current.value.draftRevision || 0 : null) === revision &&
+    (expectedValue === undefined || canonical(current?.value ?? null) === canonical(expectedValue));
   async function fingerprint(value) {
     if (!root.crypto || !root.crypto.subtle) throw new Error('안전한 저장 확인을 위해 HTTPS 주소 또는 지원되는 브라우저에서 열어 주세요.');
     const digest = await root.crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical(value)));
@@ -40,9 +43,9 @@
         if (values.has(key)) return { value: copy(values.get(key)), created: false };
         values.set(key, copy(value)); return { value: copy(value), created: true };
       },
-      compareAndSet: async (key, expectedRevision, value) => {
+      compareAndSet: async (key, expectedRevision, value, expectedValue) => {
         const current = values.get(key) || null;
-        if ((current ? current.value.draftRevision || 0 : null) !== expectedRevision) return { applied: false, current: copy(current) };
+        if (!matchesDraft(current, expectedRevision, expectedValue)) return { applied: false, current: copy(current) };
         if (value === null) values.delete(key); else values.set(key, copy(value));
         return { applied: true };
       },
@@ -72,11 +75,11 @@
           done({ value: copy(value), created: true });
         };
       }),
-      compareAndSet: (key, expectedRevision, value) => transact('readwrite', (store, done) => {
+      compareAndSet: (key, expectedRevision, value, expectedValue) => transact('readwrite', (store, done) => {
         const recordKey = ns + '|' + key, request = store.get(recordKey);
         request.onsuccess = () => {
           const current = request.result ? request.result.value : null;
-          if ((current ? current.value.draftRevision || 0 : null) !== expectedRevision) return done({ applied: false, current });
+          if (!matchesDraft(current, expectedRevision, expectedValue)) return done({ applied: false, current });
           if (value === null) store.delete(recordKey);
           else store.put({ key: recordKey, namespace: ns, item: key, value: copy(value) });
           done({ applied: true });
@@ -112,20 +115,20 @@
     await store.write(key, { id, kind, value: copy(value), updatedAt: Date.now() });
     emit({ type: 'draft', kind, id });
   }
-  async function putIfCurrent(kind, id, value, expectedRevision = null) {
+  async function putIfCurrent(kind, id, value, expectedRevision = null, expectedValue) {
     const store = requireStore(), gen = generation;
     if (typeof store.compareAndSet !== 'function') throw Object.assign(new Error('이 저장소는 충돌을 확인하는 초안 저장을 지원하지 않아요.'), { code: 'unsupported-backend' });
     if (expectedRevision !== null && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) throw new Error('초안 버전을 확인해 주세요.');
     const saved = { ...copy(value), draftRevision: (expectedRevision || 0) + 1 };
-    const result = await store.compareAndSet(kind + ':' + id, expectedRevision, { id, kind, value: saved, updatedAt: Date.now() });
+    const result = await store.compareAndSet(kind + ':' + id, expectedRevision, { id, kind, value: saved, updatedAt: Date.now() }, expectedValue);
     if (gen !== generation) throw Object.assign(new Error('초안을 저장하는 동안 계정이 바뀌었어요.'), { code: 'account-changed' });
     if (!result.applied) throw Object.assign(new Error('다른 탭에서 이 초안을 변경했어요. 최신 내용과 비교해 주세요.'), { code: 'conflict' });
     emit({ type: 'draft', kind, id }); return copy(saved);
   }
-  async function removeIfCurrent(kind, id, expectedRevision) {
+  async function removeIfCurrent(kind, id, expectedRevision, expectedValue) {
     const store = requireStore(), gen = generation;
     if (typeof store.compareAndSet !== 'function') throw Object.assign(new Error('이 저장소는 충돌을 확인하는 초안 삭제를 지원하지 않아요.'), { code: 'unsupported-backend' });
-    const result = await store.compareAndSet(kind + ':' + id, expectedRevision, null);
+    const result = await store.compareAndSet(kind + ':' + id, expectedRevision, null, expectedValue);
     if (gen !== generation) throw Object.assign(new Error('초안을 처리하는 동안 계정이 바뀌었어요.'), { code: 'account-changed' });
     if (!result.applied && result.current !== null) throw Object.assign(new Error('다른 탭에서 변경한 초안은 지우지 않았어요.'), { code: 'conflict' });
     emit({ type: 'removed', kind, id }); return true;

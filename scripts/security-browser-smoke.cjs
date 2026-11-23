@@ -56,6 +56,35 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.evaluate(() => window.__xss), undefined);
     assert.equal(await page.locator('#sheet .sheet-head h3 img').count(), 0);
 
+    checks.push('an account change closes staff details, photos and pending confirmations');
+    const lock = await page.evaluate(async () => {
+      let authChanged;
+      const auth = {
+        currentUser: { uid: 'staff-a' },
+        setPersistence: async () => {},
+        getRedirectResult: async () => {},
+        onAuthStateChanged: fn => { authChanged = fn; queueMicrotask(fn); return () => {}; }
+      };
+      const query = {
+        doc: () => ({ set: async () => {} }),
+        orderBy() { return this; }, limit() { return this; }, onSnapshot: () => () => {}
+      };
+      window.firebase = { apps: [{}], firestore: () => ({ collection: () => query }), auth: () => auth };
+      await fbBoot({});
+      const overlay = document.querySelector('#ovl');
+      overlay.hidden = false; overlay.textContent = '이전 계정 사진 메모';
+      const confirmation = DGDialog.confirm('이전 계정 확인');
+      const nextPrompt = DGDialog.prompt('이전 계정 후속 입력');
+      auth.currentUser = { uid: 'staff-b' }; authChanged();
+      return {
+        locked: S.fbAccessChanged && !S.canWrite, photoVisible: !overlay.hidden, photo: overlay.textContent,
+        sheet: document.querySelector('#sheetIn').textContent, dialogOpen: DGDialog.isOpen(),
+        confirmResult: await confirmation, promptResult: await nextPrompt
+      };
+    });
+    assert.deepEqual(lock, { locked: true, photoVisible: false, photo: '', sheet: '', dialogOpen: false, confirmResult: false, promptResult: null });
+    assert.match(await page.locator('#view h3').textContent(), /계정이나 접근 권한이 바뀌었어요/);
+
     assert.deepEqual(errors.filter(e => !/Content Security Policy|evil\.example/.test(e)), []);
     console.log(JSON.stringify({ results: checks, browserErrors: errors }, null, 2));
   } finally { await context.close(); await browser.close(); server.close(); }
