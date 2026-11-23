@@ -77,6 +77,31 @@
       if (api.activeDraft() === d) { api.setDraft(null); api.closeSheet(); }
     });
   }
+  async function restoreInspectionDraft(id) {
+    const owner = captureOwner(), generation = api.navGen?.();
+    const current = () => ownsOwner(owner) && canInspect() && (generation == null || api.navAlive(generation));
+    if (!current()) return;
+    await draftWrite.catch(() => {});
+    if (!current()) return;
+    const saved = await owner.offline.get('draft', id);
+    if (!current()) return;
+    const active = syncMemo(api.activeDraft()), local = active?.lightId === id ? active : api.drafts()[id];
+    const content = draftContent(local);
+    if (hasDraftInput(local) && content !== draftContent(draftBaselines.get(local)) && content !== draftContent(saved)) {
+      api.toast('이 창의 최신 입력을 먼저 열었어요. 다른 탭에 저장된 초안도 저장 대기함에 남아 있어요.');
+      return api.openLight(id);
+    }
+    if (active?.lightId === id) api.setDraft(null);
+    if (!saved || saved.lightId !== id) {
+      delete api.drafts()[id];
+      api.toast('이어 쓸 점검 초안이 없어요. 저장 대기함을 새로 확인해 주세요.');
+      return;
+    }
+    const draft = copy(saved);
+    draftBaselines.set(draft, saved);
+    api.drafts()[id] = draft;
+    return api.openLight(id);
+  }
   function unpreservedInspectionDrafts(stored) {
     if (suspended) return [];
     const active = syncMemo(api.activeDraft()), entries = new Map(stored.map(row => [row.id, row.value])), drafts = new Map(Object.entries(api.drafts()));
@@ -331,6 +356,6 @@
     root.addEventListener('pagehide', () => { persistDraft().catch(() => {}); persistPatrol().catch(() => {}); });
     root.DG_HAS_UNSAVED_WORK = hasUnsaved; root.DG_HAS_UNSAVED_WORK_SYNC = hasUnsavedSync;
   }
-  root.DGIntegration = { attach, ready, suspend, persistDraft, discardInspectionDraft, scheduleDraft, persistPatrol, restorePatrol, saveInspection, savePatrol, unpreservedInspectionDrafts, hasUnsaved, hasUnsavedSync, captureForm, restoreForm,
+  root.DGIntegration = { attach, ready, suspend, persistDraft, discardInspectionDraft, restoreInspectionDraft, scheduleDraft, persistPatrol, restorePatrol, saveInspection, savePatrol, unpreservedInspectionDrafts, hasUnsaved, hasUnsavedSync, captureForm, restoreForm,
     whenReady: () => suspended ? Promise.resolve(false) : readyPromise, flushDraftWrites: () => draftWrite, get initialized() { return initialized; } };
 })(globalThis);

@@ -200,3 +200,27 @@ test('a photo added while an inspection is saving remains in the newer draft', a
   assert.deepEqual(c.draft.photos.map(p => p.id), ['before', 'after']);
   assert.deepEqual(h.storage.get('draft:L1').value.photos.map(p => p.id), ['before', 'after']);
 });
+
+test('outbox resumes the latest inspection from storage when another tab wrote it after startup', async () => {
+  const h = harness(), c = h.context;
+  await c.DGIntegration.ready();
+  h.putDraft('draft', 'L1', { lightId: 'L1', checks: {}, photos: [], memo: 'newer peer inspection', draftRevision: 4 });
+  await c.DGOperations.refreshQueue();
+  h.click('recover-draft', { kind: 'draft', id: 'L1' });
+  await until(() => h.opened.length > 0);
+  assert.equal(c.draft.memo, 'newer peer inspection');
+});
+
+test('outbox resume does not silently replace this tab’s conflicted unsaved inputs', async () => {
+  const h = harness(), c = h.context;
+  h.putDraft('draft', 'L1', { lightId: 'L1', checks: {}, photos: [], memo: 'original', draftRevision: 4 });
+  await c.DGIntegration.ready();
+  c.DRAFTS.L1.memo = 'unsaved in this tab';
+  h.putDraft('draft', 'L1', { lightId: 'L1', checks: {}, photos: [], memo: 'newer peer inspection', draftRevision: 5 });
+  await c.DGOperations.refreshQueue();
+  h.click('recover-draft', { kind: 'draft', id: 'L1' });
+  await until(() => h.opened.length > 0);
+  assert.equal(c.draft.memo, 'unsaved in this tab');
+  assert.ok(h.toasts.some(message => message.includes('이 창의 최신 입력')));
+  assert.equal(h.storage.get('draft:L1').value.memo, 'newer peer inspection');
+});
