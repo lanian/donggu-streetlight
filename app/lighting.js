@@ -145,7 +145,7 @@
       (source ? select('lcStatus', '관찰 당시 점등 상태', { unknown: '미확인', on: '켜짐', off: '꺼짐' }, d.status) + '<p class="muted">반경·영향 가정은 상대 모델 입력이에요. 광도·조도 실측값이나 조명 설계값이 아니에요.</p>' : field('lcInstrument', '측정 기기·방법 (실측 입력 시 필수)', d.instrument, 'maxlength="100" placeholder="예: 조도계 모델, 보행면 수평 측정"') + '<p class="muted">밝기 판단과 lux는 기록한 범위 안의 관찰이에요. 주변 길 전체로 확대하거나 모델 지수로 변환하지 않아요.</p>') +
       field('lcObservedAt', '실제로 확인한 날짜·시각 (한국 시간)', kstInput(d.observedAt), 'type="datetime-local" required') +
       (d.sourceAgency ? '<p class="muted">자료 출처: ' + E(d.sourceAgency) + ' / ' + E(d.sourceRecordId) + ' · ' + E(d.sourceDataset) + '<br>원본 갱신 ' + (d.sourceUpdatedAt ? E(kstTime(d.sourceUpdatedAt)) : '미제공') + ' · 반입 ' + E(kstTime(d.importedAt)) + '</p>' : '') +
-      (d.originKind ? '<p class="muted">연결 원본: ' + (d.originKind === 'patrol' ? '순찰 ' : '재확인 업무 ') + E(d.originId) + (d.originPointId ? ' / 지점 ' + E(d.originPointId) : '') + (d.positionAccuracy ? ' · GPS ±' + E(d.positionAccuracy) + 'm' : '') + '</p>' : '') +
+      (d.originKind ? '<p class="muted">연결 원본: ' + (d.originKind === 'patrol' ? '순찰 ' : '재확인 업무 ') + E(d.originId) + (d.originPointId ? ' / 지점 ' + E(d.originPointId) : '') + '<span id="lcOriginAccuracy">' + (d.positionAccuracy ? ' · GPS ±' + E(Math.round(d.positionAccuracy)) + 'm' : '') + '</span></p>' : '') +
       '<label class="f"><input id="lcNight" type="checkbox" ' + (d.nightConfirmed ? 'checked' : '') + '> 실제 해가 진 뒤 확인했어요</label>' +
       select('lcSchedule', source ? '점등 시간 정보' : '이 관찰을 적용할 시간대', source ? { unknown: '모름 · 수치 보완 없이 확인 대상으로 표시', hours: '확인한 시간대', always: '상시 점등 확인' } : { hours: '관찰한 시간대', unknown: '시간대 미확인' }, d.schedule) +
       '<div class="grid2"><div>' + field('lcStart', '시작 (한국 시간)', minuteText(d.startMinute), 'type="time"') + '</div><div>' + field('lcEnd', '종료 (다음 날 가능)', minuteText(d.endMinute), 'type="time"') + '</div></div><p class="muted">상가가 문을 닫거나 조명이 꺼지는 시간을 반영해 주세요. 시간 미확인·야간 미확인 자료는 밝기 수치 보완에 쓰지 않아요.</p>' +
@@ -157,11 +157,19 @@
       '<p id="lcSaveState" class="muted" role="status">' + (root.DGOffline.durable ? '작성 내용은 이 기기에 자동 보관돼요.' : '현재 창에서만 초안을 보관해요.') + '</p></form>', { key: 'lcedit', reopen: () => renderEditor() });
   }
   function CATEGORIES_SOURCE() { const result = { ...CATEGORIES }; delete result.field; return result; }
+  function setPositionAccuracy(data, accuracy) {
+    if (!data.originKind) return;
+    data.positionAccuracy = accuracy;
+    const label = Q('#lcOriginAccuracy');
+    if (label) label.textContent = accuracy ? ' · GPS ±' + Math.round(accuracy) + 'm' : '';
+  }
   function readForm() {
     const draft = state.draft; if (!draft || Q('#lcForm')?.dataset.recordId !== draft.recordId || draft.readonly || draft.pending) return draft;
     const d = draft.data, num = id => Q(id).value === '' ? '' : Number(Q(id).value);
     if (d.kind === 'obstruction') { Object.assign(d, { label: Q('#lcLabel').value, category: Q('#lcCategory').value, operator: Q('#lcOperator').value, lat: num('#lcLat'), lng: num('#lcLng'), radius: num('#lcRadius'), strength: Q('#lcStrength').value, observedAt: Date.parse(Q('#lcObservedAt').value + '+09:00'), validDays: num('#lcValidDays'), note: Q('#lcNote').value }); return draft; }
-    Object.assign(d, { label: Q('#lcLabel').value, lat: num('#lcLat'), lng: num('#lcLng'), radius: num('#lcRadius'), observedAt: Date.parse(Q('#lcObservedAt').value + '+09:00'), nightConfirmed: Q('#lcNight').checked, schedule: Q('#lcSchedule').value, startMinute: parseMinute(Q('#lcStart').value), endMinute: parseMinute(Q('#lcEnd').value), validDays: num('#lcValidDays'), note: Q('#lcNote').value });
+    const lat = num('#lcLat'), lng = num('#lcLng');
+    if (d.lat !== lat || d.lng !== lng) setPositionAccuracy(d, 0);
+    Object.assign(d, { label: Q('#lcLabel').value, lat, lng, radius: num('#lcRadius'), observedAt: Date.parse(Q('#lcObservedAt').value + '+09:00'), nightConfirmed: Q('#lcNight').checked, schedule: Q('#lcSchedule').value, startMinute: parseMinute(Q('#lcStart').value), endMinute: parseMinute(Q('#lcEnd').value), validDays: num('#lcValidDays'), note: Q('#lcNote').value });
     if (d.kind === 'source') Object.assign(d, { category: Q('#lcCategory').value, operator: Q('#lcOperator').value, strength: Q('#lcStrength').value, status: Q('#lcStatus').value, linkedLightId: Q('#lcLinked').value, distinct: Q('#lcDistinct').checked });
     else Object.assign(d, { level: Q('#lcLevel').value, lux: Q('#lcLux').value === '' ? null : +Q('#lcLux').value, instrument: Q('#lcInstrument').value });
     return draft;
@@ -225,8 +233,27 @@
     if (action === 'pick-map') return pickMap();
     if (action === 'gps') {
       if (!root.navigator.geolocation) return api.toast('현재 위치를 사용할 수 없어요. 좌표나 지도를 이용해 주세요.');
-      button.disabled = true; const form = Q('#lcForm');
-      root.navigator.geolocation.getCurrentPosition(position => { button.disabled = false; if (!form.isConnected || form !== Q('#lcForm')) return; Q('#lcLat').value = position.coords.latitude.toFixed(6); Q('#lcLng').value = position.coords.longitude.toFixed(6); Q('#lcPosition').textContent = 'GPS 오차 약 ' + Math.round(position.coords.accuracy) + 'm. 실제 광원·관찰 지점과 맞는지 확인해 주세요.'; persistDraft().catch(error => api.toast(error.message)); }, () => { button.disabled = false; api.toast('위치 권한과 GPS를 확인하거나 지도에서 위치를 선택해 주세요.'); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 });
+      const form = Q('#lcForm'), draft = state.draft;
+      if (!form || !draft || draft.readonly || draft.pending || !canWrite() || button.disabled) return;
+      const lat = Q('#lcLat'), lng = Q('#lcLng'), previousLat = lat.value, previousLng = lng.value, me = api.state().me;
+      const current = () => form.isConnected && form === Q('#lcForm') && state.draft === draft && !draft.pending && me === api.state().me && canWrite();
+      button.disabled = true;
+      root.navigator.geolocation.getCurrentPosition(position => {
+        button.disabled = false;
+        if (!current() || lat.value !== previousLat || lng.value !== previousLng) return;
+        const fix = root.DongguField.gpsFix(position, 50, 5000);
+        if (!fix) {
+          Q('#lcPosition').textContent = '50m 이내의 최신 위치를 받으면 입력할 수 있어요. 다시 시도하거나 지도에서 실제 지점을 선택해 주세요.';
+          return;
+        }
+        lat.value = fix.lat.toFixed(6); lng.value = fix.lng.toFixed(6);
+        readForm(); setPositionAccuracy(draft.data, fix.acc);
+        Q('#lcPosition').textContent = 'GPS 오차 약 ' + Math.round(fix.acc) + 'm. 실제 광원·관찰 지점과 맞는지 확인해 주세요.';
+        persistDraft(false).catch(error => api.toast(error.message));
+      }, () => {
+        button.disabled = false;
+        if (current()) api.toast('위치 권한과 GPS를 확인하거나 지도에서 위치를 선택해 주세요.');
+      }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 5000 });
     }
   }
   async function restoreRecord(row, overwrite) {

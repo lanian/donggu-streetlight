@@ -11,6 +11,14 @@
   const norm = v => Math.hypot(...v);
   const angle = (a, b) => Math.acos(clamp(Math.abs(a.reduce((s, x, i) => s + x * b[i], 0)) / (norm(a) * norm(b)))) / RAD;
 
+  function gpsFix(position, maxAccuracy = Infinity, maxAge = 30000, now = Date.now()) {
+    const { latitude: lat, longitude: lng, accuracy: acc } = position?.coords || {}, at = position?.timestamp;
+    if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lng) || Math.abs(lng) > 180 ||
+        !Number.isFinite(acc) || acc < 0 || acc > maxAccuracy ||
+        !Number.isFinite(at) || at <= 0 || now < at || now - at > maxAge) return null;
+    return { lat, lng, acc, at };
+  }
+
   function gravityVector(beta, gamma) {
     if (![beta, gamma].every(Number.isFinite)) return null;
     const b = beta * RAD, g = gamma * RAD;
@@ -137,5 +145,5 @@
     }
     return samples;
   }
-  return { gravityVector, longAxis, longAxisTilt, tiltWindow, cameraHeading, voiceIntent, pointInRing, inPolygon, joinRings, relationPolygons, sampleLine };
+  return { gpsFix, gravityVector, longAxis, longAxisTilt, tiltWindow, cameraHeading, voiceIntent, pointInRing, inPolygon, joinRings, relationPolygons, sampleLine };
 });

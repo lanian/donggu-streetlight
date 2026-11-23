@@ -9,19 +9,20 @@ const source = file => fs.readFileSync(path.join(root, file), 'utf8');
 const Commands = require(path.join(root, 'app/lighting-commands.js'));
 const Model = require(path.join(root, 'app/lighting-model.js'));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
-async function until(check) {
+async function until(check, detail = () => '') {
   for (let i = 0; i < 500; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 1)); }
-  assert.fail('The expected asynchronous UI state was not reached.');
+  assert.fail('The expected asynchronous UI state was not reached. ' + detail());
 }
 
 async function fixture(options = {}) {
   let fields = {}, closes = 0, saved = '{}';
-  const listeners = {}, toasts = [], invalidations = [], control = { failDraft: false };
+  const listeners = {}, toasts = [], invalidations = [], positionRequests = [], control = { failDraft: false };
   const document = { querySelector: selector => fields[selector] || null, addEventListener: (name, fn) => (listeners[name] ||= []).push(fn) };
   const context = vm.createContext({ console, Date, Math, TextEncoder, structuredClone, setTimeout, clearTimeout, crypto: webcrypto,
-    document, confirm: message => options.confirm ? options.confirm(message) : true, DGLightingCommands: Commands, DGLightingModel: Model });
+    document, navigator: { geolocation: { getCurrentPosition: (success, failure) => positionRequests.push({ success, failure }) } },
+    confirm: message => options.confirm ? options.confirm(message) : true, DongguField: require('../../app/field.js'), DGLightingCommands: Commands, DGLightingModel: Model });
   vm.runInContext(source('app/data.js'), context);
-  const db = context.DGData.createLocalDB({ storage: { getItem: () => saved, setItem: (_, value) => { saved = value; } }, indexedDB: null });
+  const db = context.DGData.createLocalDB({ storage: { getItem: () => saved, setItem: (_, value) => { saved = value; } }, indexedDB: null, locks: { request: (_, run) => run() } });
   vm.runInContext(source('app/offline.js'), context);
   const offline = context.DGOffline, adapter = offline.memoryStore(), write = adapter.write;
   adapter.write = async (key, value) => { if (control.failDraft && key.startsWith('lightingDraft:')) throw new Error('draft quota failure'); return write(key, value); };
@@ -42,7 +43,7 @@ async function fixture(options = {}) {
     const form = { id: 'lcForm', dataset: { recordId: draft.recordId }, isConnected: true,
       querySelector: selector => selector === 'fieldset' ? fieldset : fields[selector] || null };
     const value = v => ({ value: v == null ? '' : String(v), closest: selector => selector === '#lcForm' ? form : null });
-    fields = { '#lcForm': form, '#lcSave': { disabled: !!draft.pending, isConnected: true }, '#lcSaveState': status, '#lcTimeWarning': { textContent: '' }, fieldset };
+    fields = { '#lcForm': form, '#lcSave': { disabled: !!draft.pending, isConnected: true }, '#lcSaveState': status, '#lcTimeWarning': { textContent: '' }, '#lcPosition': { textContent: '' }, fieldset };
     const mapping = { lcLabel: 'label', lcLat: 'lat', lcLng: 'lng', lcRadius: 'radius', lcSchedule: 'schedule', lcValidDays: 'validDays',
       lcNote: 'note', lcCategory: 'category', lcOperator: 'operator', lcStrength: 'strength', lcStatus: 'status', lcLinked: 'linkedLightId',
       lcLevel: 'level', lcLux: 'lux', lcInstrument: 'instrument' };
@@ -58,6 +59,11 @@ async function fixture(options = {}) {
   return { context, ui: context.DGLighting, offline, db, control, toasts, invalidations,
     field: key => fields[key], closed: () => closes,
     async open(label = '새 외부 광원') { await context.DGLighting.openEditor('source', { lat: 35.15, lng: 126.92 }); fields['#lcLabel'].value = label; return context.DGLighting.state.draft; },
+    async requestGps() {
+      const triggered = { dataset: { lc: 'gps' }, disabled: false };
+      for (const fn of listeners.click || []) fn({ target: { closest: selector => selector === '[data-lc]' ? triggered : null } });
+      await until(() => positionRequests.length > 0); return positionRequests.shift();
+    },
     submit() { for (const fn of listeners.submit || []) fn({ target: fields['#lcForm'], preventDefault() {} }); },
     input(id, value) { fields[id].id = id.slice(1); fields[id].value = value; for (const fn of listeners.input || []) fn({ target: fields[id] }); }
   };
@@ -71,7 +77,7 @@ test('a draft quota error releases pending state and fields without submitting a
   assert.equal(draft.pending, null); assert.equal(f.field('fieldset').disabled, false); assert.equal(f.field('#lcSave').disabled, false);
   assert.equal(draft.data.label, '공간 오류 후 재시도'); assert.equal((await f.offline.jobs()).length, 0);
   f.control.failDraft = false; f.submit();
-  await until(async () => (await f.offline.jobs()).some(job => job.state === 'synced'));
+  await until(async () => (await f.offline.jobs()).some(job => job.state === 'synced'), () => f.toasts.join(' / '));
   assert.equal((await f.db.doc('lightingContext/' + draft.recordId).get()).data().label, '공간 오류 후 재시도');
   await until(async () => await f.offline.get('lightingDraft', draft.recordId) === null);
 });
@@ -161,4 +167,68 @@ test('a manually chosen observation window survives a date change and requires m
   f.submit(); await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(confirmations.length, 1); assert.equal((await f.offline.jobs()).length, 0);
   assert.equal(f.ui.state.draft.pending, null);
+});
+
+const patrolObservation = () => ({
+  label: '검사용 순찰 관찰', lat: 35.14, lng: 126.92, observedAt: Date.now(),
+  originKind: 'patrol', originId: 'test-patrol', originPointId: '1', positionAccuracy: 8
+});
+const gpsPosition = (accuracy, latitude = 35.145) => ({
+  timestamp: Date.now(), coords: { latitude, longitude: 126.925, accuracy }
+});
+
+test('moving a linked observation manually removes only the accuracy of the old position', async () => {
+  const f = await fixture(), original = patrolObservation();
+  await f.ui.openObservation(original);
+  f.input('#lcNote', '위치는 그대로 둔 메모');
+  assert.equal(f.ui.state.draft.data.positionAccuracy, 8);
+  f.input('#lcLat', 35.145);
+  await f.ui.persistDraft();
+  const saved = await f.offline.get('lightingDraft', f.ui.state.draft.recordId);
+  assert.equal(saved.data.positionAccuracy, 0);
+  assert.equal(saved.data.originId, original.originId);
+  assert.equal(saved.data.originPointId, original.originPointId);
+  f.submit();
+  await until(async () => (await f.offline.jobs()).some(job => job.state === 'synced'));
+  const record = (await f.db.doc('lightingContext/' + saved.recordId).get()).data();
+  assert.equal(record.positionAccuracy, 0);
+  assert.equal(record.originId, original.originId);
+});
+
+test('coarse brightness GPS cannot move a linked observation or mislabel its accuracy', async () => {
+  const f = await fixture();
+  await f.ui.openObservation(patrolObservation());
+  const request = await f.requestGps();
+  request.success(gpsPosition(3000));
+  await f.ui.persistDraft();
+  const saved = await f.offline.get('lightingDraft', f.ui.state.draft.recordId);
+  assert.equal(saved.data.lat, 35.14);
+  assert.equal(saved.data.positionAccuracy, 8);
+});
+
+test('fresh accepted brightness GPS associates its own accuracy with the new coordinates', async () => {
+  const f = await fixture();
+  await f.ui.openObservation(patrolObservation());
+  const request = await f.requestGps();
+  request.success(gpsPosition(12.4));
+  await f.ui.persistDraft();
+  const saved = await f.offline.get('lightingDraft', f.ui.state.draft.recordId);
+  assert.equal(saved.data.lat, 35.145);
+  assert.equal(saved.data.positionAccuracy, 12.4);
+  f.submit();
+  await until(async () => (await f.offline.jobs()).some(job => job.state === 'synced'));
+  const record = (await f.db.doc('lightingContext/' + saved.recordId).get()).data();
+  assert.equal(record.lat, 35.145);
+  assert.equal(record.positionAccuracy, 12.4);
+});
+
+test('brightness GPS returning after a manual coordinate change does not overwrite it', async () => {
+  const f = await fixture();
+  await f.ui.openObservation(patrolObservation());
+  const request = await f.requestGps();
+  f.input('#lcLat', 35.142);
+  request.success(gpsPosition(10));
+  await f.ui.persistDraft();
+  assert.equal(f.ui.state.draft.data.lat, 35.142);
+  assert.equal(f.ui.state.draft.data.positionAccuracy, 0);
 });

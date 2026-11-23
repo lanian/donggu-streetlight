@@ -651,7 +651,7 @@ function filtered(){
   const rank={"고장":0,"수리중":1,"점검필요":2,"정상":3};
   if(S.mine==null){try{S.mine=localStorage.getItem("dg-mine")!=="0"}catch(e){S.mine=true}}
   return S.lights.filter(l=>inDong(l,S.dong)&&(!S.mine||inMyDongs(l))&&(S.kind==="전체"||(l.kind||"가로등")===S.kind)&&(!S.stat||(S.stat==="__open"?l.status!=="정상":l.status===S.stat))&&(!q||(l.code+" "+(l.label||"")+" "+l.dong+" "+l.address+" "+(l.poleNo||"")+" "+(l.lampId||"")+" "+(l.aliases||[]).join(" ")).toLowerCase().replace(/\s+/g,"").includes(q.replace(/\s+/g,""))))
-    .map(l=>[l,S.near&&S.pos?(distM(S.pos,l)||1e9):0]).sort(([a,da],[b,db])=>S.near&&S.pos?da-db:(rank[a.status]-rank[b.status])||((a.lastInspected||0)-(b.lastInspected||0))).map(([l])=>l);
+    .map(l=>{const distance=S.near&&S.pos?distM(S.pos,l):0;return [l,Number.isFinite(distance)?distance:Infinity]}).sort(([a,da],[b,db])=>S.near&&S.pos?da-db:(rank[a.status]-rank[b.status])||((a.lastInspected||0)-(b.lastInspected||0))).map(([l])=>l);
 }
 function nearToggle(){
   S.near=!S.near;S.limit=60;try{localStorage.setItem("dg-near",S.near?"1":"")}catch(e){}
@@ -663,7 +663,9 @@ function nearToggle(){
       if(!quality.ok){S.near=false;S.pos=null;try{localStorage.setItem("dg-near","")}catch(e){}
         if(S.posWatch!=null){navigator.geolocation.clearWatch(S.posWatch);S.posWatch=null}
         toast(`위치 오차 ${quality.label}로 가까운 순 정렬을 사용할 수 없어요. 주소·시설 번호 검색이나 지도를 사용해 주세요.`);render();return}
-      const np={lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy,at:Date.now()};if(!S.pos||distM(S.pos,np)>8){S.pos=np;if(S.tab==="inspect"&&S.near)renderList()}
+      const np=DongguField.gpsFix(p,POSITION_MAP_FOLLOW_MAX_M);
+      if(!np||S.pos?.at>np.at)return;
+      const moved=!S.pos||distM(S.pos,np)>8;S.pos=np;if(moved&&S.tab==="inspect"&&S.near)renderList();
     },e=>{if(e&&e.code===3)return; // a slow fix is not a failure: keep waiting
       if(S.posWatch!=null){navigator.geolocation.clearWatch(S.posWatch);S.posWatch=null}
       toast("위치 권한을 확인하거나 지도로 시설을 찾아 주세요.");S.near=false;S.pos=null;try{localStorage.setItem("dg-near","")}catch(err){}render()},{enableHighAccuracy:true,maximumAge:5000,timeout:15000});}
@@ -2282,6 +2284,8 @@ async function openRepPhoto(id,slot){
 /* ---------- 위치 확인: while a light is open, compare the phone's GPS with the registered coordinate. The distance is
    saved with the inspection; a big gap can be corrected (admin, with edit history) or left as a suggestion (inspector). ---------- */
 const POS_OK=25,POS_FAR=60; // m
+const POSITION_CHECK_MAX_AGE_MS=30000;
+const posFresh=pos=>!!pos&&Number.isFinite(pos.at)&&Date.now()>=pos.at&&Date.now()-pos.at<=POSITION_CHECK_MAX_AGE_MS;
 let PK={id:null,watch:null,pos:null,map:null,t:0};
 function posBox(l){
   const w=S.canWrite&&can("inspect"),has=typeof l.lat==="number";
@@ -2290,24 +2294,53 @@ function posBox(l){
     <div class="pmap" id="posMap" hidden></div>
     <div class="ops"><button type="button" class="btn ghost sm" id="posAgain">위치 다시 잡기</button>${w?`<button type="button" class="btn ghost sm" id="posFix" hidden></button>`:""}<button type="button" class="btn ghost sm" id="posMapBtn" ${has?"":"hidden"}>지도 보기</button></div></div>`;
 }
-function posCheckStart(id){
-  posCheckStop();PK={id,watch:null,pos:null,map:null,t:Date.now()};
-  if(!navigator.geolocation){const t=$("#posTxt");if(t)t.textContent="이 기기에서는 위치를 쓸 수 없어요";return}
-  const onPos=p=>{if(PK.id!==id)return;const pos={lat:p.coords.latitude,lng:p.coords.longitude,acc:Math.round(p.coords.accuracy||0)};
-    if(PK.pos&&pos.acc>PK.pos.acc&&Date.now()-PK.t<8000)return; // keep the better fix while it settles
-    PK.pos=pos;S.pos={lat:pos.lat,lng:pos.lng};posDraw();if(pos.acc<=15&&Date.now()-PK.t>6000)posCheckStop(true)};
-  const onErr=e=>{if(PK.id!==id)return;const t=$("#posTxt");if(t)t.textContent=e&&e.code===1?"위치 권한이 없어요":"위치를 못 잡았어요 — 하늘이 보이는 곳에서 다시";};
-  try{PK.watch=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:20000})}catch(e){}
-  setTimeout(()=>{if(PK.id===id)posCheckStop(true)},30000);
+function posCheckMessage(message){
+  const t=$("#posTxt"),d=$("#posD"),fx=$("#posFix");
+  if(t)t.textContent=message;
+  if(d){d.textContent="";d.className="d"}
+  if(fx)fx.hidden=true;
 }
-function posCheckStop(keep){if(PK.watch!=null){try{navigator.geolocation.clearWatch(PK.watch)}catch(e){}PK.watch=null}if(!keep){if(PK.map){try{PK.map.remove()}catch(e){}PK.map=null}PK.id=null}}
+function posCheckStart(id){
+  posCheckStop();
+  const check=PK={id,watch:null,pos:null,map:null,t:Date.now(),active:true,watchTimer:null,positionTimer:null};
+  if(!navigator.geolocation){posCheckMessage("이 기기에서는 위치를 쓸 수 없어요");return}
+  posCheckMessage("GPS 잡는 중…");
+  const active=()=>PK===check&&check.active;
+  const onErr=e=>{
+    if(!active())return;
+    check.pos=null;clearTimeout(check.positionTimer);
+    posCheckMessage(e&&e.code===1?"위치 권한이 없어요":"위치를 못 잡았어요. 위치 다시 잡기를 눌러 주세요.");
+    if(check.map)posMapDraw();
+  };
+  const onPos=p=>{
+    if(!active())return;
+    const pos=DongguField.gpsFix(p,Infinity,POSITION_CHECK_MAX_AGE_MS,Date.now());
+    if(!pos){onErr();return}
+    if(check.pos?.at>pos.at)return;
+    if(pos.acc<=POSITION_INPUT_MAX_M&&posFresh(check.pos)&&pos.acc>check.pos.acc&&Date.now()-check.t<8000)return;
+    check.pos=pos;
+    if(pos.acc<=POSITION_INPUT_MAX_M&&!(S.pos?.at>pos.at))S.pos=pos;
+    clearTimeout(check.positionTimer);
+    check.positionTimer=setTimeout(()=>{if(PK===check&&check.pos===pos)posDraw()},Math.max(1,pos.at+POSITION_CHECK_MAX_AGE_MS-Date.now()+1));
+    posDraw();
+    if(pos.acc<=15&&Date.now()-check.t>6000)posCheckStop(true);
+  };
+  try{check.watch=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:20000})}catch(e){onErr(e)}
+  check.watchTimer=setTimeout(()=>{if(active())posCheckStop(true)},POSITION_CHECK_MAX_AGE_MS);
+}
+function posCheckStop(keep){
+  PK.active=false;clearTimeout(PK.watchTimer);
+  if(PK.watch!=null){try{navigator.geolocation.clearWatch(PK.watch)}catch(e){}PK.watch=null}
+  if(!keep){clearTimeout(PK.positionTimer);if(PK.map){try{PK.map.remove()}catch(e){}PK.map=null}PK.id=null}
+}
 function posDraw(){
   const l=byId(PK.id),pos=PK.pos;if(!l||!pos)return;const t=$("#posTxt"),d=$("#posD"),fx=$("#posFix");if(!t)return;
+  if(!posFresh(pos)){posCheckMessage("현재 위치를 다시 확인해 주세요.");if(PK.map)posMapDraw();return}
   const has=typeof l.lat==="number";const dist=has?distM(pos,l):null;
   // a position coarser than ±50m (PC Wi-Fi/IP estimate) cannot judge or correct a light's coordinate, nor be stored on the inspection
   if(!Number.isFinite(pos.acc)||pos.acc>POSITION_INPUT_MAX_M){
     if(draft&&draft.lightId===l.id&&!(draft.pos&&draft.pos.acc<=POSITION_INPUT_MAX_M)){draft.pos=null;draft.posDist=null} // keep an earlier good fix
-    t.textContent=`현재 위치가 추정치예요 (±${Number.isFinite(pos.acc)?pos.acc:"?"}m) — ${DEV.gps?"GPS가 잡힐 때까지 기다리거나 실외에서 다시 시도하세요":"이 기기에서는 위치로 등을 확인할 수 없어요. 지도에서 확인하세요"}.`;
+    t.textContent=`현재 위치가 추정치예요 (±${Number.isFinite(pos.acc)?Math.round(pos.acc):"?"}m) — ${DEV.gps?"GPS가 잡힐 때까지 기다리거나 실외에서 다시 시도하세요":"이 기기에서는 위치로 등을 확인할 수 없어요. 지도에서 확인하세요"}.`;
     d.textContent="";d.className="d";if(fx)fx.hidden=true;if(PK.map)posMapDraw();return}
   if(draft&&draft.lightId===l.id){draft.pos=pos;draft.posDist=dist==null?null:Math.round(dist)}
   if(!has){t.textContent=`등록 좌표가 없어요 · 현재 위치 ±${pos.acc}m`;d.textContent="";if(fx){fx.hidden=false;fx.textContent=can("admin")?"현재 위치로 좌표 등록":"현재 위치를 좌표로 제안"}return}
@@ -2320,28 +2353,34 @@ function posDraw(){
 }
 function posMapShow(){
   const l=byId(PK.id),box=$("#posMap");if(!l||!box||!window.L)return;box.hidden=false;
-  if(!PK.map){const c=typeof l.lat==="number"?[l.lat,l.lng]:(PK.pos?[PK.pos.lat,PK.pos.lng]:[35.146,126.923]);
+  if(!PK.map){const c=typeof l.lat==="number"?[l.lat,l.lng]:(posFresh(PK.pos)?[PK.pos.lat,PK.pos.lng]:[35.146,126.923]);
     PK.map=L.map(box,{zoomControl:false,attributionControl:true,tap:true}).setView(c,18);DongguPWA.tileLayer(L).addTo(PK.map);PK.layer=L.layerGroup().addTo(PK.map)}
   posMapDraw();setTimeout(()=>{try{PK.map.invalidateSize()}catch(e){}},50);
 }
 function posMapDraw(){
   const l=byId(PK.id);if(!l||!PK.map)return;PK.layer.clearLayers();const pts=[];
   if(typeof l.lat==="number"){L.marker([l.lat,l.lng],{icon:L.divIcon({className:"lepin",html:'<div class="lepin-dot" style="cursor:default"></div>',iconSize:[30,30],iconAnchor:[15,15]}),interactive:false}).addTo(PK.layer);pts.push([l.lat,l.lng])}
-  if(PK.pos){L.circle([PK.pos.lat,PK.pos.lng],{radius:PK.pos.acc||0,color:"#2F5DA8",weight:1,fillOpacity:.1,interactive:false}).addTo(PK.layer);L.marker([PK.pos.lat,PK.pos.lng],{icon:L.divIcon({className:"posme",html:"<i></i>",iconSize:[14,14],iconAnchor:[7,7]}),interactive:false}).addTo(PK.layer);pts.push([PK.pos.lat,PK.pos.lng])}
+  if(posFresh(PK.pos)){L.circle([PK.pos.lat,PK.pos.lng],{radius:PK.pos.acc||0,color:"#2F5DA8",weight:1,fillOpacity:.1,interactive:false}).addTo(PK.layer);L.marker([PK.pos.lat,PK.pos.lng],{icon:L.divIcon({className:"posme",html:"<i></i>",iconSize:[14,14],iconAnchor:[7,7]}),interactive:false}).addTo(PK.layer);pts.push([PK.pos.lat,PK.pos.lng])}
   if(pts.length===2){L.polyline(pts,{color:"#E89A0C",weight:2,dashArray:"4 4",interactive:false}).addTo(PK.layer);PK.map.fitBounds(pts,{padding:[24,24],maxZoom:19})}else if(pts.length)PK.map.setView(pts[0],18);
 }
 async function posFix(){
-  const l=byId(PK.id),pos=PK.pos;if(!l||!pos)return;
-  if(!Number.isFinite(pos.acc)||pos.acc>POSITION_INPUT_MAX_M){toast(`위치 정확도(±${pos.acc}m)가 낮아 좌표로 쓸 수 없어요. 정보 수정의 지도에서 지정하세요.`);return}const has=typeof l.lat==="number";const dist=has?Math.round(distM(pos,l)):null;
-  if(can("admin")){
-    if(!await dgConfirm(`${l.code}의 좌표를 현재 위치(±${pos.acc}m)로 ${has?"바로잡아요. "+dist+"m 옮겨요.":"등록해요."} 변경 이력에 남아요.`,{title:has?"좌표를 바로잡을까요?":"좌표를 등록할까요?",ok:has?"바로잡기":"등록"}))return;
+  const check=PK,l=byId(check.id),pos=check.pos;if(!l||!pos||!S.canWrite||!can("inspect"))return;
+  if(!posFresh(pos)){posDraw();toast("위치 다시 잡기로 현재 위치를 확인해 주세요.");return}
+  if(!Number.isFinite(pos.acc)||pos.acc>POSITION_INPUT_MAX_M){toast(`위치 정확도(±${Math.round(pos.acc)}m)가 낮아 좌표로 쓸 수 없어요. 정보 수정의 지도에서 지정하세요.`);return}
+  const admin=can("admin"),actor=S.me,store=db,gen=navGen(),acc=Math.round(pos.acc);
+  const ready=()=>PK===check&&check.pos===pos&&posFresh(pos)&&S.me===actor&&db===store&&navAlive(gen)&&S.canWrite&&can("inspect")&&can("admin")===admin;
+  const has=typeof l.lat==="number",dist=has?Math.round(distM(pos,l)):null;
+  if(admin){
+    if(!await dgConfirm(`${l.code}의 좌표를 현재 위치(±${acc}m)로 ${has?"바로잡아요. "+dist+"m 옮겨요.":"등록해요."} 변경 이력에 남아요.`,{title:has?"좌표를 바로잡을까요?":"좌표를 등록할까요?",ok:has?"바로잡기":"등록"}))return;
+    if(!ready()){toast("위치나 화면이 바뀌었어요. 현재 위치를 확인한 뒤 다시 진행해 주세요.");return}
     const changes=[{f:"lat",from:has?l.lat:null,to:+pos.lat.toFixed(6)},{f:"lng",from:has?l.lng:null,to:+pos.lng.toFixed(6)}];
-    const entry={at:Date.now(),by:S.me||null,changes,note:`점검 중 위치 확인(GPS ±${pos.acc}m)`};
-    const ok=await write(()=>patchLight(l.id,{lat:changes[0].to,lng:changes[1].to,acc:pos.acc,posSuggest:null,posApprox:null,edits:withEdit(l,{...entry,prior:{posApprox:l.posApprox||null}}),updatedAt:entry.at}),`${l.code} 좌표를 현재 위치로 ${has?"바로잡았어요":"등록했어요"}.`);
+    const entry={at:Date.now(),by:S.me||null,changes,note:`점검 중 위치 확인(GPS ±${acc}m)`};
+    const ok=await write(()=>patchLight(l.id,{lat:changes[0].to,lng:changes[1].to,acc,posSuggest:null,posApprox:null,edits:withEdit(l,{...entry,prior:{posApprox:l.posApprox||null}}),updatedAt:entry.at}),`${l.code} 좌표를 현재 위치로 ${has?"바로잡았어요":"등록했어요"}.`);
     if(ok)setTimeout(()=>posDraw(),80);
   }else{
-    if(!await dgConfirm(`현재 위치(±${pos.acc}m)를 ${l.code}의 좌표로 제안해요. 관리자가 확인한 뒤 적용해요.`,{title:"좌표를 제안할까요?",ok:"제안"}))return;
-    const ok=await write(()=>patchLight(l.id,{posSuggest:{lat:+pos.lat.toFixed(6),lng:+pos.lng.toFixed(6),acc:pos.acc,dist:dist||0,at:Date.now(),by:S.me||null},updatedAt:Date.now()}),"좌표 제안을 남겼어요. 관리자가 적용할 수 있어요.");
+    if(!await dgConfirm(`현재 위치(±${acc}m)를 ${l.code}의 좌표로 제안해요. 관리자가 확인한 뒤 적용해요.`,{title:"좌표를 제안할까요?",ok:"제안"}))return;
+    if(!ready()){toast("위치나 화면이 바뀌었어요. 현재 위치를 확인한 뒤 다시 진행해 주세요.");return}
+    const ok=await write(()=>patchLight(l.id,{posSuggest:{lat:+pos.lat.toFixed(6),lng:+pos.lng.toFixed(6),acc,dist:dist||0,at:Date.now(),by:S.me||null},updatedAt:Date.now()}),"좌표 제안을 남겼어요. 관리자가 적용할 수 있어요.");
     if(ok){const fx=$("#posFix");if(fx)fx.hidden=true}
   }
 }
@@ -2448,7 +2487,7 @@ function editedSection(){
 /* A desktop may have no GNSS: never copy coarse IP/Wi-Fi location into the lighting registry. */
 const POSITION_INPUT_MAX_M=50,POSITION_MAP_FOLLOW_MAX_M=150;
 function positionQuality(p,limit=POSITION_INPUT_MAX_M){
-  const c=p&&p.coords||{},acc=Number(c.accuracy);
+  const c=p&&p.coords||{},acc=c.accuracy;
   const valid=Number.isFinite(c.latitude)&&Math.abs(c.latitude)<=90&&Number.isFinite(c.longitude)&&Math.abs(c.longitude)<=180;
   return {ok:valid&&Number.isFinite(acc)&&acc>=0&&acc<=limit,acc:Number.isFinite(acc)&&acc>=0?Math.round(acc):null,label:Number.isFinite(acc)&&acc>=0?"±"+Math.round(acc)+"m":"확인 불가"};
 }
