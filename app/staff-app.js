@@ -198,12 +198,31 @@ async function fbBoot(cfg){
   const V="10.12.2";for(const m of ["app","auth","firestore"])await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-${m}-compat.js`);
   if(!firebase.apps.length)firebase.initializeApp(cfg);
   if(cfg.appCheckSiteKey&&!window.DG_APP_CHECK_ACTIVE){await loadScript(`https://www.gstatic.com/firebasejs/${V}/firebase-app-check-compat.js`);firebase.appCheck().activate(cfg.appCheckSiteKey,true);window.DG_APP_CHECK_ACTIVE=true;}
-  const fs=firebase.firestore();if(window.DG_DEVICE_TRUSTED){try{await fs.enablePersistence({synchronizeTabs:true})}catch(e){toast("오프라인 보관을 시작하지 못했어요. 공유 PC 방식으로 계속합니다.")}}
+  const fs=firebase.firestore();if(window.DG_DEVICE_TRUSTED){try{await fs.enablePersistence({synchronizeTabs:true})}catch(e){window.DG_DEVICE_TRUSTED=false;toast("오프라인 보관을 시작하지 못했어요. 공유 PC 방식으로 계속합니다.")}}
   const auth=firebase.auth();await auth.setPersistence(window.DG_DEVICE_TRUSTED?"local":"session");
-  FB={auth,fs};
-  await new Promise(res=>{const un=FB.auth.onAuthStateChanged(()=>{un();res()})});
-  try{const r=await FB.auth.getRedirectResult();}catch(e){}
-  const u=FB.auth.currentUser;
+  const session=FB={auth,fs},subscriptions=[];
+  let actor=null,started=false,locked=false,staffRole=null,stopAuth;
+  const current=()=>!locked&&FB===session&&(auth.currentUser?.uid||null)===actor;
+  const lock=()=>{
+    if(locked||FB!==session)return;
+    locked=true;
+    stopAuth?.();
+    for(const stop of subscriptions)stop?.();
+    Object.assign(S,{me:null,canWrite:false,live:false,rolesSeen:true,fbError:true,fbAccessChanged:true,
+      lights:[],insp:[],reports:[],patrols:[],roles:[],names:{}});
+    db=null;user=null;
+    if(typeof clearFirebaseView==="function")clearFirebaseView();
+    setSync(false,"접근 권한 변경");render();
+  };
+  await new Promise(ready=>{
+    stopAuth=auth.onAuthStateChanged(()=>{
+      if(!started)ready();
+      else if(!current())lock();
+    });
+  });
+  try{await auth.getRedirectResult()}catch(e){}
+  const u=auth.currentUser;
+  actor=u?.uid||null;started=true;
   if(!u){S.me=null;S.fbSignedOut=true;setSync(false,"로그인 필요");render();return}
   S.me=u.uid;S.fbSignedOut=false;
   // This optional profile write may wait for the server while offline. Start cached reads immediately.
@@ -211,14 +230,36 @@ async function fbBoot(cfg){
   db=fs;
   user={id:async()=>u.uid,can:async()=>true,profiles:async ids=>{const out={};await Promise.all(ids.map(async id=>{try{const d=await fs.collection("users").doc(id).get();if(d.exists)out[id]={name:d.data().name}}catch(e){}}));return out}};
   dl={save:async({filename,data})=>{const a=document.createElement("a");a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data],{type:"text/csv"}));a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2e3)}};
-  const sub=(q,key,map)=>q.onSnapshot({includeMetadataChanges:true},snap=>{if(key==="roles"&&!(snap.metadata.fromCache&&snap.empty))S.rolesSeen=true;if(key==="lights")onLights(snap);else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));if(map)map();dataChanged(key);S.live=true;setSync(!snap.metadata.fromCache,snap.metadata.fromCache?"오프라인":"실시간");render();resolveNames()},err=>{if(key==="roles"&&!S.rolesSeen){S.rolesSeen=true;render()}if(err&&err.code==="permission-denied"){setSync(false,"권한 없음")}else setSync(false,"연결 끊김")});
+  const sub=(q,key,map)=>subscriptions.push(q.onSnapshot({includeMetadataChanges:true},snap=>{
+    if(!current())return;
+    if(key==="roles"){
+      const roles=snap.docs.map(d=>({id:d.id,...d.data()}));
+      const role=roles.find(r=>r.id===actor)?.role;
+      const nextRole=role==="admin"||role==="inspector"?role:null;
+      if(staffRole&&staffRole!==nextRole){
+        if(!snap.metadata.fromCache)lock();
+        return;
+      }
+      staffRole=nextRole;
+      if(!(snap.metadata.fromCache&&snap.empty))S.rolesSeen=true;
+      S.roles=roles;
+    }else if(key==="lights")onLights(snap);
+    else S[key]=snap.docs.map(d=>({id:d.id,...d.data()}));
+    if(map)map();
+    dataChanged(key);S.live=true;setSync(!snap.metadata.fromCache,snap.metadata.fromCache?"오프라인":"실시간");render();resolveNames();
+  },err=>{
+    if(!current())return;
+    if(err?.code==="permission-denied"&&staffRole){lock();return}
+    if(key==="roles"&&!S.rolesSeen){S.rolesSeen=true;render()}
+    setSync(false,err?.code==="permission-denied"?"권한 없음":"연결 끊김");
+  }));
   sub(fs.collection("lights"),"lights");
   sub(fs.collection("inspections").orderBy("date","desc").limit(40),"insp");
   sub(fs.collection("reports").orderBy("createdAt","desc"),"reports");
   sub(fs.collection("patrols").orderBy("start","desc").limit(30),"patrols",ptIndex);
   sub(fs.collection("roles"),"roles");
   // Until the role list answers, the screen says it is checking instead of flashing the "직원 승인 전" page.
-  if(typeof setTimeout==="function")setTimeout(()=>{if(!S.rolesSeen){S.rolesSeen=true;render()}},8000);
+  if(typeof setTimeout==="function")setTimeout(()=>{if(current()&&!S.rolesSeen){S.rolesSeen=true;render()}},8000);
 }
 async function fbSignIn(){const prov=new firebase.auth.GoogleAuthProvider();try{await FB.auth.signInWithPopup(prov);location.reload()}catch(e){if(e&&/popup/.test(e.code||"")){await FB.auth.signInWithRedirect(prov)}else toast("로그인하지 못했어요: "+(e&&e.code||""))}}
 async function fbSignOut(){
@@ -238,7 +279,7 @@ function residentPanel(){
     <p class="muted" style="font-size:12px;margin:8px 0 0">${official?"이 앱에서는 신고를 접수하지 않아요. 사진·연락처 입력과 처리상태 확인은 운영서비스에서 진행해 주세요.":"신고 내용과 연락처는 담당 부서만 봐요. 점검 기록은 직원으로 로그인해야 보여요."}</p></div>`;
 }
 function vSignIn(){return `<div class="panel" style="margin-top:12px"><h3>직원 로그인</h3><p class="muted">구청 Google 계정으로 로그인하면 점검·순찰 기록이 공유 저장소에 저장돼요. 역할(관리자·점검자)은 관리자가 지정해요.</p><button class="btn sodium block" id="fbSignIn">Google로 로그인</button></div>${residentPanel()}${DGSecurity.devicePanel()}`}
-function vConnectionError(){return `<div class="panel" style="margin-top:12px"><h3>공유 저장소에 연결하지 못했어요</h3><p class="muted">인터넷 연결을 확인한 뒤 다시 열어 주세요. 문제가 계속되면 관리자에게 연결 설정을 확인해 달라고 하세요.</p><button class="btn sodium block" id="fbRetry">다시 연결</button></div>`}
+function vConnectionError(){if(S.fbAccessChanged)return `<div class="panel" style="margin-top:12px"><h3>계정이나 접근 권한이 바뀌었어요</h3><p class="muted">현재 계정의 권한으로 작업하려면 앱을 다시 열어 주세요.</p><button class="btn sodium block" id="fbRetry">다시 열기</button></div>`;return `<div class="panel" style="margin-top:12px"><h3>공유 저장소에 연결하지 못했어요</h3><p class="muted">인터넷 연결을 확인한 뒤 다시 열어 주세요. 문제가 계속되면 관리자에게 연결 설정을 확인해 달라고 하세요.</p><button class="btn sodium block" id="fbRetry">다시 연결</button></div>`}
 async function boot(){
   await loadRegistry();
   if((!window.claude||!window.claude.use)&&window.FIREBASE_CONFIG!=null){
@@ -302,10 +343,11 @@ function applyTheme(t){if(t==="auto")delete document.documentElement.dataset.the
   document.querySelectorAll('meta[name="theme-color"]').forEach(m=>{if(m.dataset.media==null)m.dataset.media=m.getAttribute("media")||"";if(t==="auto")m.setAttribute("media",m.dataset.media);else m.setAttribute("media",m.dataset.media.includes(t)?"all":"not all")});const b=$("#themeBtn");if(b){b.innerHTML=THEME_ICON[t];b.title=`화면: ${t==="auto"?"자동":t==="dark"?"야간":"주간"}`}}
 (function(){let t="auto";try{t=localStorage.getItem("dg-theme")||"auto"}catch(e){}applyTheme(t)})();
 async function resolveNames(){
-  if(!user)return;
+  const requester=user;
+  if(!requester)return;
   const ids=[...new Set([...S.insp.map(i=>i.inspector),...(S.allLights||S.lights).flatMap(l=>[l.foundBy,...(l.edits||[]).map(e=>e.by)]),...S.patrols.map(p=>p.by),...S.roles.map(r=>r.id),...S.reports.map(r=>r.reporterId)].filter(Boolean))].filter(id=>!(id in S.names));
   if(!ids.length)return;
-  try{const ps=await user.profiles(ids);ids.forEach(id=>S.names[id]=(ps[id]&&ps[id].name)||"점검자");render()}catch(e){}
+  try{const ps=await requester.profiles(ids);if(user!==requester)return;ids.forEach(id=>S.names[id]=(ps[id]&&ps[id].name)||"점검자");render()}catch(e){}
 }
 /* ---------- roles: admin / inspector / resident. Enforced in the UI; the shared DB itself only knows "can write".
    Until someone claims the admin role, every participant keeps full access (as before). ---------- */
@@ -1019,6 +1061,18 @@ function sheetHide(){
   const sheet=$("#sheet");sheet.classList.remove("open");$("#sheetBg").classList.remove("open");DongguUI.close(sheet);document.body.style.overflow="";
   NAV.stack.length=0;NAV.restoring=null;NAV.replaceNext=false;NAV.leaving=0;sheetHist=false;NAV.gen++;
 }
+function clearFirebaseView(){
+  DGOffline.configure({namespace:"firebase:locked",durable:false,networkRequired:true});
+  RAW_OV={};OV={};LIGHT_FIELDS=[];ALL_LIGHTS=[];ALL_FROM=null;LIDX=null;LG=null;GAL={};
+  S.allLights=[];S.pos=null;
+  if(S.posWatch!=null){navigator.geolocation?.clearWatch(S.posWatch);S.posWatch=null}
+  if(pt.watch!=null){navigator.geolocation?.clearWatch(pt.watch);pt.watch=null}
+  pt.on=false;pt.hist=false;ptListen(false);ptStopCam();ptWakeRelease();ptHide();
+  if(pt.map){pt.map.remove();pt.map=null}
+  sheetLeave();sheetHide();NAV.pending=null;NAV.forward.length=0;
+  $("#sheetIn").replaceChildren();
+  document.getElementById("reportPrintRoot")?.replaceChildren();
+}
 // A route that found nothing to show (deleted item, lost permission) calls this instead of opening: drop the level.
 function navAbandon(){if(!NAV.restoring)return false;NAV.restoring=null;NAV.stack.pop();if(!NAV.stack.length){sheetHide();try{history.go(-1)}catch(e){}return true}NAV.forceRender=true;try{history.go(-1)}catch(e){sheetHide()}return true}
 // Bring the stack to `target` levels (the depth stored in the History entry we arrived at) and re-render the new top.
@@ -1274,7 +1328,7 @@ document.addEventListener("click",async e=>{
   if(t.dataset.fclear){const k=t.dataset.fclear;if(k==="dong")S.dong="전체";else if(k==="kind")S.kind="전체";else if(k==="mine"){S.mine=false;try{localStorage.setItem("dg-mine","0")}catch(e){}}else S.stat=null;S.limit=60;render();return}
   if(t.id==="rvRun"){runLightingReview();return}
   if(t.dataset.rvmode){S.rvMode=t.dataset.rvmode;invalidateLightingReview("검토 방식이 바뀌었어요.");render();return}
-  if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");invalidateLightingReview("도로망을 갱신하고 있어요.");if(t.dataset.refetch){ROADS=null;idbSet("roads",null)}roadsLoad(m=>{if(st)st.textContent=m}).then(r=>{S.rvMode="roads";invalidateLightingReview("도로망이 바뀌었어요.");S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
+  if(t.id==="rvRoads"){if(t.dataset.refetch&&!need("admin"))return;t.disabled=true;t.textContent="받는 중…";const st=$("#rvRoadsStat");invalidateLightingReview("도로망을 갱신하고 있어요.");roadsLoad(m=>{if(st)st.textContent=m},{refresh:!!t.dataset.refetch}).then(r=>{S.rvMode="roads";invalidateLightingReview("도로망이 바뀌었어요.");S.rvRoadsStat="";toast(`도로 ${r.ways.length.toLocaleString()}개를 불러왔어요.`);render()}).catch(e=>{if(e.message==="road-load-superseded")return;S.rvRoadsStat="도로망을 받지 못했어요. 네트워크를 확인하고 다시 시도하세요. (OpenStreetMap 서버 응답 없음)";render()});return}
   if(t.id==="rvMore"){S.review.show+=30;render();return}
   if(t.hasAttribute("data-rvback")){if(navDepth()>1&&navTop().key==="rvmap")closeSheet();else returnLightingReview();return}
   if(t.dataset.rvpage!==undefined){openReviewMap("all",+t.dataset.rvpage);return}
@@ -2623,13 +2677,50 @@ let ROADS=null;
 function idbOpen(){return new Promise((res,rej)=>{try{const r=indexedDB.open("dg-cache",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}})}
 async function idbGet(k){try{const d=await idbOpen();return await new Promise(res=>{const g=d.transaction("kv","readonly").objectStore("kv").get(k);g.onsuccess=()=>res(g.result);g.onerror=()=>res(null)})}catch(e){return null}}
 async function idbSet(k,v){try{const d=await idbOpen();await new Promise(res=>{const t=d.transaction("kv","readwrite");t.objectStore("kv").put(v,k);t.oncomplete=res;t.onerror=res})}catch(e){}}
-async function roadsLoad(onStatus){
-  if(ROADS)return ROADS;
-  const say=t=>onStatus&&onStatus(t);
-  const cached=await idbGet("roads");if(cached&&cached.ver===ROADS_VER&&cached.ways&&cached.ways.length){ROADS=cached;adongIndex();return ROADS}
-  if(db&&S.me!=="local"){say("공유 저장소에서 도로망을 읽는 중…");try{const snap=await db.collection("roads").get();const meta=snap.docs.find(d=>d.id==="meta");const md=meta?meta.data():null;
-    if(md&&md.ver===ROADS_VER){const parts=snap.docs.filter(d=>d.id.startsWith("part-")&&+d.id.slice(5)<(md.parts||0)).sort((a,b)=>+a.id.slice(5)-+b.id.slice(5));const ways=[],areas=[],pois=[];let bounds=[],gu=null;for(const d of parts){const x=d.data();ways.push(...(x.ways||[]));areas.push(...(x.areas||[]));pois.push(...(x.pois||[]));if(x.bounds)bounds=x.bounds;if(x.gu)gu=x.gu}
-      if(ways.length){ROADS={ver:ROADS_VER,ways,areas,bounds,gu,pois:md.pois!=null?pois:undefined,at:md.at||0,src:"db"};idbSet("roads",ROADS);adongIndex();return ROADS}}}catch(e){}}
+let roadLoadSequence=0;
+function roadCacheUsable(pack){
+  return pack?.ver===ROADS_VER&&Array.isArray(pack.ways)&&pack.ways.length>0&&
+    (pack.src==="osm"||pack.src==="db"&&pack.verified===true);
+}
+function sharedRoadPackage(snap){
+  const documents=new Map(snap.docs.map(d=>[d.id,d]));
+  const meta=documents.get("meta")?.data();
+  if(meta?.ver!==ROADS_VER||!Number.isInteger(meta.parts)||meta.parts<1||meta.parts>=documents.size)return null;
+  const ways=[],areas=[],pois=[];let bounds=[],gu=null;
+  for(let i=0;i<meta.parts;i++){
+    const part=documents.get("part-"+i)?.data();
+    if(!part||part.generation!==meta.generation||!Array.isArray(part.ways)||!Array.isArray(part.areas)||
+      (meta.pois!=null&&!Array.isArray(part.pois)))return null;
+    for(const way of part.ways)ways.push(way);
+    for(const area of part.areas)areas.push(area);
+    for(const poi of part.pois||[])pois.push(poi);
+    if(part.bounds)bounds=part.bounds;
+    if(part.gu)gu=part.gu;
+  }
+  if(!ways.length||ways.length!==meta.count||areas.length!==meta.areas||
+    (meta.pois!=null&&pois.length!==meta.pois))return null;
+  return {ver:ROADS_VER,ways,areas,bounds,gu,pois:meta.pois!=null?pois:undefined,
+    at:meta.at||0,src:"db",verified:true};
+}
+async function roadsLoad(onStatus,{refresh=false}={}){
+  if(!refresh&&roadCacheUsable(ROADS))return ROADS;
+  const seq=++roadLoadSequence,store=db,actor=S.me;
+  const current=()=>seq===roadLoadSequence&&db===store&&S.me===actor&&!S.fbError;
+  const requireCurrent=()=>{if(!current())throw new Error("road-load-superseded")};
+  const say=t=>{if(current())onStatus?.(t)};
+  const install=pack=>{requireCurrent();ROADS=pack;adongIndex();return pack};
+  if(!refresh){
+    const cached=await idbGet("roads");
+    requireCurrent();
+    if(roadCacheUsable(cached))return install(cached);
+    if(store&&actor!=="local"){
+      say("공유 저장소에서 도로망을 읽는 중…");
+      let shared;
+      try{shared=sharedRoadPackage(await store.collection("roads").get())}catch(e){}
+      requireCurrent();
+      if(shared){install(shared);idbSet("roads",shared);return shared}
+    }
+  }
   say("OpenStreetMap에서 동구 도로망을 받는 중… (휴대폰 데이터 약 4MB, 수 초에서 1분)");
   const bb=ROAD_BBOX.join(",");
   const q=`[out:json][timeout:120];(way["highway"~"^(${ROAD_TYPES})$"](${bb});
@@ -2640,8 +2731,16 @@ async function roadsLoad(onStatus){
     node["highway"~"^(crossing|bus_stop)$"](${bb});node["amenity"~"^(school|kindergarten|childcare)$"](${bb});way["amenity"~"^(kindergarten|childcare)$"](${bb});relation["amenity"~"^(kindergarten|childcare)$"](${bb});node["public_transport"="platform"]["bus"="yes"](${bb}););out geom;`;
   let data=null,err=null;
   for(const ep of ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"]){
-    try{const r=await fetch(ep,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"}});if(r.ok){data=await r.json();break}err=new Error("HTTP "+r.status)}catch(e){err=e}
+    requireCurrent();
+    try{
+      const r=await fetch(ep,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"}});
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      const result=await r.json();
+      if(result.remark||!Array.isArray(result.elements))throw new Error("Incomplete Overpass response");
+      data=result;break;
+    }catch(e){err=e}
   }
+  requireCurrent();
   if(!data)throw err||new Error("overpass");
   const ways=[],areas=[],bounds=[],pois=[];let gu=null,geometryWarnings=0;
   // 횡단보도·버스정류장·학교·어린이 시설: candidates near them are checked first (the brightness index is unchanged)
@@ -2661,11 +2760,21 @@ async function roadsLoad(onStatus){
     }
   }
   if(!ways.length)throw new Error("empty");
-  ROADS={ver:ROADS_VER,ways,areas,bounds,gu,pois,geometryWarnings,at:Date.now(),src:"osm"};idbSet("roads",ROADS);adongIndex();
-  if(db&&S.canWrite&&S.me!=="local"){say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");try{const chunks=[];let cur={ways:[],areas:[],pois:[]},size=0;const push=(key,x)=>{const s=JSON.stringify(x).length+1;if(size+s>190000){chunks.push(cur);cur={ways:[],areas:[],pois:[]};size=0}cur[key].push(x);size+=s};
+  const fresh=install({ver:ROADS_VER,ways,areas,bounds,gu,pois,geometryWarnings,at:Date.now(),src:"osm"});
+  idbSet("roads",fresh);
+  if(store&&actor!=="local"&&S.canWrite&&can("admin")){say("다른 휴대폰도 쓸 수 있게 공유 저장소에 올리는 중…");try{const chunks=[];let cur={ways:[],areas:[],pois:[]},size=0;const push=(key,x)=>{const s=JSON.stringify(x).length+1;if(size+s>190000){chunks.push(cur);cur={ways:[],areas:[],pois:[]};size=0}cur[key].push(x);size+=s};
     for(const w of ways)push("ways",w);for(const a of areas)push("areas",a);for(const p of pois)push("pois",p);if(cur.ways.length||cur.areas.length||cur.pois.length)chunks.push(cur);chunks[0].bounds=bounds;chunks[0].gu=gu;
-    for(let i=0;i<chunks.length;i++)await db.doc("roads/part-"+i).set(chunks[i]);await db.doc("roads/meta").set({ver:ROADS_VER,at:ROADS.at,parts:chunks.length,count:ways.length,areas:areas.length,pois:pois.length,attribution:"© OpenStreetMap contributors (ODbL)"})}catch(e){}}
-  return ROADS;
+    const generation=DGData.newId("roads");
+    for(let i=0;i<chunks.length;i++){
+      requireCurrent();
+      await store.doc("roads/part-"+i).set({...chunks[i],generation});
+    }
+    requireCurrent();
+    await store.doc("roads/meta").set({ver:ROADS_VER,at:fresh.at,generation,parts:chunks.length,
+      count:ways.length,areas:areas.length,pois:pois.length,attribution:"© OpenStreetMap contributors (ODbL)"});
+  }catch(e){}}
+  requireCurrent();
+  return fresh;
 }
 /* assign every light its 행정동 from the boundary polygons that came with the road network */
 function adongIndex(){
@@ -4154,4 +4263,4 @@ const _close=closeSheet;closeSheet=function(fromHistory){S.asec=null;repConfirmC
 initializeOperations();
 render();
 try{if(localStorage.getItem("dg-near")==="1"){S.near=false;nearToggle()}}catch(e){}
-boot().then(async()=>{await DGIntegration.ready();idbGet("roads").then(r=>{if(r&&r.ver===ROADS_VER&&r.ways&&r.ways.length){ROADS=r;adongIndex();render()}})}).catch(e=>toast("앱 초기화를 마치지 못했어요: "+e.message));
+boot().then(async()=>{await DGIntegration.ready();idbGet("roads").then(r=>{if(!S.fbError&&roadLoadSequence===0&&roadCacheUsable(r)){ROADS=r;adongIndex();render()}})}).catch(e=>toast("앱 초기화를 마치지 못했어요: "+e.message));
